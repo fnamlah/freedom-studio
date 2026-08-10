@@ -2,7 +2,7 @@
 
 This document designs the authentication and session-assurance model for the studio management system: invite-only account provisioning through Supabase Auth, mandatory TOTP two-factor enrollment before any application access, and two-layer AAL2 enforcement in which the database — not the application — is the final authority. It also defines the single canonical AAL2 restrictive-policy SQL snippet used by every table (referenced from [04 — Database Schema & RLS](04-database-erd.md)), the safety model under which the Super Admin exercises "full database access", and the recovery runbooks for lost TOTP factors. This package is design-only; nothing described here is deployed yet.
 
-**Related docs:** [00 — Index](00-index.md) · [01 — Overview](01-overview.md) · [02 — Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [06 — Documents & Sharing](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md)
+**Related docs:** [00 — Index](00-index.md) · [01 — Overview](01-overview.md) · [02 — Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [06 — Documents & Sharing](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md)
 
 ---
 

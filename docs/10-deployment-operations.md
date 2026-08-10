@@ -1,8 +1,8 @@
 # 10 — Deployment & Operations
 
-This document designs the runtime environments, CI/CD pipeline, provisioning procedure, and operational runbooks for the Studio Management System. It covers how the three environments (local, preview, production) are laid out; how code and database migrations travel from a developer's branch to production; the provisioning checklists mapped to the Supabase MCP and Vercel MCP tooling used at implementation time; the configuration and environment-variable inventory; and the standing runbooks for backup/restore, key rotation, MFA recovery, user deactivation, share-token leak response, the monthly accounting close, and audit-log archival. Nothing described here exists yet — this is the design the operations setup will be built to.
+This document designs the runtime environments, CI/CD pipeline, provisioning procedure, and operational runbooks for the Studio Management System. It covers how the three environments (local, preview, production) are laid out; how code and database migrations travel from a developer's branch to production; the provisioning checklists mapped to the Supabase MCP and Vercel MCP tooling used at implementation time; the configuration and environment-variable inventory; and the standing runbooks for backup/restore, key rotation, MFA recovery, user deactivation, share-token leak response, the monthly accounting close, audit-log archival, the AI model switch, and embedding-model changes. Nothing described here exists yet — this is the design the operations setup will be built to.
 
-**Related docs:** [00 — Index](00-index.md) · [01 — Product Overview](01-overview.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Documents & Sharing](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md)
+**Related docs:** [00 — Index](00-index.md) · [01 — Product Overview](01-overview.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Documents & Sharing](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md)
 
 ---
 
@@ -72,7 +72,7 @@ Provisioning is performed once per environment at implementation time. The check
 |---|---|---|---|
 | 1 | Create the production project | `create_project` (after `get_cost` / `confirm_cost`) | Region chosen for data-residency and latency; record project ref and URL. |
 | 2 | Configure Auth | Supabase dashboard / management API | Apply the auth settings inventory in §4.1: public signups **disabled**, TOTP MFA **enabled**, SMTP configured, redirect URLs allow-listed. |
-| 3 | Apply schema migrations in order | `apply_migration` | Extensions (`citext`, `btree_gist`) → enums → tables → helper functions → triggers → RLS restrictive + permissive policies → views/RPCs → seed rows (platforms lookup; the single **default commission scheme**, which must exist at all times per [09](09-accounting.md)). Full object definitions live in [04](04-database-erd.md) and [07](07-analytics.md). |
+| 3 | Apply schema migrations in order | `apply_migration` | Extensions (`citext`, `btree_gist`, `vector`) → enums (including the AI enums) → tables (including the AI tables) → helper functions → triggers → RLS restrictive + permissive policies (including the AI-table policies) → views/RPCs → the `embeddings` HNSW index → seed rows (platforms lookup; the single **default commission scheme**, which must exist at all times per [09](09-accounting.md); the nine `ai.*` keys in `app_settings` — `ai.active_provider`, `ai.chat_model.moonshot`, `ai.chat_model.zhipu`, `ai.embedding.provider`, `ai.embedding.model`, `ai.embedding.dim`, and the three `ai.limits.*` budgets, per [11](11-ai-llm.md)). Full object definitions live in [04](04-database-erd.md) and [07](07-analytics.md). |
 | 4 | Create the storage bucket | migration via `apply_migration` | Private bucket `model-documents`, public access **off**, storage RLS policies per [06](06-documents-sharing.md). |
 | 5 | Deploy the share endpoint | `deploy_edge_function` | Edge Function `share-view` ([06](06-documents-sharing.md)); set its secrets (`SHARE_TOKEN_PEPPER`, if adopted) as Edge Function secrets, not code constants. |
 | 6 | Security lint | `get_advisors` | Must come back clean before the environment is considered provisioned; repeated after every subsequent migration. |
@@ -86,7 +86,7 @@ The same sequence, minus project creation, provisions each preview branch databa
 | # | Step | Tool / surface | Notes |
 |---|---|---|---|
 | 1 | Create the project and link the Git repository | `list_teams` / project create via Vercel MCP | Production branch = `main`; preview deployments on every PR. |
-| 2 | Set environment variables | Vercel MCP / dashboard env-var settings | Per the inventory in §4.2, with **distinct values per environment** — preview builds must receive preview-scoped Supabase keys, never production keys. `SUPABASE_SERVICE_ROLE_KEY` is server-scope only and must never be created with a `NEXT_PUBLIC_` name. |
+| 2 | Set environment variables | Vercel MCP / dashboard env-var settings | Per the inventory in §4.2, with **distinct values per environment** — preview builds must receive preview-scoped Supabase keys, never production keys. `SUPABASE_SERVICE_ROLE_KEY` is server-scope only and must never be created with a `NEXT_PUBLIC_` name. `MOONSHOT_API_KEY` and `ZHIPU_API_KEY` ([11](11-ai-llm.md)) are likewise server-scope secrets; AI features are disabled in preview unless preview-scoped keys are set — previews hold fake data regardless. |
 | 3 | Enable Deployment Protection | `get_project_deployment_protection` / `update_project_deployment_protection` | All preview deployments behind Vercel authentication, per [08](08-security-threat-model.md). |
 | 4 | Configure the production domain and HTTPS | dashboard | HSTS and the rest of the security-header set are specified in [08](08-security-threat-model.md); they ship in the Next.js config, not as dashboard settings. |
 | 5 | Configure a log drain | dashboard | Drain Vercel request/build logs to external storage for **90-day** retention, per [08](08-security-threat-model.md) §4.6. |
@@ -116,6 +116,8 @@ Column key — **Scope**: where the value is readable. **Secret**: whether expos
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser + server | No | Vercel env vars (per environment) | Supabase project URL for the client SDK. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + server | No (publishable) | Vercel env vars (per environment) | Anon/publishable key. Safe to ship to the browser **because every query it makes passes RLS** ([02](02-architecture.md), [04](04-database-erd.md)); it grants nothing by itself. |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Server only** | **Yes — critical** | Vercel env vars, server scope; distinct value per environment | Bypasses RLS. Used only inside guarded server actions/route handlers that first verify caller role + AAL2 ([05](05-auth-2fa.md)). Never `NEXT_PUBLIC_*`, never in client bundles, never in preview with the production value. |
+| `MOONSHOT_API_KEY` | **Server only** | **Yes — secret** | Vercel env vars, server scope; per environment | Kimi K3 (Moonshot) API key for the AI gateway ([11](11-ai-llm.md)). Never reaches the browser. AI features are disabled in preview unless preview-scoped keys are set; previews hold fake data regardless. Blast radius if exposed: provider spend + impersonated API traffic, no studio data ([08](08-security-threat-model.md)). |
+| `ZHIPU_API_KEY` | **Server only** | **Yes — secret** | Vercel env vars, server scope; per environment | GLM 5.2 (Zhipu) API key for the AI gateway ([11](11-ai-llm.md)). Same handling and blast radius as `MOONSHOT_API_KEY`. |
 | `SHARE_TOKEN_PEPPER` (optional) | `share-view` Edge Function only | Yes | Supabase Edge Function secrets | Optional server-side pepper mixed into share-token hashing ([06](06-documents-sharing.md)). Rotating it invalidates all outstanding share links — an intentional hard-stop lever (§5.5). |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Edge runtime) | Edge Function runtime | Yes | Injected by Supabase into the function's environment | Lets `share-view` operate with the service role, since anonymous viewers hold zero DB grants ([02](02-architecture.md)). |
 | `SUPABASE_ACCESS_TOKEN` | CI / operator workstation only | Yes | CI secret store; never in Vercel or app code | Authenticates the Supabase CLI/MCP for migrations and function deploys. |
@@ -150,6 +152,8 @@ Each runbook names its actor(s) by role — capabilities per role are canonical 
 4. Revoke the old keys; confirm requests signed with them now fail.
 5. If the rotation was exposure-driven: review `audit_log` and Supabase logs for the exposure window, and treat any anomalous service-role activity as a separate incident.
 6. Audit the rotation (who, when, why).
+
+- **AI provider keys**: `MOONSHOT_API_KEY` / `ZHIPU_API_KEY` rotate the same way — issue a new key in the provider console, update the Vercel server-scope env var (§4.2), redeploy, then revoke the old key. These keys hold no studio data, so the exposure blast radius is provider spend and impersonated API traffic ([08](08-security-threat-model.md)); if the rotation was exposure-driven, review the provider console's usage logs for the window instead of `audit_log`.
 
 ### 5.3 Super Admin MFA recovery
 
@@ -207,7 +211,7 @@ Each runbook names its actor(s) by role — capabilities per role are canonical 
 |---|---|---|
 | After every migration | Security advisors clean | `get_advisors` |
 | Weekly | Review Edge Function and Auth logs for anomalies (failed logins, share-view 404 spikes) | `get_logs`, Vercel logs |
-| Monthly | Monthly close (§5.6); document-compliance review via `v_model_compliance_summary` ([07](07-analytics.md)) | app dashboards |
+| Monthly | Monthly close (§5.6); document-compliance review via `v_model_compliance_summary` ([07](07-analytics.md)); review `ai_usage` spend against the `app_settings` budgets ([11](11-ai-llm.md)) — anomalous per-user token spikes are treated as potential injection/abuse incidents per [08](08-security-threat-model.md) | app dashboards |
 | Quarterly | PITR restore drill (§5.1); dependency/update pass per the policy in [08](08-security-threat-model.md); audit-log archival (§5.8) | Supabase dashboard, CI |
 
 ### 5.8 Audit-log archival & retention
@@ -220,3 +224,24 @@ Retention horizons for `audit_log` and `document_share_views` are defined in [08
 4. Record the archival itself in `audit_log` (`ops.archive`, metadata: date range, row counts, archive location).
 
 Declarative range partitioning of `audit_log` by month on `created_at` is the recommended implementation — adopt it in the initial migration while the table is empty so step 3 never rewrites live data.
+
+### 5.9 AI model switch
+
+**Actor:** Super Admin (the only role with write access to `app_settings`, per [03](03-roles-rbac.md) and [04](04-database-erd.md)). **Trigger:** provider outage, cost, or quality — there is **no auto-failover** by design, so every provider change is a deliberate, audited SA action ([11](11-ai-llm.md)).
+
+1. Verify the target provider is ready: its API key is set in the environment (§4.2), its chat-model setting (`ai.chat_model.moonshot` / `ai.chat_model.zhipu`) holds the intended model ID, and the `ai.limits.*` budget knobs are appropriate for the target provider's pricing.
+2. Update `ai.active_provider` in the settings UI. The write goes through the SA-only RLS policy and the `validate_app_setting` trigger ([04](04-database-erd.md)) — no deploy, no env-var change.
+3. Confirm the `ai.model_switch` entry appears in `audit_log` with the old and new provider in its metadata.
+4. Propagation: the gateway caches the setting with a ≤ 60-second TTL per serverless instance ([11](11-ai-llm.md)), so all subsequent requests use the new provider within 60 seconds. No redeploy is needed.
+5. Embeddings are **unaffected by design**: semantic search keeps using `ai.embedding.provider` / `ai.embedding.model`, which are decoupled from the chat switch precisely so switching chat providers never invalidates stored vectors ([11](11-ai-llm.md)). Changing the embedding model is runbook §5.10, not this one.
+
+### 5.10 Embedding-model change & re-embed
+
+**Actor:** Super Admin. **Trigger:** a deliberate decision to change the embedding provider or model — a planned maintenance event, not a settings flip. Query vectors must come from the same model as stored vectors, so this change invalidates the vector store until the re-embed completes ([11](11-ai-llm.md)).
+
+1. Update `ai.embedding.provider` / `ai.embedding.model` (and `ai.embedding.dim` if the dimension changes) in `app_settings`; each write is audited as `ai.settings_update`.
+2. If the dimension changes, ship a migration altering `embeddings.embedding` to the new `vector(N)` — the column is dimension-typed for the HNSW index ([04](04-database-erd.md)) — through the normal pipeline (§1.1, §2), including the `get_advisors` gate.
+3. Run the full reindex job (service role): content builders select only allowlisted columns per source type → redaction scrubber → provider embedding endpoint → upsert into `embeddings` keyed on `content_hash` ([11](11-ai-llm.md)).
+4. Verify: row counts in `embeddings` per `source_type` match the source tables, and a spot-check semantic search returns sensible results.
+5. Confirm the `ai.reindex` entry appears in `audit_log`.
+6. State the degradation window: semantic search returns incomplete results until the reindex completes ([11](11-ai-llm.md)); for a large corpus, tell the AI-enabled roles (SA, Manager, Finance) before starting.

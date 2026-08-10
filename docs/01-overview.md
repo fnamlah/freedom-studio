@@ -2,7 +2,7 @@
 
 This document defines what the Studio Management System is, who uses it, what it must do, and — just as importantly — what it deliberately does not do. It introduces the six personas, maps them to the system's capability groups, states the non-functional priorities that shape every other design decision in this package, and fixes the product boundary. It is the entry point for requirements; the detailed designs it points to live in the sibling documents. This package is design-only: nothing described here is implied to exist yet.
 
-**Related docs:** [00 — Index & Conventions](00-index.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Document Management & Shareable Links](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md)
+**Related docs:** [00 — Index & Conventions](00-index.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Document Management & Shareable Links](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md)
 
 ---
 
@@ -51,6 +51,7 @@ Each capability group below is a requirement stated at product level; the linked
 | **Shareable view links** | Let admins and managers share a single document externally via a high-entropy, expiring, revocable, view-limited token — with every view audited and no public URLs ever. | [06 — Document Management & Shareable Links](06-documents-sharing.md) |
 | **Statistics dashboards & forecasting** | Per-role dashboards (earnings, hours, payouts, compliance, balances) where every viewer sees only what their row-level permissions allow, plus revenue forecasting with accuracy tracking. | [07 — Statistics & Dashboards](07-analytics.md), [09 — Accounting](09-accounting.md) |
 | **Accounting: commission splits, ledger, payouts** | Resolve the applicable commission scheme per earning, split studio net revenue across model / operator pool / studio, post append-only ledger entries, and pay out **both models and operators** through a maker-checker workflow (Finance records, Super Admin authorizes). | [09 — Accounting](09-accounting.md) |
+| **AI assistant & insights** | Answer operational and financial questions via whitelisted, RLS-scoped tools; semantic search over internal notes and metadata; monthly AI market reports. Only aggregated, de-identified data ever reaches the external LLM providers. | [11 — AI Assistant & LLM Gateway](11-ai-llm.md) |
 
 ### Persona → capability map
 
@@ -74,6 +75,7 @@ flowchart LR
     SHR["Shareable view links"]
     DASH["Dashboards & forecasting"]
     ACC["Accounting: splits, ledger, payouts"]
+    AI["AI assistant & insights"]
   end
 
   SA --> UM
@@ -82,12 +84,14 @@ flowchart LR
   SA --> SHR
   SA -->|"all data"| DASH
   SA -->|"approves payouts"| ACC
+  SA -->|"full, aggregates-only egress"| AI
 
   MGR --> REC
   MGR --> DOC
   MGR --> SHR
   MGR -->|"all data"| DASH
   MGR -->|"read; create pending payouts"| ACC
+  MGR -->|"own-scope, aggregates-only egress"| AI
 
   MOD -->|"own record, read-only"| REC
   MOD -->|"own documents, read-only"| DOC
@@ -101,6 +105,7 @@ flowchart LR
   FIN -->|"stage names only"| REC
   FIN -->|"money views only"| DASH
   FIN -->|"records and settles"| ACC
+  FIN -->|"own-scope, aggregates-only egress"| AI
 
   EXT -->|"one shared document via token"| SHR
 ```
@@ -131,5 +136,8 @@ Boundaries stated now prevent scope creep later. The following are explicitly ou
 | **Scheduling / shift planning** | Work sessions are recorded after the fact for hours tracking; the system does not plan or assign shifts. | No |
 | **Multi-studio tenancy** | The system is single-tenant: one studio, one deployment. Multi-studio support would change the data model and RLS design pervasively. | Yes — future consideration |
 | **Operator compliance documents** | Documents are model-scoped in this design; operators carry no document records. | Yes — future consideration |
+| **External market-data ingestion for AI** | v1 market analysis uses internal aggregates only; ingesting third-party web text would open a fresh prompt-injection channel and add crawling and provider surface ([11](11-ai-llm.md)). | Yes — future consideration |
+| **AI access for the Model and Operator roles** | Their scope is narrow self-service, the assistant's value is operational/analytical, and excluding them shrinks the injection and cost surface ([11](11-ai-llm.md)). | Yes — future consideration |
+| **AI write actions / agent mutations** | The assistant is read-only by design: no write tools exist, and every mutation remains a human workflow with its existing controls ([11](11-ai-llm.md)). | No |
 
 Everything else in this package — architecture, roles, schema, auth, documents, analytics, threat model, accounting, and operations — elaborates the scope defined here without extending it.

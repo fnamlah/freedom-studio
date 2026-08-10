@@ -2,17 +2,17 @@
 
 This document is the canonical definition of the Postgres schema for the studio management system: every enum, every table with its columns and constraints, the entity-relationship diagram, the security helper functions, the complete Row-Level Security (RLS) policy-intent matrix, the index plan, and the trigger inventory. Table and column definitions live **only** here — every other document links to this one rather than restating schema. The design is deny-by-default: RLS is the final authority on every read and write, an AAL2 (TOTP-verified) session is a hard precondition for touching any row, and the money tables are append-only. This is a design document; no database exists yet, and everything below is written as the schema the migrations will create.
 
-**Related docs:** [00 — Index & Conventions](00-index.md) · [01 — Overview](01-overview.md) · [02 — Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Documents & Sharing](06-documents-sharing.md) · [07 — Analytics](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md)
+**Related docs:** [00 — Index & Conventions](00-index.md) · [01 — Overview](01-overview.md) · [02 — Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Documents & Sharing](06-documents-sharing.md) · [07 — Analytics](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md)
 
 ---
 
 ## 1. Schema conventions
 
-- All IDs are `uuid` (default `gen_random_uuid()`) except append-only journals (`ledger_entries`, `audit_log`, `document_share_views`), which use `bigint GENERATED ALWAYS AS IDENTITY` for cheap, strictly ordered keys.
+- All IDs are `uuid` (default `gen_random_uuid()`) except append-only journals (`ledger_entries`, `audit_log`, `document_share_views`, and the AI journals `ai_messages` / `ai_usage`), which use `bigint GENERATED ALWAYS AS IDENTITY` for cheap, strictly ordered keys.
 - Money columns are `numeric(12,2)`; percentage columns are `numeric(5,2)`.
 - Every mutable table carries `created_at` / `updated_at` (`timestamptz NOT NULL DEFAULT now()`); `updated_at` is maintained by trigger (§9), never by application code.
 - Roles are a Postgres enum, not a roles table — the rationale is owned by [03 — Roles & RBAC](03-roles-rbac.md).
-- Required extensions: `citext` (case-insensitive email columns) and `btree_gist` (overlap-exclusion constraints on `operator_assignments` and `commission_schemes`). `gen_random_uuid()` is built into modern Postgres and needs no extension.
+- Required extensions: `citext` (case-insensitive email columns), `btree_gist` (overlap-exclusion constraints on `operator_assignments` and `commission_schemes`), and `vector` (pgvector — the `embeddings.embedding` column and its HNSW index, [11 — AI Assistant & LLM Gateway](11-ai-llm.md)). `gen_random_uuid()` is built into modern Postgres and needs no extension.
 
 ## 2. Enums
 
@@ -30,6 +30,10 @@ All enums are product-defined and fixed at design time; users can never create v
 | `entry_source` | `manual`, `import` | `work_sessions.source`, `earnings.source` | Distinguishes hand entry from bulk statement import. |
 | `payee_type` | `model`, `operator` | `ledger_entries.payee_type`, `payouts.payee_type` | Discriminator of the polymorphic payee (§4.10). |
 | `ledger_entry_type` | `earning_share`, `adjustment`, `deduction`, `payout_settlement` | `ledger_entries.entry_type` | Sign convention per type in §4.10. |
+| `ai_provider` | `moonshot`, `zhipu` | `ai_usage.provider`, `ai_messages.provider`, `ai_reports.provider` | The two switchable LLM providers; the active one is an `app_settings` value ([11](11-ai-llm.md)). |
+| `ai_message_role` | `user`, `assistant`, `tool` | `ai_messages.role` | |
+| `ai_request_kind` | `chat`, `embedding`, `report` | `ai_usage.request_kind` | |
+| `embedding_source` | `model_note`, `operator_note`, `platform`, `document_meta` | `embeddings.source_type` | What may be embedded is decided in [11](11-ai-llm.md) §6 — document *contents* are never a source. |
 
 ## 3. Supabase-managed objects referenced (not owned by this schema)
 
@@ -342,7 +346,7 @@ No UPDATE/DELETE policy exists for **any** role, including the Super Admin in-ap
 | `id` | `bigint` | no | identity | PK, `GENERATED ALWAYS AS IDENTITY` |
 | `actor_id` | `uuid` | yes | — | FK → `auth.users(id)`; NULL for anonymous/system actions |
 | `actor_role` | `user_role` | yes | — | Snapshot at action time (roles can change later) |
-| `action` | `text` | no | — | Dotted verbs: `user.invite`, `user.deactivate`, `document.upload`, `document.download`, `share.create`, `share.revoke`, `share.view`, `payout.approve`, `payout.paid`, `ledger.post`, `scheme.update`, `auth.mfa_enrolled`, … |
+| `action` | `text` | no | — | Dotted verbs: `user.invite`, `user.deactivate`, `document.upload`, `document.download`, `share.create`, `share.revoke`, `share.view`, `payout.approve`, `payout.paid`, `ledger.post`, `scheme.update`, `auth.mfa_enrolled`, `ai.model_switch`, `ai.settings_update`, `ai.reindex`, `ai.report_create`, … |
 | `entity_type` | `text` | yes | — | |
 | `entity_id` | `text` | yes | — | Text, not uuid — some entities have bigint keys |
 | `metadata` | `jsonb` | no | `'{}'` | |
@@ -369,12 +373,110 @@ Records *who was invited as what*; the actual invite email and token are handled
 
 Table-level: CHECK `NOT (model_id IS NOT NULL AND operator_id IS NOT NULL)` — an invite pre-links to at most one business record. Partial UNIQUE `(email) WHERE status = 'pending'` — one live invite per address.
 
+### 4.18 `app_settings` — typed global configuration
+
+Key-value configuration read by server code — most prominently the AI gateway's active-provider switch, model IDs, and budget knobs ([11 — AI Assistant & LLM Gateway](11-ai-llm.md)). **Rule: secrets never live here** — API keys and other secrets live in server environment variables ([10](10-deployment-operations.md)); this table holds only non-secret, auditable settings.
+
+| Column | Type | Null | Default | Constraints / Notes |
+|---|---|---|---|---|
+| `key` | `text` | no | — | PK; dotted namespace; CHECK `key ~ '^[a-z][a-z0-9_.]*$'` |
+| `value` | `jsonb` | no | — | Validated for known `ai.*` keys by the `validate_app_setting` trigger (§9) |
+| `description` | `text` | yes | — | |
+| `updated_by` | `uuid` | yes | — | FK → `profiles(id)`; NULL = migration seed |
+| `created_at` / `updated_at` | `timestamptz` | no | `now()` | Trigger-maintained |
+
+Seed keys (provisioned by migration, [10](10-deployment-operations.md)): `ai.active_provider` (`"moonshot"` \| `"zhipu"`), `ai.chat_model.moonshot`, `ai.chat_model.zhipu`, `ai.embedding.provider`, `ai.embedding.model`, `ai.embedding.dim`, `ai.limits.requests_per_user_per_hour`, `ai.limits.tokens_per_user_per_day`, `ai.limits.tokens_global_per_day`.
+
+### 4.19 `ai_conversations` — AI assistant chat threads
+
+One row per assistant conversation. Conversations are **own-only for every role including the Super Admin** — oversight happens through `ai_usage` and `audit_log`, never by reading colleagues' chats ([11](11-ai-llm.md)).
+
+| Column | Type | Null | Default | Constraints / Notes |
+|---|---|---|---|---|
+| `id` | `uuid` | no | `gen_random_uuid()` | PK |
+| `user_id` | `uuid` | no | — | FK → `profiles(id)` ON DELETE CASCADE |
+| `title` | `text` | yes | — | Auto-generated from the first turn |
+| `created_at` / `updated_at` | `timestamptz` | no | `now()` | Trigger-maintained |
+
+### 4.20 `ai_messages` — conversation turns (redacted forms only)
+
+Append-only within a conversation: no UPDATE or DELETE policy exists for any role (§7.2). The stored `content` / `tool_result` are the **redacted, provider-bound forms** — raw tool rows are never persisted here, which makes the conversation log double as an egress audit ([11](11-ai-llm.md) §5).
+
+| Column | Type | Null | Default | Constraints / Notes |
+|---|---|---|---|---|
+| `id` | `bigint` | no | identity | PK, `GENERATED ALWAYS AS IDENTITY` |
+| `conversation_id` | `uuid` | no | — | FK → `ai_conversations(id)` ON DELETE CASCADE |
+| `user_id` | `uuid` | no | — | FK → `profiles(id)` — denormalized so the own-rows RLS policy is a single-hop `user_id = auth.uid()` comparison (same pattern as `work_sessions.model_id`, §4.6) |
+| `role` | `ai_message_role` | no | — | |
+| `content` | `text` | yes | — | NULL for pure tool rows |
+| `tool_name` | `text` | yes | — | CHECK `(role <> 'tool' OR tool_name IS NOT NULL)`; must name a tool in the registry ([11](11-ai-llm.md) §4) |
+| `tool_args` | `jsonb` | yes | — | |
+| `tool_result` | `jsonb` | yes | — | **Redacted projection only** — raw rows are never persisted here |
+| `provider` | `ai_provider` | yes | — | Set on assistant turns |
+| `model` | `text` | yes | — | |
+| `created_at` | `timestamptz` | no | `now()` | |
+
+### 4.21 `ai_usage` — per-request AI metering
+
+One row per gateway request (chat turn, embedding batch, or report). This is high-volume operational telemetry, deliberately **separate from `audit_log`**: different readers (users see their own spend) and different retention (2 years vs the SA-only 7-year audit trail — [08](08-security-threat-model.md), [11](11-ai-llm.md) §8). Rows are inserted by the gateway via the service role only; no client-side write path exists. The gateway's rate/budget checks are `SUM`s over this table ([11](11-ai-llm.md) §8).
+
+| Column | Type | Null | Default | Constraints / Notes |
+|---|---|---|---|---|
+| `id` | `bigint` | no | identity | PK, `GENERATED ALWAYS AS IDENTITY` |
+| `user_id` | `uuid` | no | — | FK → `profiles(id)` |
+| `conversation_id` | `uuid` | yes | — | FK → `ai_conversations(id)` ON DELETE SET NULL |
+| `request_kind` | `ai_request_kind` | no | — | |
+| `provider` | `ai_provider` | no | — | |
+| `model` | `text` | no | — | |
+| `prompt_tokens` / `completion_tokens` | `integer` | no | `0` | |
+| `tool_call_count` | `integer` | no | `0` | |
+| `est_cost_usd` | `numeric(10,6)` | yes | — | **Deviation from the `numeric(12,2)` money convention (§1):** per-token unit prices are fractions of a cent, so cost estimates need six decimal places |
+| `duration_ms` | `integer` | yes | — | |
+| `status` | `text` | no | `'ok'` | CHECK `status IN ('ok','error','rate_limited','budget_exceeded')` |
+| `created_at` | `timestamptz` | no | `now()` | |
+
+### 4.22 `embeddings` — pgvector semantic-search store
+
+One vector per embeddable source row (see `embedding_source`, §2): model/operator notes, platforms, and document **metadata** — never document contents. `content` holds the **already-redacted** text that was actually embedded, so re-surfacing it in search results is safe by construction; what gets embedded and the indexing pipeline are owned by [11](11-ai-llm.md) §6. Written only by the service-role indexing job; reads mirror source-row visibility (§7.3).
+
+| Column | Type | Null | Default | Constraints / Notes |
+|---|---|---|---|---|
+| `id` | `uuid` | no | `gen_random_uuid()` | PK |
+| `source_type` | `embedding_source` | no | — | |
+| `source_id` | `uuid` | no | — | Row id in the source table — polymorphic by `source_type`, **no declarative FK** (same trade-off as the payee pattern, §4.10) |
+| `model_id` | `uuid` | yes | — | FK → `models(id)` ON DELETE CASCADE; CHECK `(source_type IN ('model_note','document_meta')) = (model_id IS NOT NULL)` — RLS scoping FK |
+| `operator_id` | `uuid` | yes | — | FK → `operators(id)` ON DELETE CASCADE; CHECK `(source_type = 'operator_note') = (operator_id IS NOT NULL)` — RLS scoping FK |
+| `content` | `text` | no | — | **Redacted** text actually embedded (safe to re-surface) |
+| `content_hash` | `text` | no | — | SHA-256 of `content`; unchanged hash ⇒ the indexing job skips re-embedding |
+| `embedding` | `vector(2048)` | no | — | Dimension fixed by migration to the `ai.embedding.dim` setting; changing it = migration + re-embed runbook ([10](10-deployment-operations.md)) |
+| `embedding_model` | `text` | no | — | One live embedding model at a time; this column + the unique key below make a future multi-namespace design a non-breaking extension ([11](11-ai-llm.md)) |
+| `embedded_at` | `timestamptz` | no | `now()` | |
+
+Table-level: UNIQUE `(source_type, source_id, embedding_model)` — one vector per source row per embedding model.
+
+### 4.23 `ai_reports` — stored AI market reports
+
+Monthly market/trend commentary generated from internal aggregates only ([11](11-ai-llm.md) §7). Readable by Super Admin and finance only: the report inputs include SA/FIN-only analytics widgets (split distribution, balances, forecast accuracy), so any wider read would widen the [07](07-analytics.md) presentation boundary.
+
+| Column | Type | Null | Default | Constraints / Notes |
+|---|---|---|---|---|
+| `id` | `uuid` | no | `gen_random_uuid()` | PK |
+| `report_month` | `date` | no | — | First day of the reported month |
+| `title` | `text` | no | — | |
+| `content_md` | `text` | no | — | Generated commentary (aggregates-only inputs) |
+| `provider` | `ai_provider` | no | — | |
+| `model` | `text` | no | — | |
+| `params` | `jsonb` | no | `'{}'` | Scope, horizon, prompt version |
+| `created_by` | `uuid` | no | — | FK → `profiles(id)` |
+| `created_at` | `timestamptz` | no | `now()` | |
+
 ## 5. Entity-relationship diagram
 
 Reading notes for the diagram:
 
 - Mermaid `erDiagram` shows **types and PK/FK/UK markers only** — CHECK constraints, defaults, exclusion constraints, and partial unique indexes cannot be expressed and live exclusively in the §4 tables.
 - **Dashed lines mark the polymorphic payee links** (`ledger_entries` / `payouts` → `models` or `operators` via `payee_type` + `payee_id`). Mermaid has no polymorphic-association notation, and there is no declarative FK in the schema either — the dashed lines plus the BEFORE INSERT validation trigger (§9) are the honest representation.
+- `embeddings.source_id` is polymorphic in the same spirit (by `source_type`, no declarative FK — §4.22). Only its **scoping FKs** `models.id` / `operators.id` are drawn as lines; the polymorphic source link is annotated on the attribute instead, like the payee pattern.
 - For legibility, `created_at` / `updated_at` / `notes` attributes and the many `created_by` / `entered_by` / `uploaded_by` audit FKs to `profiles` are omitted from the drawing; they are all present in §4.
 
 ```mermaid
@@ -404,6 +506,12 @@ erDiagram
     operators |o--o{ invitations : "pre-linked"
     models |o--o{ forecast_snapshots : "scope"
     platforms |o--o{ forecast_snapshots : "scope"
+    profiles ||--o{ ai_conversations : "owns"
+    ai_conversations ||--o{ ai_messages : "turns"
+    profiles ||--o{ ai_usage : "metered spend"
+    profiles ||--o{ ai_reports : "created_by"
+    models |o--o{ embeddings : "scoping FK"
+    operators |o--o{ embeddings : "scoping FK"
     models ||..o{ ledger_entries : "payee_type=model (no FK)"
     operators ||..o{ ledger_entries : "payee_type=operator (no FK)"
     models ||..o{ payouts : "payee_type=model (no FK)"
@@ -599,6 +707,65 @@ erDiagram
         timestamptz accepted_at
         uuid invited_by FK
     }
+    app_settings {
+        text key PK
+        jsonb value
+        text description
+        uuid updated_by FK "nullable"
+    }
+    ai_conversations {
+        uuid id PK
+        uuid user_id FK
+        text title
+    }
+    ai_messages {
+        bigint id PK
+        uuid conversation_id FK
+        uuid user_id FK "denormalized"
+        ai_message_role role
+        text content
+        text tool_name
+        jsonb tool_args
+        jsonb tool_result "redacted"
+        ai_provider provider
+        text model
+    }
+    ai_usage {
+        bigint id PK
+        uuid user_id FK
+        uuid conversation_id FK "nullable"
+        ai_request_kind request_kind
+        ai_provider provider
+        text model
+        integer prompt_tokens
+        integer completion_tokens
+        integer tool_call_count
+        numeric est_cost_usd
+        integer duration_ms
+        text status
+    }
+    embeddings {
+        uuid id PK
+        embedding_source source_type
+        uuid source_id "polymorphic, no FK"
+        uuid model_id FK "nullable scope"
+        uuid operator_id FK "nullable scope"
+        text content "redacted"
+        text content_hash
+        vector_2048 embedding
+        text embedding_model
+        timestamptz embedded_at
+    }
+    ai_reports {
+        uuid id PK
+        date report_month
+        text title
+        text content_md
+        ai_provider provider
+        text model
+        jsonb params
+        uuid created_by FK
+    }
 ```
 
 ## 6. Helper functions
@@ -647,6 +814,12 @@ Legend: **C/R/U/D** = insert/select/update/delete. **own** = row-scoped via `aut
 | `document_share_views` | R | R (shares they created) | deny | deny | deny | insert via service role only |
 | `audit_log` | R (no U/D) | deny | deny | deny | deny | insert via service role / trigger |
 | `invitations` | CRUD | deny | deny | deny | deny | — |
+| `app_settings` | R + U (writes trigger-validated + audited; inserts via migration only) | R | deny | R | deny | — |
+| `ai_conversations` | CRUD **own only** | CRUD own | deny | CRUD own | deny | — |
+| `ai_messages` | C+R own (`user_id = auth.uid()`; no U/D — append-only) | C+R own | deny | C+R own | deny | — |
+| `ai_usage` | R all | R own | deny | R own | deny | insert via service role only (gateway) |
+| `embeddings` | R all | R all | deny | R (`source_type = 'platform'` only) | deny | write via service role only (indexing job) |
+| `ai_reports` | C+R+D | deny | deny | C+R | deny | — |
 
 ### 7.3 Matrix notes
 
@@ -656,6 +829,9 @@ Legend: **C/R/U/D** = insert/select/update/delete. **own** = row-scoped via `aut
 - **Role changes and deactivation** never happen through client-reachable policies: they run in the guarded service-role server path ([02](02-architecture.md) trust zones, [05](05-auth-2fa.md)), which also revokes the target's sessions. The manager's `profiles` UPDATE WITH CHECK explicitly excludes `role` and `status` to make privilege escalation via contact-field updates impossible ([08](08-security-threat-model.md)).
 - **Documents are denied to finance and operators entirely** — a deliberate least-privilege stance ([08](08-security-threat-model.md), insider-misuse threat). Storage-bucket policies mirror this and are specified in [06](06-documents-sharing.md).
 - **RPC surface.** `fn_generate_earning_shares` and `fn_snapshot_forecast` ([09](09-accounting.md)) are executable by super_admin and finance only, matching the [03](03-roles-rbac.md) capability matrix; analytics RPCs ([07](07-analytics.md)) are SECURITY INVOKER, so this matrix already governs whatever they can see.
+- **AI conversations are own-only — including for the Super Admin.** `ai_conversations` / `ai_messages` grant every AI-enabled role (super_admin, manager, finance) access to their **own** rows only; SA oversight runs through `ai_usage` (R all) and `audit_log`, never through reading colleagues' chats ([11](11-ai-llm.md)). Model and operator have no permissive AI policies at all — their exclusion from the AI surface ([03](03-roles-rbac.md)) is enforced at the database, not just in the UI.
+- **Embedding reads never exceed source-row visibility.** The `embeddings` grants mirror the source tables: manager reads all rows (as with the underlying notes, platforms, and document metadata), finance reads only `source_type = 'platform'` — the consequence of finance's documents/notes denial, so finance's semantic search is honestly near-empty — and non-AI roles simply have no policy (deny-by-default). Because `fn_semantic_search` ([07](07-analytics.md), [11](11-ai-llm.md)) is SECURITY INVOKER, this matrix is the whole enforcement story.
+- **`app_settings` writes are Super-Admin-only** and pass the `validate_app_setting` trigger (§9); every change is audited as `ai.model_switch` or `ai.settings_update` (§4.16, [11](11-ai-llm.md)). Inserts happen only via migration seed — no role holds INSERT.
 
 ## 8. Index plan
 
@@ -678,6 +854,12 @@ Every FK column gets an index (Postgres does not create these automatically); th
 | `commission_schemes_no_overlap` | EXCLUDE USING gist on coalesced scope + daterange (§4.9) | Deterministic scheme resolution |
 | `invitations_pending_email` | `invitations (email) WHERE status='pending'` — partial UNIQUE | One live invitation per address |
 | `forecast_snapshots_scope_day` | unique expression index (§4.12) | One snapshot per scope per day |
+| `embeddings_hnsw` | `embeddings USING hnsw (embedding vector_cosine_ops)` | Approximate-nearest-neighbor semantic search (`fn_semantic_search`, [11](11-ai-llm.md)) |
+| `embeddings_source_unique` | `embeddings (source_type, source_id, embedding_model)` UNIQUE | One vector per source row per embedding model (§4.22); upsert target for the indexing job |
+| `ai_messages_conversation` | `ai_messages (conversation_id, id)` | Ordered transcript reads |
+| `ai_messages_user` | `ai_messages (user_id)` | Single-hop own-rows RLS scans (§4.20) |
+| `ai_usage_user_created` | `ai_usage (user_id, created_at)` | Per-user hourly/daily budget sums in the gateway ([11](11-ai-llm.md) §8) |
+| `ai_usage_created` | `ai_usage (created_at)` | Global daily token-budget sums |
 
 ## 9. Triggers
 
@@ -689,4 +871,5 @@ Every FK column gets an index (Postgres does not create these automatically); th
 | `validate_payout_payee` | `payouts` | BEFORE INSERT | Same validation for payouts (§4.11) |
 | `check_operator_pool` | `operator_assignments` | BEFORE INSERT OR UPDATE | Validates the cross-row rule that per-model `pool_share_percent` sums to ≤ 100 on every date of the assignment range — not expressible as a CHECK constraint (§4.8) |
 | `payout_paid_settlement` | `payouts` | AFTER UPDATE | On transition to `status='paid'`, inserts the negative `payout_settlement` ledger entry — the only writer of settlement entries (§4.11) |
-| `audit_sensitive_actions` | sensitive tables (payouts, commission_schemes, document_shares, invitations, profiles, …) | AFTER INSERT/UPDATE | Writes `audit_log` rows for the dotted-verb action catalog (§4.16); complements the audit writes performed by server actions and the share Edge Function |
+| `validate_app_setting` | `app_settings` | BEFORE UPDATE | Validates `value` for the known `ai.*` keys (§4.18) — e.g. `ai.active_provider` must be `"moonshot"` or `"zhipu"`, budget and dimension keys must be positive numbers ([11](11-ai-llm.md)) |
+| `audit_sensitive_actions` | sensitive tables (payouts, commission_schemes, document_shares, invitations, profiles, app_settings, ai_reports, …) | AFTER INSERT/UPDATE | Writes `audit_log` rows for the dotted-verb action catalog (§4.16); complements the audit writes performed by server actions and the share Edge Function. For `app_settings` the action is `ai.model_switch` when `key = 'ai.active_provider'`, otherwise `ai.settings_update`; `ai_reports` inserts log `ai.report_create` ([11](11-ai-llm.md)) |

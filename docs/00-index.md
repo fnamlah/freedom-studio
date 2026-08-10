@@ -2,7 +2,7 @@
 
 This document is the entry point for the Studio Management System design-documentation package. It lists every document in the package with a one-line summary, defines the shared glossary used throughout, and records the documentation conventions — cross-referencing rules, canonical-source rules, Mermaid usage, and the package-wide design-only rule — that every other document in `docs/` follows.
 
-Related docs: [01 — Product Overview & Requirements](01-overview.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Document Management & Shareable Links](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md)
+Related docs: [01 — Product Overview & Requirements](01-overview.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Document Management & Shareable Links](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md)
 
 ---
 
@@ -32,10 +32,11 @@ The security stance stated there applies to every document in this package and s
 | 08 | [Security & Threat Model](08-security-threat-model.md) | Threat-by-threat mitigation table (account takeover, document leakage, privilege escalation, insider misuse, …) plus platform hardening: headers, secrets inventory, rate limiting, backups. |
 | 09 | [Accounting: Splits, Ledger, Payouts & Forecasting](09-accounting.md) | Commission-scheme resolution, the append-only polymorphic-payee ledger, the maker-checker payout/settlement flow, payee statements, and the forecasting design. |
 | 10 | [Deployment & Operations](10-deployment-operations.md) | Environments and CI/CD pipeline, MCP-driven provisioning checklist, configuration and env-var inventory, and operational runbooks. |
+| 11 | [AI Assistant & LLM Gateway](11-ai-llm.md) | The server-side LLM gateway switchable between Kimi K3 and GLM 5.2, the whitelisted RLS-scoped tool registry, the aggregates-only redaction boundary, pgvector semantic search, and AI market reports. |
 
 ### Reading order
 
-Documents are written to be read in numerical order: 01–02 establish product and architecture, 03–05 establish identity and authorization, 06–08 cover documents, analytics, and the threat model, and 09–10 close with accounting and operations. One ordering note matters: **[09 — Accounting](09-accounting.md) extends 03, 04, and 07 with the accounting module** (operator roles and capabilities, ledger/payout tables, and accounting-driven charts respectively) — read it after [07 — Statistics & Dashboards](07-analytics.md) so that the roles, schema, and analytics surfaces it builds on are already familiar.
+Documents are written to be read in numerical order: 01–02 establish product and architecture, 03–05 establish identity and authorization, 06–08 cover documents, analytics, and the threat model, and 09–11 close with accounting, operations, and the AI layer. Two ordering notes matter: **[09 — Accounting](09-accounting.md) extends 03, 04, and 07 with the accounting module** (operator roles and capabilities, ledger/payout tables, and accounting-driven charts respectively) — read it after [07 — Statistics & Dashboards](07-analytics.md) so that the roles, schema, and analytics surfaces it builds on are already familiar. Likewise, **[11 — AI Assistant & LLM Gateway](11-ai-llm.md) extends 02, 03, 04, 07, and 08 with the AI layer** — read it last, after everything it builds on.
 
 ## 4. Glossary
 
@@ -56,6 +57,13 @@ Documents are written to be read in numerical order: 01–02 establish product a
 | **RLS** | Row Level Security — Postgres per-row access policies. In this design, RLS is the final authority on authorization; application-layer checks are UX conveniences, not security boundaries. |
 | **SECURITY INVOKER / DEFINER** | Postgres execution modes for views and functions. INVOKER objects run with the caller's permissions (RLS applies to the caller); DEFINER objects run with the owner's. This design uses INVOKER for all analytics and confines DEFINER to a few narrow, hardened helpers. |
 | **Maker-checker** | Separation of duties for payments: Finance creates obligations and records settlements ("maker"), while only the Super Admin can approve a payout ("checker"), so no single role can originate and release funds end-to-end. |
+| **LLM gateway** | The server-side entry point through which every AI request flows: it gates by role and AAL2, runs the agent loop, executes whitelisted tools under the caller's RLS, and is the only component that reaches the external LLM providers. The browser never talks to a provider directly. |
+| **Provider adapter** | A uniform interface (chat with tool-calling and streaming, plus embed) with one implementation per LLM provider — Moonshot (Kimi K3) and Zhipu (GLM 5.2). Model IDs are configuration values, never hardcoded. |
+| **Active model** | The globally selected chat provider, held as a single `app_settings` key writable only by the Super Admin. Switching it is an audited action that takes effect within the gateway's short cache TTL. |
+| **Aggregates-only policy** | The outbound data rule for LLM providers: only aggregated or de-identified business data (stage/display names, numbers, statuses, periods) may leave the system — never legal names, dates of birth, contact or payment details, IPs, or document contents. Applies equally to chat prompts, tool results, and embedding inputs. |
+| **Redaction chokepoint** | The single module through which every provider-bound payload passes, enforcing the aggregates-only policy via per-tool allowlist projection, a global field blocklist, and best-effort free-text scrubbing. |
+| **Embedding / pgvector** | An embedding is a numeric vector representation of text that enables semantic (similarity) search; pgvector is the Postgres extension that stores such vectors and indexes them for nearest-neighbor queries. |
+| **Prompt injection** | An attack in which untrusted text entering the model's context (e.g. a stored note) instructs the LLM to misuse its tools or exfiltrate data. Mitigated by the whitelisted read-only tool registry, caller-scoped RLS execution, and the redaction chokepoint. |
 
 ## 5. Documentation conventions
 
@@ -63,7 +71,7 @@ The following conventions bind every document in this package.
 
 ### 5.1 Structure
 
-- Files live in `docs/` and are numbered `00-index.md` through `10-deployment-operations.md`.
+- Files live in `docs/` and are numbered `00-index.md` through `11-ai-llm.md`.
 - Every document starts with an H1 title, a one-paragraph scope statement, and a **Related docs** line linking sibling documents by relative path.
 - Documents cross-reference each other **by number and link** (e.g. "see [04 — Database Schema & RLS](04-database-erd.md)"), never by restating the referenced content.
 
@@ -76,6 +84,7 @@ To keep the package free of drift, certain content has exactly one home. Other d
 | Role capabilities (the authoritative capability matrix) | [03 — Roles & RBAC](03-roles-rbac.md) | Links to 03; 04's RLS matrix is derived from it |
 | Table and column definitions (full schema) | [04 — Database Schema & RLS](04-database-erd.md) | Links to 04 |
 | The AAL2 RESTRICTIVE policy snippet (exact SQL) | [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) | References it, including 04 |
+| The AI tool registry & redaction blocklist | [11 — AI Assistant & LLM Gateway](11-ai-llm.md) | Links to 11 |
 
 ### 5.3 Diagrams
 

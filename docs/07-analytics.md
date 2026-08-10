@@ -2,7 +2,7 @@
 
 This document designs the analytics layer of the studio management system: the database views and RPC functions that aggregate business data, the mapping from metrics to chart types, and the per-role composition of the dashboards. The central design principle is that **every analytics object runs as SECURITY INVOKER**, so a single set of views and functions serves every role while Row Level Security remains the sole authority over what each caller can see. This is a design document only — no code or infrastructure described here exists yet.
 
-**Related docs:** [00 — Index & Conventions](00-index.md) · [01 — Product Overview](01-overview.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Documents & Shareable Links](06-documents-sharing.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md)
+**Related docs:** [00 — Index & Conventions](00-index.md) · [01 — Product Overview](01-overview.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Documents & Shareable Links](06-documents-sharing.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md)
 
 ---
 
@@ -76,8 +76,11 @@ All RPCs are `SECURITY INVOKER`, `STABLE`, and take explicit date-range paramete
 | `fn_compliance_counts()` | `(valid_count integer, expiring_count integer, expired_count integer)` | Studio-wide (or, for a model, own) compliance counts for the donut widget |
 | `fn_payee_statement(p_payee_type payee_type, p_payee_id uuid, p_from date, p_to date)` | opening balance, ledger entry rows, closing balance | Payee statement; the full contract (opening balance = sum of entries before `p_from`, entry rows, closing balance) is specified in [09 — Accounting](09-accounting.md) |
 | `fn_forecast(p_months_ahead integer)` | set of `(target_month date, model_id uuid, platform_id uuid, predicted_net numeric(12,2))` | Parameterized variant of `v_earnings_forecast` for horizons other than the default 3 months |
+| `fn_semantic_search(p_embedding vector, p_top_k integer, p_source_types embedding_source[])` | set of `(source_type embedding_source, subject_name text, snippet text, similarity numeric)` | Semantic search over the `embeddings` table; INVOKER like every RPC here, so the caller's RLS on `embeddings` (which mirrors source-row visibility, see 04) scopes the matches. Returns only a redacted content snippet plus a source reference — semantics, redaction contract, and query flow are canonical in [11 — AI Assistant & LLM Gateway](11-ai-llm.md) |
 
 **Boundary with 09:** the write-side RPCs `fn_generate_earning_shares(...)` and `fn_snapshot_forecast()` are *not* analytics objects — they mutate `ledger_entries` and `forecast_snapshots` respectively, are restricted to Super Admin and Finance per the capability matrix in [03 — Roles & RBAC](03-roles-rbac.md), and are specified in [09 — Accounting](09-accounting.md). Everything in this document is read-only.
+
+**Boundary with 11:** the AI tool registry in [11 — AI Assistant & LLM Gateway](11-ai-llm.md) maps 1:1 onto the objects in this catalog and adds no privileged query path — every AI tool call executes these same SECURITY INVOKER views and RPCs under the caller's own JWT, so the assistant can never return rows this catalog would not return to that user directly.
 
 ---
 
@@ -100,6 +103,7 @@ The authoritative metric-to-chart specification for the dashboards. Audience abb
 | Payee outstanding balances | Horizontal bar + table | SA, FIN |
 | Document compliance status | Donut (valid / expiring / expired) | SA, MGR; Model own |
 | KPI tiles (period gross, net, hours, pending payouts, own balance) | Stat tiles | per role |
+| AI monthly insight (latest `ai_reports`, see 11) | Text/insight panel | SA, FIN |
 
 The "Audience" column is a *presentation* decision — which widgets a role's dashboard renders. It is deliberately narrower than or equal to what RLS permits, never wider; even if a widget were mistakenly rendered for the wrong role, the INVOKER query behind it would return only RLS-permitted rows (usually an empty set). Rows driven by the accounting module (splits, balances, forecasts, payouts) are cross-referenced from [09 — Accounting](09-accounting.md) rather than duplicated there.
 
@@ -111,11 +115,11 @@ Role capabilities are canonical in [03 — Roles & RBAC](03-roles-rbac.md); this
 
 | Role | Dashboard scope | Widgets |
 |---|---|---|
-| **Super Admin** | Studio-wide, all data | Every widget in the chart-mapping table: earnings pies and trends, model comparisons, split distribution, forecasts and accuracy, payout history, payee balances, compliance donut, full KPI tile row |
-| **Studio Manager** | Studio-wide, all data | As Super Admin *except* the money-governance widgets reserved to SA/FIN: no split-distribution pie, no forecast-accuracy bar, no payee-balances chart (managers read schemes and ledger but do not govern them — see 03) |
+| **Super Admin** | Studio-wide, all data | Every widget in the chart-mapping table: earnings pies and trends, model comparisons, split distribution, forecasts and accuracy, payout history, payee balances, compliance donut, full KPI tile row, AI monthly insight panel (latest `ai_reports`, see 11) |
+| **Studio Manager** | Studio-wide, all data | As Super Admin *except* the money-governance widgets reserved to SA/FIN: no split-distribution pie, no forecast-accuracy bar, no payee-balances chart, no AI monthly insight panel — its report inputs include those same SA/FIN-only aggregates, see 11 (managers read schemes and ledger but do not govern them — see 03) |
 | **Model** | Own data only | Own earnings trend line, platform-share pie over own accounts, own hours & session trend, own payout history, own compliance donut, KPI tiles (own gross/net, hours, pending payout) |
 | **Operator** | Own ledger and payouts only | Own share trend line (from `ledger_entries` `earning_share` credits), own payouts table, own balance tile — **no raw earnings data of any model**, by design (03/09) |
-| **Finance/Accountant** | Money only, studio-wide | Earnings trends and summaries, split-distribution pie, projected-vs-actual line, forecast breakdown and accuracy, payout history, payee outstanding balances, ledger statements via `fn_payee_statement` — **no documents/compliance widget** (finance is denied the `documents` table entirely, see 04/06) |
+| **Finance/Accountant** | Money only, studio-wide | Earnings trends and summaries, split-distribution pie, projected-vs-actual line, forecast breakdown and accuracy, payout history, payee outstanding balances, ledger statements via `fn_payee_statement`, AI monthly insight panel (latest `ai_reports`, see 11) — **no documents/compliance widget** (finance is denied the `documents` table entirely, see 04/06) |
 
 The operator scope deserves emphasis because it is the sharpest asymmetry in the system: an operator participates in revenue splits but never sees the underlying `earnings` or `work_sessions` rows. Their dashboard is derived exclusively from their own `ledger_entries` and `payouts` rows — the computed *result* of the split, not its inputs. The rationale for this boundary is part of the operator design decision in [09 — Accounting](09-accounting.md).
 

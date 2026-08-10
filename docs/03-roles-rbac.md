@@ -2,7 +2,7 @@
 
 This document defines the role model for the Studio Management System: the decision to represent roles as a Postgres enum with a JWT custom claim, the mechanism that guarantees exactly one Super Admin, and the **authoritative capability matrix** that every other document derives from. Role capabilities are canonical here and only here — the RLS policy-intent matrix in [04 — Database Schema & RLS](04-database-erd.md) is the row-level translation of this matrix, and the threat mitigations in [08 — Security & Threat Model](08-security-threat-model.md) reference it. This is a design document; nothing described here is implemented or deployed yet.
 
-**Related docs:** [00 — Index & Conventions](00-index.md) · [01 — Product Overview](01-overview.md) · [02 — System Architecture](02-architecture.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Documents & Sharing](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md)
+**Related docs:** [00 — Index & Conventions](00-index.md) · [01 — Product Overview](01-overview.md) · [02 — System Architecture](02-architecture.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Documents & Sharing](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md)
 
 ---
 
@@ -76,6 +76,11 @@ This matrix is the **single source of truth for what each role may do**. The per
 | Dashboards | all data | all data | own data only | earnings/payouts/ledger only | own ledger/payouts only |
 | Audit log read | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Direct DB / Supabase dashboard | ✅ (see [05](05-auth-2fa.md)) | ❌ | ❌ | ❌ | ❌ |
+| Use AI assistant (chat + whitelisted tools + semantic search) | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Switch active AI model / edit AI settings | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Generate / read AI market reports | ✅ | ❌ | ❌ | ✅ | ❌ |
+| View AI usage & cost | ✅ all | own | ❌ | own | ❌ |
+| Manage embeddings / trigger reindex | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 Reading notes on deliberate asymmetries:
 
@@ -83,6 +88,7 @@ Reading notes on deliberate asymmetries:
 - **Operators never see raw earnings.** An operator's economic interest is their computed share, which materializes as ledger credits ([09 — Accounting](09-accounting.md)). Exposing per-model gross earnings to support staff would leak business data far beyond what the split requires.
 - **The ledger is append-only for everyone**, including the Super Admin. No role holds UPDATE or DELETE on ledger entries; corrections are posted as reversing adjustment entries ([09 — Accounting](09-accounting.md)).
 - **Audit-log reads are Super-Admin-only**, and no role — including the Super Admin in-app — can modify or delete audit rows. An audit trail readable or editable by the people it watches is not an audit trail.
+- **The AI assistant grants no new data access.** Every AI tool executes under the caller's own JWT against the existing RLS-scoped views and RPCs, so the rows already in this matrix bound exactly what the assistant can retrieve for each role — the model is a consumer of pre-scoped data, never an authority ([11 — AI Assistant & LLM Gateway](11-ai-llm.md)). Model and Operator get no AI surface in v1: their scope is narrow self-service, the assistant's value is operational/analytical, and excluding them shrinks the prompt-injection and cost surface. The exclusion is enforced at the database level — no permissive policies on the AI tables exist for those roles ([04 — Database Schema & RLS](04-database-erd.md)) — not just in the UI.
 
 ## 4. Maker-checker: why payout approval is Super-Admin-only
 
@@ -116,16 +122,20 @@ flowchart LR
         OPS["Ops dashboards (models, sessions, earnings, docs)"]
         PORTAL["Self-service portal (own data only)"]
         FINWS["Finance workspace (ledger, payouts, forecasts)"]
+        AICHAT["AI assistant (SA / MGR / FIN surfaces)"]
         SHARE["Share viewer (Edge Function, token-gated)"]
     end
 
     SA --> ADMIN
     SA --> OPS
     SA --> FINWS
+    SA --> AICHAT
     MGR --> OPS
+    MGR --> AICHAT
     MOD --> PORTAL
     OP --> PORTAL
     FIN --> FINWS
+    FIN --> AICHAT
     EXT --> SHARE
 ```
 

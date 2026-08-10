@@ -127,3 +127,27 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# ---------------------------------------------------------------------------
+# Node / Next.js (Freedom Studio web app)
+# ---------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+build/
+next-env.d.ts
+*.tsbuildinfo
+
+# Local env files (never commit secrets)
+.env
+.env.local
+.env*.local
+.env.development
+.env.production
+
+# Deploy / tooling
+.vercel/
+.turbo/
+coverage/
+npm-debug.log*
+yarn-error.log*

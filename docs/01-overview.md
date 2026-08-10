@@ -1,6 +1,6 @@
 # 01 — Product Overview & Requirements
 
-This document defines what the Studio Management System is, who uses it, what it must do, and — just as importantly — what it deliberately does not do. It introduces the six personas, maps them to the system's capability groups, states the non-functional priorities that shape every other design decision in this package, and fixes the product boundary. It is the entry point for requirements; the detailed designs it points to live in the sibling documents. This package is design-only: nothing described here is implied to exist yet.
+This document defines what **Freedom Studio** is, who uses it, what it must do, and — just as importantly — what it deliberately does not do. It introduces the six personas, maps them to the system's capability groups, states the non-functional priorities that shape every other design decision in this package, and fixes the product boundary. It is the entry point for requirements; the detailed designs it points to live in the sibling documents. This package is design-only: nothing described here is implied to exist yet.
 
 **Related docs:** [00 — Index & Conventions](00-index.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Document Management & Shareable Links](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md)
 
@@ -8,7 +8,7 @@ This document defines what the Studio Management System is, who uses it, what it
 
 ## 1. What the application is
 
-The Studio Management System is **back-office management software for a studio that manages adult-webcam performers ("models")**. It is the studio's internal system of record for the business side of that work: who the models and support staff are, which external platform accounts they work on, how many hours they work, what those platforms pay, how revenue is split between the studio, its models, and its operators, what each payee is owed, and whether the studio's identity and compliance paperwork is current.
+Freedom Studio is **back-office management software for a studio that manages adult-webcam performers ("models")**. It is the studio's internal system of record for the business side of that work: who the models and support staff are, which external platform accounts they work on, how many hours they work, what those platforms pay, how revenue is split between the studio, its models, and its operators, what each payee is owed, and whether the studio's identity and compliance paperwork is current.
 
 The system is designed to hold three kinds of data, and only these:
 

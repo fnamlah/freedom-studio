@@ -1,14 +1,14 @@
 # 00 — Index & Conventions
 
-This document is the entry point for the Studio Management System design-documentation package. It lists every document in the package with a one-line summary, defines the shared glossary used throughout, and records the documentation conventions — cross-referencing rules, canonical-source rules, Mermaid usage, and the package-wide design-only rule — that every other document in `docs/` follows.
+This document is the entry point for the **Freedom Studio** design-documentation package. It lists every document in the package with a one-line summary, defines the shared glossary used throughout, and records the documentation conventions — cross-referencing rules, canonical-source rules, Mermaid usage, and the package-wide design-only rule — that every other document in `docs/` follows.
 
-Related docs: [01 — Product Overview & Requirements](01-overview.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Document Management & Shareable Links](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md)
+Related docs: [01 — Product Overview & Requirements](01-overview.md) · [02 — System Architecture](02-architecture.md) · [03 — Roles & RBAC](03-roles-rbac.md) · [04 — Database Schema & RLS](04-database-erd.md) · [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) · [06 — Document Management & Shareable Links](06-documents-sharing.md) · [07 — Statistics & Dashboards](07-analytics.md) · [08 — Security & Threat Model](08-security-threat-model.md) · [09 — Accounting](09-accounting.md) · [10 — Deployment & Operations](10-deployment-operations.md) · [11 — AI Assistant & LLM Gateway](11-ai-llm.md) · [12 — File Library & AI Classification](12-file-library-classification.md)
 
 ---
 
 ## 1. What this package describes
 
-The Studio Management System is back-office management software for a studio that manages adult-webcam performers ("models"). It is **not** a streaming or content platform: no media content is ever stored. The system holds business records, identity/compliance documents, and financial data only. The product scope, personas, and non-functional priorities are defined in [01 — Product Overview & Requirements](01-overview.md).
+Freedom Studio is back-office management software for a studio that manages adult-webcam performers ("models"). It is **not** a streaming or content platform: no media content is ever stored. The system holds business records, identity/compliance documents, and financial data only. The product scope, personas, and non-functional priorities are defined in [01 — Product Overview & Requirements](01-overview.md).
 
 The security stance stated there applies to every document in this package and should be read as a package-wide invariant:
 
@@ -33,10 +33,11 @@ The security stance stated there applies to every document in this package and s
 | 09 | [Accounting: Splits, Ledger, Payouts & Forecasting](09-accounting.md) | Commission-scheme resolution, the append-only polymorphic-payee ledger, the maker-checker payout/settlement flow, payee statements, and the forecasting design. |
 | 10 | [Deployment & Operations](10-deployment-operations.md) | Environments and CI/CD pipeline, MCP-driven provisioning checklist, configuration and env-var inventory, and operational runbooks. |
 | 11 | [AI Assistant & LLM Gateway](11-ai-llm.md) | The server-side LLM gateway switchable between Kimi K3 and GLM 5.2, the whitelisted RLS-scoped tool registry, the aggregates-only redaction boundary, pgvector semantic search, and AI market reports. |
+| 12 | [File Library & AI Classification](12-file-library-classification.md) | The org-wide file library (its own table and private bucket, separate from compliance documents), the **canonical** `doc_categories` / `library_files` schema, the classify → suggest → human-confirm pipeline and its batch loop, and the **boxed policy carve-out** that lets library file contents — and only those — reach an LLM provider. |
 
 ### Reading order
 
-Documents are written to be read in numerical order: 01–02 establish product and architecture, 03–05 establish identity and authorization, 06–08 cover documents, analytics, and the threat model, and 09–11 close with accounting, operations, and the AI layer. Two ordering notes matter: **[09 — Accounting](09-accounting.md) extends 03, 04, and 07 with the accounting module** (operator roles and capabilities, ledger/payout tables, and accounting-driven charts respectively) — read it after [07 — Statistics & Dashboards](07-analytics.md) so that the roles, schema, and analytics surfaces it builds on are already familiar. Likewise, **[11 — AI Assistant & LLM Gateway](11-ai-llm.md) extends 02, 03, 04, 07, and 08 with the AI layer** — read it last, after everything it builds on.
+Documents are written to be read in numerical order: 01–02 establish product and architecture, 03–05 establish identity and authorization, 06–08 cover documents, analytics, and the threat model, and 09–11 close with accounting, operations, and the AI layer. Two ordering notes matter: **[09 — Accounting](09-accounting.md) extends 03, 04, and 07 with the accounting module** (operator roles and capabilities, ledger/payout tables, and accounting-driven charts respectively) — read it after [07 — Statistics & Dashboards](07-analytics.md) so that the roles, schema, and analytics surfaces it builds on are already familiar. Likewise, **[11 — AI Assistant & LLM Gateway](11-ai-llm.md) extends 02, 03, 04, 07, and 08 with the AI layer** — read it before [12](12-file-library-classification.md), which closes the package by adding the file library and the one bounded exception to 11's outbound-data policy.
 
 ## 4. Glossary
 
@@ -64,6 +65,9 @@ Documents are written to be read in numerical order: 01–02 establish product a
 | **Redaction chokepoint** | The single module through which every provider-bound payload passes, enforcing the aggregates-only policy via per-tool allowlist projection, a global field blocklist, and best-effort free-text scrubbing. |
 | **Embedding / pgvector** | An embedding is a numeric vector representation of text that enables semantic (similarity) search; pgvector is the Postgres extension that stores such vectors and indexes them for nearest-neighbor queries. |
 | **Prompt injection** | An attack in which untrusted text entering the model's context (e.g. a stored note) instructs the LLM to misuse its tools or exfiltrate data. Mitigated by the whitelisted read-only tool registry, caller-scoped RLS execution, and the redaction chokepoint. |
+| **File library** | The studio's own org-wide, folder-organized document store (`library_files` + the private `library` bucket), holding operating paperwork such as statements, receipts, contracts and policies. Distinct in table, bucket and purpose from the model compliance documents of [06](06-documents-sharing.md); specified in [12](12-file-library-classification.md). |
+| **Doc category** | An entry in the `doc_categories` vocabulary under which a library file is filed. Its `description` is handed verbatim to the classifier as the category's definition, so the vocabulary is also prompt text; `ai_enabled = false` marks a category the classifier may never suggest. |
+| **Classification channel** | The single, named path in the redaction chokepoint through which library **file contents** may cross to an LLM provider — the one documented exception to the aggregates-only policy, scoped to the `library` bucket, opt-out per file and per category, and audited and metered on every crossing ([12 §6](12-file-library-classification.md)). Compliance documents never use it. |
 
 ## 5. Documentation conventions
 
@@ -71,7 +75,7 @@ The following conventions bind every document in this package.
 
 ### 5.1 Structure
 
-- Files live in `docs/` and are numbered `00-index.md` through `11-ai-llm.md`.
+- Files live in `docs/` and are numbered `00-index.md` through `12-file-library-classification.md`.
 - Every document starts with an H1 title, a one-paragraph scope statement, and a **Related docs** line linking sibling documents by relative path.
 - Documents cross-reference each other **by number and link** (e.g. "see [04 — Database Schema & RLS](04-database-erd.md)"), never by restating the referenced content.
 
@@ -82,7 +86,8 @@ To keep the package free of drift, certain content has exactly one home. Other d
 | Canonical content | Lives only in | Everyone else |
 |---|---|---|
 | Role capabilities (the authoritative capability matrix) | [03 — Roles & RBAC](03-roles-rbac.md) | Links to 03; 04's RLS matrix is derived from it |
-| Table and column definitions (full schema) | [04 — Database Schema & RLS](04-database-erd.md) | Links to 04 |
+| Table and column definitions (full schema) | [04 — Database Schema & RLS](04-database-erd.md) | Links to 04 — **except** the two library tables below, which postdate it |
+| `doc_categories` / `library_files` columns, the `library` bucket policies, and the classification policy carve-out | [12 — File Library & AI Classification](12-file-library-classification.md) | Links to 12, including 04 and 11 |
 | The AAL2 RESTRICTIVE policy snippet (exact SQL) | [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) | References it, including 04 |
 | The AI tool registry & redaction blocklist | [11 — AI Assistant & LLM Gateway](11-ai-llm.md) | Links to 11 |
 

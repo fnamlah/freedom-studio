@@ -15,11 +15,25 @@ const securityHeaders = [
   { key: "X-DNS-Prefetch-Control", value: "off" },
 ];
 
+// The only anonymous surface is the share-view Edge Function (docs/06 §5.3).
+// Route /share/:token to it so shareable document links resolve without ever
+// exposing a Supabase URL to the recipient. The Supabase project URL is public.
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
+  },
+  async rewrites() {
+    if (!supabaseUrl) return [];
+    return [
+      {
+        source: "/share/:token",
+        destination: `${supabaseUrl}/functions/v1/share-view/:token`,
+      },
+    ];
   },
 };
 

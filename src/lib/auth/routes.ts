@@ -33,6 +33,17 @@ export const ANONYMOUS_ALLOWED_PATHS: readonly string[] = [
   AUTH_ROUTES.callback,
 ];
 
+/**
+ * The anonymous public share surface. Requests here are rewritten to the
+ * share-view Edge Function (next.config.ts); token validation, rate limiting
+ * and the uniform 404 all live in that function (docs/06 §5).
+ */
+export const SHARE_PREFIX = "/share";
+
+export function isSharePath(pathname: string): boolean {
+  return pathname === SHARE_PREFIX || pathname.startsWith(`${SHARE_PREFIX}/`);
+}
+
 export function isAuthPath(pathname: string): boolean {
   return pathname === AUTH_PREFIX || pathname.startsWith(`${AUTH_PREFIX}/`);
 }

@@ -60,8 +60,10 @@ const uploadMetaSchema = z.object({
 const categorizeSchema = z.object({
   file_id: uuid,
   decision: z.enum(["confirm", "override"]),
+  // Absent (confirm sends no category) and blank both normalize to null —
+  // `nullable()` alone rejected `undefined`, which broke every confirm.
   category_id: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+    (v) => (v === undefined || (typeof v === "string" && v.trim() === "") ? null : v),
     uuid.nullable(),
   ),
 });

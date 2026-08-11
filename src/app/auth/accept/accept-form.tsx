@@ -49,16 +49,36 @@ export function AcceptForm() {
     void (async () => {
       const supabase = createBrowserSupabase();
       const url = new URL(window.location.href);
+      const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
 
-      const errorDescription = url.searchParams.get("error_description");
+      // GoTrue reports verify failures in the URL FRAGMENT (implicit-style
+      // transport), not the query string — check both.
+      const errorDescription =
+        url.searchParams.get("error_description") ?? hashParams.get("error_description");
       if (errorDescription) {
         setError(errorDescription);
         setPhase("no_session");
         return;
       }
 
-      // Code-exchange fallback for the PKCE link flow. The implicit (hash) flow
-      // is auto-detected by the browser client on creation, so this is defensive.
+      // Invite links redirect here with implicit-style hash tokens. The browser
+      // client is configured for the PKCE flow (@supabase/ssr hardcodes it), and
+      // auth-js REFUSES to auto-ingest an implicit callback on a PKCE client —
+      // so the session must be established explicitly, then the tokens scrubbed
+      // from the URL so they never linger in history.
+      const accessToken = hashParams.get("access_token");
+      const refreshToken = hashParams.get("refresh_token");
+      if (accessToken && refreshToken) {
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (!sessionError) {
+          window.history.replaceState(null, "", url.pathname + url.search);
+        }
+      }
+
+      // Code-exchange fallback for the PKCE link flow.
       const code = url.searchParams.get("code");
       if (code) {
         try {

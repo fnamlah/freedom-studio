@@ -154,3 +154,8 @@ yarn-error.log*
 
 # JetBrains IDE
 .idea/
+
+# Playwright E2E
+e2e/.state/
+playwright-report/
+test-results/

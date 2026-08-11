@@ -12,6 +12,13 @@ import {
 } from "recharts";
 
 import {
+  resolveAxisFormat,
+  resolveValueFormat,
+  type AxisFormat,
+  type ValueFormat,
+} from "./formats";
+
+import {
   ChartEmpty,
   ChartFrame,
   ChartTooltipContent,
@@ -39,9 +46,9 @@ export type LineChartCardProps = Omit<ChartFrameProps, "children"> & {
   series: readonly ChartSeries[];
   height?: number;
   /** Formats tooltip values and the y axis (e.g. `(v) => money(v)`). */
-  valueFormatter?: (value: number) => string;
+  valueFormat?: ValueFormat;
   /** Formats x-axis ticks and the tooltip heading (e.g. `(v) => month(v)`). */
-  xFormatter?: (value: string | number) => string;
+  xFormat?: AxisFormat;
   emptyMessage?: string;
   /** Connects across null datapoints instead of breaking the line. */
   connectNulls?: boolean;
@@ -70,12 +77,14 @@ export function LineChartCard({
   xKey,
   series,
   height = 280,
-  valueFormatter,
-  xFormatter,
+  valueFormat,
+  xFormat,
   emptyMessage,
   connectNulls = false,
   ...frame
 }: LineChartCardProps) {
+  const valueFormatter = resolveValueFormat(valueFormat);
+  const xFormatter = resolveAxisFormat(xFormat);
   const hasData = data.length > 0 && series.length > 0;
 
   return (

@@ -15,4 +15,7 @@ export const moonshotAdapter: ProviderAdapter = createOpenAiCompatibleAdapter({
   id: "moonshot",
   baseUrl: MOONSHOT_BASE_URL,
   apiKeyEnv: "MOONSHOT_API_KEY",
+  // Kimi K3 accepts ONLY temperature=1 and 400s on anything else — omit the
+  // field entirely and let the provider default apply (discovered in E2E).
+  mapTemperature: () => undefined,
 });

@@ -29,9 +29,7 @@ export const metadata: Metadata = { title: "Dashboard" };
 
 /* ------------------------------------------------------------- formatters */
 
-const fmtMonth = (value: string | number) => month(String(value));
 const fmtNumber = (value: number) => number(value, { decimals: Number.isInteger(value) ? 0 : 1 });
-const fmtPercent = (value: number) => percent(value);
 const fmtHoursTile = (value: number) => `${number(value, { decimals: 1 })}h`;
 
 function moneyFmt(currency: string) {
@@ -157,8 +155,8 @@ function StudioDashboard({
           { key: "net", label: "Net" },
           { key: "gross", label: "Gross" },
         ]}
-        valueFormatter={fmtMoney}
-        xFormatter={fmtMonth}
+        valueFormat={{ money: data.currency }}
+        xFormat="month"
       />
 
       <Grid>
@@ -166,13 +164,13 @@ function StudioDashboard({
           title="Earnings share by model"
           description="Net revenue mix across models (last 12 months)."
           data={data.shareByModel}
-          valueFormatter={fmtMoney}
+          valueFormat={{ money: data.currency }}
         />
         <PieChartCard
           title="Earnings share by platform"
           description="Net revenue mix across platforms (last 12 months)."
           data={data.shareByPlatform}
-          valueFormatter={fmtMoney}
+          valueFormat={{ money: data.currency }}
         />
         <LineChartCard
           title="Hours & sessions"
@@ -183,8 +181,8 @@ function StudioDashboard({
             { key: "hours", label: "Hours" },
             { key: "sessions", label: "Sessions" },
           ]}
-          valueFormatter={fmtNumber}
-          xFormatter={fmtMonth}
+          valueFormat="number"
+          xFormat="month"
         />
         <GroupedBarCard
           title="Model comparison"
@@ -192,7 +190,7 @@ function StudioDashboard({
           data={data.modelComparison.data}
           xKey="name"
           series={data.modelComparison.series}
-          valueFormatter={fmtMoney}
+          valueFormat={{ money: data.currency }}
         />
         <LineChartCard
           title="Projected vs actual net"
@@ -203,8 +201,8 @@ function StudioDashboard({
             { key: "actual", label: "Actual" },
             { key: "predicted", label: "Projected", dash: "6 4" },
           ]}
-          valueFormatter={fmtMoney}
-          xFormatter={fmtMonth}
+          valueFormat={{ money: data.currency }}
+          xFormat="month"
           connectNulls
         />
         <DonutChartCard
@@ -212,7 +210,7 @@ function StudioDashboard({
           description="Studio-wide document status."
           data={compliance.slices}
           colorByName={COMPLIANCE_COLORS}
-          valueFormatter={fmtNumber}
+          valueFormat="number"
           centerValue={fmtNumber(compliance.total)}
           centerLabel="documents"
         />
@@ -225,8 +223,8 @@ function StudioDashboard({
         data={data.forecastBreakdown.data}
         xKey="month"
         series={data.forecastBreakdown.series}
-        valueFormatter={fmtMoney}
-        xFormatter={fmtMonth}
+        valueFormat={{ money: data.currency }}
+        xFormat="month"
       />
 
       <StackedBarCard
@@ -236,8 +234,8 @@ function StudioDashboard({
         data={data.payouts.data}
         xKey="month"
         series={data.payouts.series}
-        valueFormatter={fmtMoney}
-        xFormatter={fmtMonth}
+        valueFormat={{ money: data.currency }}
+        xFormat="month"
       />
 
       {governance ? (
@@ -246,7 +244,7 @@ function StudioDashboard({
             title="Split distribution"
             description="Net revenue split across studio, model and operator pools."
             data={data.split}
-            valueFormatter={fmtMoney}
+            valueFormat={{ money: data.currency }}
           />
           <GroupedBarCard
             title="Forecast accuracy"
@@ -254,8 +252,8 @@ function StudioDashboard({
             data={data.accuracy}
             xKey="month"
             series={[{ key: "error", label: "Error %" }]}
-            valueFormatter={fmtPercent}
-            xFormatter={fmtMonth}
+            valueFormat="percent"
+            xFormat="month"
           />
         </Grid>
       ) : null}
@@ -264,7 +262,7 @@ function StudioDashboard({
         <HorizontalBarCard
           title="Payee outstanding balances"
           data={data.balances}
-          valueFormatter={fmtMoney}
+          valueFormat={{ money: data.currency }}
           highlightNegative
           emptyMessage="No outstanding balances"
         />
@@ -314,8 +312,8 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
           { key: "net", label: "Net" },
           { key: "gross", label: "Gross" },
         ]}
-        valueFormatter={fmtMoney}
-        xFormatter={fmtMonth}
+        valueFormat={{ money: data.currency }}
+        xFormat="month"
       />
 
       <Grid>
@@ -323,7 +321,7 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
           title="Split distribution"
           description="Net revenue split across studio, model and operator pools."
           data={data.split}
-          valueFormatter={fmtMoney}
+          valueFormat={{ money: data.currency }}
         />
         <LineChartCard
           title="Projected vs actual net"
@@ -334,8 +332,8 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
             { key: "actual", label: "Actual" },
             { key: "predicted", label: "Projected", dash: "6 4" },
           ]}
-          valueFormatter={fmtMoney}
-          xFormatter={fmtMonth}
+          valueFormat={{ money: data.currency }}
+          xFormat="month"
           connectNulls
         />
       </Grid>
@@ -347,8 +345,8 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
         data={data.forecastBreakdown.data}
         xKey="month"
         series={data.forecastBreakdown.series}
-        valueFormatter={fmtMoney}
-        xFormatter={fmtMonth}
+        valueFormat={{ money: data.currency }}
+        xFormat="month"
       />
 
       <Grid>
@@ -358,13 +356,13 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
           data={data.accuracy}
           xKey="month"
           series={[{ key: "error", label: "Error %" }]}
-          valueFormatter={fmtPercent}
-          xFormatter={fmtMonth}
+          valueFormat="percent"
+          xFormat="month"
         />
         <HorizontalBarCard
           title="Payee outstanding balances"
           data={data.balances}
-          valueFormatter={fmtMoney}
+          valueFormat={{ money: data.currency }}
           highlightNegative
           emptyMessage="No outstanding balances"
         />
@@ -377,8 +375,8 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
         data={data.payouts.data}
         xKey="month"
         series={data.payouts.series}
-        valueFormatter={fmtMoney}
-        xFormatter={fmtMonth}
+        valueFormat={{ money: data.currency }}
+        xFormat="month"
       />
 
       <Card>
@@ -422,8 +420,8 @@ function ModelDashboard({ data }: { data: Awaited<ReturnType<typeof loadModelDas
           { key: "net", label: "Net" },
           { key: "gross", label: "Gross" },
         ]}
-        valueFormatter={fmtMoney}
-        xFormatter={fmtMonth}
+        valueFormat={{ money: data.currency }}
+        xFormat="month"
       />
 
       <Grid>
@@ -431,7 +429,7 @@ function ModelDashboard({ data }: { data: Awaited<ReturnType<typeof loadModelDas
           title="Platform share"
           description="Your net earnings mix across platforms."
           data={data.shareByPlatform}
-          valueFormatter={fmtMoney}
+          valueFormat={{ money: data.currency }}
         />
         <LineChartCard
           title="Hours & sessions"
@@ -442,15 +440,15 @@ function ModelDashboard({ data }: { data: Awaited<ReturnType<typeof loadModelDas
             { key: "hours", label: "Hours" },
             { key: "sessions", label: "Sessions" },
           ]}
-          valueFormatter={fmtNumber}
-          xFormatter={fmtMonth}
+          valueFormat="number"
+          xFormat="month"
         />
         <DonutChartCard
           title="Document compliance"
           description="Your document status."
           data={compliance.slices}
           colorByName={COMPLIANCE_COLORS}
-          valueFormatter={fmtNumber}
+          valueFormat="number"
           centerValue={fmtNumber(compliance.total)}
           centerLabel="documents"
         />
@@ -460,8 +458,8 @@ function ModelDashboard({ data }: { data: Awaited<ReturnType<typeof loadModelDas
           data={data.payouts.data}
           xKey="month"
           series={data.payouts.series}
-          valueFormatter={fmtMoney}
-          xFormatter={fmtMonth}
+          valueFormat={{ money: data.currency }}
+          xFormat="month"
         />
       </Grid>
 
@@ -498,8 +496,8 @@ function OperatorDashboard({ data }: { data: Awaited<ReturnType<typeof loadOpera
         data={data.shareTrend}
         xKey="month"
         series={[{ key: "share", label: "Share credited" }]}
-        valueFormatter={fmtMoney}
-        xFormatter={fmtMonth}
+        valueFormat={{ money: data.currency }}
+        xFormat="month"
       />
 
       <StackedBarCard
@@ -508,8 +506,8 @@ function OperatorDashboard({ data }: { data: Awaited<ReturnType<typeof loadOpera
         data={data.payouts.data}
         xKey="month"
         series={data.payouts.series}
-        valueFormatter={fmtMoney}
-        xFormatter={fmtMonth}
+        valueFormat={{ money: data.currency }}
+        xFormat="month"
       />
 
       <Card>

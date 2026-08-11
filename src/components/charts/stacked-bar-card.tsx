@@ -12,6 +12,13 @@ import {
 } from "recharts";
 
 import {
+  resolveAxisFormat,
+  resolveValueFormat,
+  type AxisFormat,
+  type ValueFormat,
+} from "./formats";
+
+import {
   ChartEmpty,
   ChartFrame,
   ChartTooltipContent,
@@ -37,8 +44,8 @@ export type StackedBarCardProps = Omit<ChartFrameProps, "children"> & {
   /** Stack segments, bottom to top, in fixed slot order. */
   series: readonly ChartSeries[];
   height?: number;
-  valueFormatter?: (value: number) => string;
-  xFormatter?: (value: string | number) => string;
+  valueFormat?: ValueFormat;
+  xFormat?: AxisFormat;
   emptyMessage?: string;
   /** Adds a Total row to the tooltip. Default true — the point of a stack. */
   showTotal?: boolean;
@@ -58,12 +65,14 @@ export function StackedBarCard({
   xKey,
   series,
   height = 280,
-  valueFormatter,
-  xFormatter,
+  valueFormat,
+  xFormat,
   emptyMessage,
   showTotal = true,
   ...frame
 }: StackedBarCardProps) {
+  const valueFormatter = resolveValueFormat(valueFormat);
+  const xFormatter = resolveAxisFormat(xFormat);
   const hasData = data.length > 0 && series.length > 0;
 
   return (

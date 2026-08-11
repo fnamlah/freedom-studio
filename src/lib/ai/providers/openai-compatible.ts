@@ -31,6 +31,12 @@ export interface OpenAiCompatibleConfig {
   baseUrl: string;
   /** Name of the env var holding the API key, e.g. `MOONSHOT_API_KEY`. */
   apiKeyEnv: string;
+  /**
+   * Provider-specific temperature normalization. Some models constrain the
+   * accepted range (Kimi K3 rejects anything but 1); returning `undefined`
+   * omits the field so the provider's default applies.
+   */
+  mapTemperature?: (requested: number) => number | undefined;
 }
 
 /* ------------------------------------------------------- wire-format shapes */
@@ -102,7 +108,11 @@ function normalizeToolCalls(calls: WireToolCall[] | undefined): ToolCall[] {
   }));
 }
 
-function buildBody(opts: ChatOptions, stream: boolean): Record<string, unknown> {
+function buildBody(
+  config: OpenAiCompatibleConfig,
+  opts: ChatOptions,
+  stream: boolean,
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: opts.model,
     messages: opts.messages,
@@ -112,7 +122,12 @@ function buildBody(opts: ChatOptions, stream: boolean): Record<string, unknown> 
     body.tools = opts.tools;
     body.tool_choice = "auto";
   }
-  if (typeof opts.temperature === "number") body.temperature = opts.temperature;
+  if (typeof opts.temperature === "number") {
+    const temperature = config.mapTemperature
+      ? config.mapTemperature(opts.temperature)
+      : opts.temperature;
+    if (typeof temperature === "number") body.temperature = temperature;
+  }
   if (typeof opts.maxTokens === "number") body.max_tokens = opts.maxTokens;
   // Ask OpenAI-compatible servers to include a final usage chunk while streaming.
   if (stream) body.stream_options = { include_usage: true };
@@ -149,7 +164,7 @@ async function chatOnce(
       "Content-Type": "application/json",
       Authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify(buildBody(opts, false)),
+    body: JSON.stringify(buildBody(config, opts, false)),
     signal: opts.signal,
   });
   if (!res.ok) throw await toProviderError(config, res);
@@ -176,7 +191,7 @@ async function* chatStream(
       "Content-Type": "application/json",
       Authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify(buildBody(opts, true)),
+    body: JSON.stringify(buildBody(config, opts, true)),
     signal: opts.signal,
   });
   if (!res.ok) throw await toProviderError(config, res);

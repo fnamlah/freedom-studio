@@ -3,6 +3,11 @@
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import {
+  resolveValueFormat,
+  type ValueFormat,
+} from "./formats";
+
+import {
   ChartEmpty,
   ChartFrame,
   ChartTooltipContent,
@@ -21,7 +26,7 @@ export type PieChartCardProps = Omit<ChartFrameProps, "children"> & {
   /** Slices. Values must be non-negative; the component does not normalise them. */
   data: readonly SliceDatum[];
   height?: number;
-  valueFormatter?: (value: number) => string;
+  valueFormat?: ValueFormat;
   emptyMessage?: string;
   /** Max slices before the tail folds into "Other". Part-to-whole reads badly past 6. */
   maxSlices?: number;
@@ -44,7 +49,7 @@ export type PieChartCardProps = Omit<ChartFrameProps, "children"> & {
 export function PieChartCard({
   data,
   height = 280,
-  valueFormatter,
+  valueFormat,
   emptyMessage,
   maxSlices = 6,
   colorByName,
@@ -53,6 +58,7 @@ export function PieChartCard({
   centerValue,
   ...frame
 }: PieChartCardProps) {
+  const valueFormatter = resolveValueFormat(valueFormat);
   const slices = foldToTop(data, maxSlices);
   const total = slices.reduce((sum, slice) => sum + (Number(slice.value) || 0), 0);
   const hasData = slices.length > 0 && total > 0;

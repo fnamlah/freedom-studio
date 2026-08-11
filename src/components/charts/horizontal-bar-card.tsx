@@ -13,6 +13,11 @@ import {
 } from "recharts";
 
 import {
+  resolveValueFormat,
+  type ValueFormat,
+} from "./formats";
+
+import {
   ChartEmpty,
   ChartFrame,
   ChartTooltipContent,
@@ -40,7 +45,7 @@ export type HorizontalBarDatum = {
 export type HorizontalBarCardProps = Omit<ChartFrameProps, "children"> & {
   data: readonly HorizontalBarDatum[];
   height?: number;
-  valueFormatter?: (value: number) => string;
+  valueFormat?: ValueFormat;
   emptyMessage?: string;
   /**
    * A single measure across nominal categories is ONE series → one colour
@@ -65,7 +70,7 @@ export type HorizontalBarCardProps = Omit<ChartFrameProps, "children"> & {
 export function HorizontalBarCard({
   data,
   height,
-  valueFormatter,
+  valueFormat,
   emptyMessage,
   colorPerCategory = false,
   highlightNegative = false,
@@ -73,6 +78,7 @@ export function HorizontalBarCard({
   categoryWidth = 120,
   ...frame
 }: HorizontalBarCardProps) {
+  const valueFormatter = resolveValueFormat(valueFormat);
   const hasData = data.length > 0;
   const resolvedHeight = height ?? Math.max(180, data.length * 34 + 48);
 

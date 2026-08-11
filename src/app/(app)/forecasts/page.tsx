@@ -260,8 +260,8 @@ export default async function ForecastsPage() {
               xKey="month"
               series={lineSeries}
               connectNulls
-              valueFormatter={(v) => money(v)}
-              xFormatter={(v) => month(String(v))}
+              valueFormat="money"
+              xFormat="month"
               emptyMessage="No earnings recorded yet."
             />
           </div>
@@ -275,8 +275,8 @@ export default async function ForecastsPage() {
               data={breakdownData}
               xKey="month"
               series={breakdownSeries}
-              valueFormatter={(v) => money(v)}
-              xFormatter={(v) => month(String(v))}
+              valueFormat="money"
+              xFormat="month"
               emptyMessage="No projection to break down yet."
             />
 
@@ -288,8 +288,8 @@ export default async function ForecastsPage() {
                 xKey="month"
                 series={accuracySeries}
                 showTotal={false}
-                valueFormatter={(v) => percent(v, { signed: true })}
-                xFormatter={(v) => month(String(v))}
+                valueFormat="percent-signed"
+                xFormat="month"
                 emptyMessage="No snapshots scored yet — snapshot a forecast, then wait for its month to close."
               />
             ) : null}

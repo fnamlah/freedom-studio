@@ -5,6 +5,7 @@ import {
   AUTH_ROUTES,
   isAnonymousAllowed,
   isAuthPath,
+  isSharePath,
   loginWithNext,
 } from "@/lib/auth/routes";
 
@@ -52,6 +53,16 @@ export async function middleware(request: NextRequest) {
   // Without Supabase configured there is no session to evaluate; still ship the
   // security headers so a misconfigured deploy is not also an unprotected one.
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    return applySecurityHeaders(response, nonce);
+  }
+
+  // /share/:token is the anonymous share surface, rewritten to the share-view
+  // edge function. Token validation, rate limiting and the uniform 404 live in
+  // that function; evaluating a session here would wrongly gate anonymous
+  // recipients (and drag a signed-in AAL1 visitor into an MFA challenge
+  // mid-click). Skipped before the Supabase client to avoid a pointless Auth
+  // round-trip per view; headers are still stamped.
+  if (isSharePath(pathname)) {
     return applySecurityHeaders(response, nonce);
   }
 

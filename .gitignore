@@ -151,3 +151,6 @@ next-env.d.ts
 coverage/
 npm-debug.log*
 yarn-error.log*
+
+# JetBrains IDE
+.idea/

@@ -12,20 +12,30 @@ have (secret keys, Auth toggles), so they are documented here for you to run.
   - Security advisors: **6 residual warnings**, all the RLS helper functions that must stay executable by `authenticated` for policy evaluation — safe by design (they expose only the caller's own session facts).
   - Edge functions deployed and ACTIVE: `share-view` (anonymous share links) and `bootstrap-admin` (one-time admin invite).
   - A **pending Super Admin invitation for `faisal@falconmind.co`** is already staged in the `invitations` table.
-- **App**: full Next.js 15 build — every route typechecks and builds; redactor egress tests pass.
+- **App**: full Next.js 15 build on `main` — every route typechecks and builds; the 9 redactor egress tests pass.
+- **Runtime smoke test passed** (production server booted locally, Supabase deliberately unreachable):
+  - Protected routes (`/dashboard`, `/ledger`, `/library`, `/admin/users`) all **307 → `/auth/login`** — auth **fails closed** when the backend is unreachable, rather than falling open.
+  - `/api/ai/chat` and `/api/ai/classify` return **401** unauthenticated (never 200, never 500).
+  - All security headers present, including a **unique per-request CSP nonce**, `frame-ancestors 'none'`, and `connect-src` scoped to this Supabase project only.
+  - Zero errors or unhandled rejections in the server log.
 
 ## Step 0 — Deploy the app to Vercel (Git import)
 
-The app is a 184-file Next.js codebase, which is too large to push through the
-Vercel MCP's inline upload — so deploy it the standard way, via Git. This also
-gives you automatic redeploys on every future push.
+**Everything is already on `main`** — importing the repo is all that's needed; no
+branch configuration.
 
-1. Rename the GitHub repo to `freedom-studio` first if you want the final name (Step 5), or import it as-is.
-2. Vercel dashboard → **Add New… → Project → Import** your GitHub repo (`fnamlah/100-movies-to-watch`, or `freedom-studio` after rename).
-   - If the branch isn't merged to `main` yet, set the project's **Production Branch** to `claude/studio-management-diagram-waegdz`, or merge the PR to `main` first.
-3. Framework preset auto-detects as **Next.js**. Leave build/output settings at defaults.
-4. Add the environment variables in Step 1 **before** the first deploy (the `NEXT_PUBLIC_*` ones are needed at build time).
-5. Deploy. Note the production URL, then set `APP_BASE_URL` to it (Step 1) and redeploy once.
+Why this and not an automated deploy: `api.vercel.com` is blocked by this
+environment's egress proxy (403 on CONNECT), so neither the Vercel CLI nor the
+REST API can reach Vercel from the build sandbox — a `VERCEL_TOKEN` would not
+help. The Vercel MCP's only deploy tool uploads every file inline in a single
+call (~184 files / 1.1 MB / ~344K tokens), far beyond the hard limit. Git import
+is the correct transport for an app this size, and it gives you automatic
+redeploys on every future push.
+
+1. Vercel dashboard → **Add New… → Project → Import** `fnamlah/100-movies-to-watch` (or `freedom-studio` if you rename first — Step 5).
+2. Framework preset auto-detects as **Next.js**. Leave build/output settings at defaults; production branch is `main`.
+3. Add the environment variables in Step 1 **before** the first deploy (the `NEXT_PUBLIC_*` ones are needed at build time).
+4. Deploy. Note the production URL, then set `APP_BASE_URL` to it and redeploy once.
 
 ## Step 1 — Environment variables (Vercel project → Settings → Environment Variables)
 
@@ -75,8 +85,15 @@ The invitation is already staged. Simplest path:
 ## Step 5 — Rename the GitHub repo (optional but recommended)
 
 GitHub Settings → rename `100-movies-to-watch` → `freedom-studio`. This preserves
-history, the branch, and redirects. (Repo creation via the integration was not
-permitted, so a rename is the clean way to the final name.)
+history, branches, the PR, and sets up redirects (so an existing Vercel import
+keeps working).
+
+Creating `fnamlah/freedom-studio` directly was attempted and is not possible from
+this environment: the GitHub integration returns `403 Resource not accessible by
+integration` on repo creation, and the session is bound to its configured
+repository ("sessions are bound to their configured repositories"). The rename is
+a 10-second dashboard action and gives a better result anyway — one repo, full
+history, no re-import.
 
 ## Post-go-live optimizations (not required)
 

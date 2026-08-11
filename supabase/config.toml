@@ -1,0 +1,37 @@
+# =============================================================================
+# Supabase CLI configuration — Freedom Studio
+# -----------------------------------------------------------------------------
+# Minimal on purpose: this file exists to pin the two Edge Function deployments.
+# Everything else (Auth settings, buckets, RLS) is provisioned per the checklists
+# in docs/10-deployment-operations.md and by the SQL migrations in
+# supabase/migrations, so nothing here duplicates a decision made elsewhere.
+#
+# Replace `project_id` with the real project ref before linking:
+#   supabase link --project-ref <ref>
+# =============================================================================
+
+project_id = "freedom-studio"
+
+# -----------------------------------------------------------------------------
+# Edge Functions
+# -----------------------------------------------------------------------------
+# Both functions run with JWT verification OFF, which is a deliberate, bounded
+# decision rather than a convenience:
+#
+#   share-view      — its callers are anonymous external viewers by definition
+#                     (docs/06 §5.3). Authorization is the hashed, expiring,
+#                     view-limited share token, checked inside the function.
+#
+#   bootstrap-admin — runs before any user, and therefore any JWT, can exist
+#                     (docs/05 §3). Authorization is the BOOTSTRAP_TOKEN bearer
+#                     secret, compared in constant time; the function is
+#                     tombstoned immediately after its single use.
+#
+# No other function may be added with verify_jwt = false without a security
+# review: these two are the entire unauthenticated surface of the system.
+
+[functions.share-view]
+verify_jwt = false
+
+[functions.bootstrap-admin]
+verify_jwt = false

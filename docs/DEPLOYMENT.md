@@ -14,6 +14,19 @@ have (secret keys, Auth toggles), so they are documented here for you to run.
   - A **pending Super Admin invitation for `faisal@falconmind.co`** is already staged in the `invitations` table.
 - **App**: full Next.js 15 build — every route typechecks and builds; redactor egress tests pass.
 
+## Step 0 — Deploy the app to Vercel (Git import)
+
+The app is a 184-file Next.js codebase, which is too large to push through the
+Vercel MCP's inline upload — so deploy it the standard way, via Git. This also
+gives you automatic redeploys on every future push.
+
+1. Rename the GitHub repo to `freedom-studio` first if you want the final name (Step 5), or import it as-is.
+2. Vercel dashboard → **Add New… → Project → Import** your GitHub repo (`fnamlah/100-movies-to-watch`, or `freedom-studio` after rename).
+   - If the branch isn't merged to `main` yet, set the project's **Production Branch** to `claude/studio-management-diagram-waegdz`, or merge the PR to `main` first.
+3. Framework preset auto-detects as **Next.js**. Leave build/output settings at defaults.
+4. Add the environment variables in Step 1 **before** the first deploy (the `NEXT_PUBLIC_*` ones are needed at build time).
+5. Deploy. Note the production URL, then set `APP_BASE_URL` to it (Step 1) and redeploy once.
+
 ## Step 1 — Environment variables (Vercel project → Settings → Environment Variables)
 
 | Name | Value | Secret? |
@@ -26,11 +39,12 @@ have (secret keys, Auth toggles), so they are documented here for you to run.
 | `ZHIPU_API_KEY` | your Zhipu (GLM 5.2) key — optional | **YES** |
 | `SHARE_TOKEN_PEPPER` | optional; if set, must be the **same** value in the `share-view` Edge Function secret | **YES** |
 
-The two `NEXT_PUBLIC_*` values are baked into the deploy, so the app is usable
-immediately; the **service-role key is required** for admin actions, auditing,
-AI usage metering, and invitations to work — add it and redeploy. The LLM keys
-are optional: without them, AI surfaces show "provider not configured" and
-everything else works.
+Set the two `NEXT_PUBLIC_*` values (public, safe in the browser) so the client
+can reach Supabase; the **service-role key is required** for admin actions,
+auditing, AI usage metering, and invitations to work. The LLM keys are optional:
+without them, AI surfaces show "provider not configured" and everything else
+works. Add all applicable vars for the **Production** environment before the
+first build.
 
 ## Step 2 — Supabase Auth settings (dashboard → Authentication)
 

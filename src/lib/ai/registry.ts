@@ -1,7 +1,7 @@
 /**
  * The whitelisted tool registry (docs/11 §4) — "runs the db" safely.
  *
- * SERVER-ONLY. Twelve read-only tools, each a thin 1:1 binding onto a SECURITY
+ * SERVER-ONLY. Thirteen read-only tools, each a thin 1:1 binding onto a SECURITY
  * INVOKER view/RPC of docs/07. Invariants:
  *   - Caller-context execution: every tool runs against the client passed in,
  *     which MUST be the caller's RLS-scoped client (never service role). Results
@@ -35,7 +35,8 @@ export type ToolName =
   | "forecast"
   | "forecast_accuracy"
   | "compliance_summary"
-  | "semantic_search";
+  | "semantic_search"
+  | "library_search";
 
 type ToolRow = Record<string, unknown>;
 
@@ -107,6 +108,15 @@ async function resolvePlatformId(
   return data?.[0]?.id ?? null;
 }
 
+/**
+ * Escape `%` and `_` so LLM-supplied search terms match literally inside an
+ * ilike pattern instead of acting as wildcards. `\` first, or the escapes
+ * would themselves be escaped.
+ */
+function escapeLike(term: string): string {
+  return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 async function modelNameMap(sb: AiSupabaseClient): Promise<Map<string, string>> {
   const { data } = await sb.from("v_model_directory").select("id, stage_name");
   const map = new Map<string, string>();
@@ -164,6 +174,12 @@ const forecastSchema = z.object({
 const forecastAccuracySchema = z.object({});
 
 const complianceSummarySchema = z.object({});
+
+const librarySearchSchema = z.object({
+  query: z.string().min(1).max(200).optional(),
+  category: z.string().min(1).max(60).optional(),
+  limit: z.coerce.number().int().min(1).max(20).default(12),
+});
 
 const semanticSearchSchema = z.object({
   query: z.string().min(1),
@@ -517,6 +533,100 @@ export const TOOLS: Record<ToolName, AiToolDef> = {
       });
       if (error) throw new Error(error.message);
       return (data ?? []) as ToolRow[];
+    },
+  },
+
+  library_search: {
+    name: "library_search",
+    description:
+      "Search the studio's file Library (training material, platform guides, scripts, business records) by name or by the AI-generated summary. Returns file metadata, category and the stored summary/key figures — never the file contents themselves.",
+    jsonSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Search term matched against file names and AI summaries. Omit to list the most recent files.",
+        },
+        category: {
+          type: "string",
+          description: "Optional category filter, by slug or name (e.g. 'training').",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20,
+          description: "Maximum files to return (default 12).",
+        },
+      },
+      additionalProperties: false,
+    },
+    execute: async (raw, sb) => {
+      const a = librarySearchSchema.parse(raw);
+
+      // Category vocabulary, resolved both ways so the model neither sees nor
+      // supplies a UUID (registry invariant).
+      const { data: cats } = await sb.from("doc_categories").select("id, slug, name");
+      const catName = new Map((cats ?? []).map((c) => [c.id, c.name] as const));
+      const wanted = a.category?.trim().toLowerCase();
+      const categoryId = wanted
+        ? ((cats ?? []).find(
+            (c) => c.slug.toLowerCase() === wanted || c.name.toLowerCase() === wanted,
+          )?.id ?? null)
+        : null;
+      if (wanted && !categoryId) return [];
+
+      const SELECT =
+        "id, name, folder_path, category_id, ai_suggested_category_id, ai_status, ai_summary, ai_key_figures, created_at";
+      const base = () => {
+        let q = sb
+          .from("library_files")
+          .select(SELECT)
+          .order("created_at", { ascending: false })
+          .limit(a.limit);
+        if (categoryId) q = q.eq("category_id", categoryId);
+        return q;
+      };
+
+      // Two separate ilike queries instead of PostgREST `.or(...)` — the or()
+      // filter string has its own comma/paren grammar that a search term could
+      // break out of; two plain filters have no such parser to confuse.
+      let rows: Array<Record<string, unknown>>;
+      if (a.query) {
+        const pattern = `%${escapeLike(a.query.trim())}%`;
+        const [byName, bySummary] = await Promise.all([
+          base().ilike("name", pattern),
+          base().ilike("ai_summary", pattern),
+        ]);
+        if (byName.error) throw new Error(byName.error.message);
+        if (bySummary.error) throw new Error(bySummary.error.message);
+        const seen = new Set<string>();
+        rows = [...(byName.data ?? []), ...(bySummary.data ?? [])]
+          .filter((r) => (seen.has(r.id as string) ? false : (seen.add(r.id as string), true)))
+          .slice(0, a.limit);
+      } else {
+        const { data, error } = await base();
+        if (error) throw new Error(error.message);
+        rows = data ?? [];
+      }
+
+      // Note the output key `name`: this is the Library DISPLAY name — a
+      // business artifact in a senior-staff-only subsystem whose full content
+      // already crosses via classificationChannel. The blocked key `file_name`
+      // guards compliance-document filenames, which can carry identity; that
+      // boundary is untouched.
+      return rows.map((r) => ({
+        name: r.name,
+        folder: r.folder_path,
+        category: r.category_id ? (catName.get(r.category_id as string) ?? null) : null,
+        suggested_category: r.ai_suggested_category_id
+          ? (catName.get(r.ai_suggested_category_id as string) ?? null)
+          : null,
+        status: r.ai_status,
+        summary: r.ai_summary,
+        key_figures: r.ai_key_figures,
+        uploaded_on: typeof r.created_at === "string" ? r.created_at.slice(0, 10) : null,
+      }));
     },
   },
 };

@@ -123,9 +123,24 @@ export const PROJECTIONS: Record<string, readonly string[]> = {
   ],
   compliance_summary: ["stage_name", "valid_count", "expiring_count", "expired_count"],
   semantic_search: ["source_type", "subject_name", "snippet", "similarity"],
+  // `name` here is the Library DISPLAY name — a business artifact (training
+  // guides, scripts) in a senior-staff-only subsystem whose content already
+  // crosses via classificationChannel. The blocked key `file_name` (compliance
+  // documents, which can carry identity in a filename) is deliberately NOT
+  // relaxed: it still strips everywhere, including from these rows.
+  library_search: [
+    "name",
+    "folder",
+    "category",
+    "suggested_category",
+    "status",
+    "summary",
+    "key_figures",
+    "uploaded_on",
+  ],
 };
 
-/** The 12 canonical tool names that have a registered projection. */
+/** The 13 canonical tool names that have a registered projection. */
 export const PROJECTED_TOOLS = Object.keys(PROJECTIONS);
 
 /** Raised when redaction cannot proceed safely — the caller must NOT send. */

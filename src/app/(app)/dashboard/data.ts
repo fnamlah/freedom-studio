@@ -366,6 +366,48 @@ function modelComparison(
   return { data, series };
 }
 
+type LibraryLiteRow = { id: string; category_id: string | null; ai_status: string };
+
+export type LibraryCard = {
+  total: number;
+  analyzed: number;
+  awaitingReview: number;
+  unreadable: number;
+  topCategories: Array<{ name: string; count: number }>;
+};
+
+/**
+ * Library knowledge-base rollup. "Analyzed" is everything the AI produced a
+ * summary state for (suggested + human-settled); "awaiting review" counts
+ * suggestions no human has confirmed or overridden yet.
+ */
+function libraryCard(
+  rows: LibraryLiteRow[],
+  cats: Array<{ id: string; name: string }>,
+): LibraryCard {
+  const byCat = new Map<string, number>();
+  let analyzed = 0;
+  let awaitingReview = 0;
+  let unreadable = 0;
+  for (const r of rows) {
+    if (r.ai_status === "suggested") {
+      analyzed += 1;
+      awaitingReview += 1;
+    } else if (r.ai_status === "confirmed" || r.ai_status === "overridden") {
+      analyzed += 1;
+    } else if (r.ai_status === "skipped" || r.ai_status === "failed") {
+      unreadable += 1;
+    }
+    if (r.category_id) byCat.set(r.category_id, (byCat.get(r.category_id) ?? 0) + 1);
+  }
+  const names = new Map(cats.map((c) => [c.id, c.name] as const));
+  const topCategories = [...byCat.entries()]
+    .map(([id, count]) => ({ name: names.get(id) ?? "Uncategorised", count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 4);
+  return { total: rows.length, analyzed, awaitingReview, unreadable, topCategories };
+}
+
 function monthTotal(rows: EarnMonthRow[], month: string) {
   let gross = 0;
   let net = 0;
@@ -429,6 +471,8 @@ export async function loadStudioDashboard(
     compliance,
     forecast,
     modelDir,
+    library,
+    libraryCats,
     split,
     accuracy,
     balances,
@@ -442,6 +486,10 @@ export async function loadStudioDashboard(
     supabase.rpc("fn_compliance_counts"),
     supabase.from("v_earnings_forecast").select("target_month, model_id, predicted_net"),
     supabase.from("v_model_directory").select("id, stage_name"),
+    // Library knowledge base — RLS scopes it to SA/MGR; other roles read zero
+    // rows and the card renders empty rather than erroring.
+    supabase.from("library_files").select("id, category_id, ai_status"),
+    supabase.from("doc_categories").select("id, name"),
     governance
       ? supabase.from("v_split_distribution").select("month, bucket, amount").gte("month", trendFrom)
       : Promise.resolve({ data: [] as SplitRow[] }),
@@ -489,6 +537,10 @@ export async function loadStudioDashboard(
     payouts: payoutStacks(payoutRows),
     payoutRows,
     compliance: complianceRow ?? { valid_count: 0, expiring_count: 0, expired_count: 0 },
+    library: libraryCard(
+      (library.data ?? []) as LibraryLiteRow[],
+      (libraryCats.data ?? []) as { id: string; name: string }[],
+    ),
     projectedVsActual: projectedVsActual(earnRows, forecastRows),
     forecastBreakdown: forecastBreakdown(forecastRows, modelNames),
     // governance-only

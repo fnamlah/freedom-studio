@@ -58,6 +58,58 @@ function complianceData(counts: {
 }
 
 /** Two-column responsive grid for chart cards. */
+/**
+ * Library knowledge-base rollup (SA/MGR studio view). Numbers come from the
+ * caller's own RLS read of library_files — roles without library access simply
+ * see an empty card path never rendered (the studio view is SA/MGR only).
+ */
+function LibraryCardView({
+  library,
+}: {
+  library: Awaited<ReturnType<typeof loadStudioDashboard>>["library"];
+}) {
+  return (
+    <Card>
+      <CardHeader
+        title="Library knowledge base"
+        description="Files ingested and AI-analyzed for the assistant."
+      />
+      <CardBody>
+        <dl className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <dt className="text-muted">Files</dt>
+            <dd className="text-xl font-semibold text-foreground">{fmtNumber(library.total)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted">AI-analyzed</dt>
+            <dd className="text-xl font-semibold text-foreground">{fmtNumber(library.analyzed)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted">Awaiting review</dt>
+            <dd className="text-xl font-semibold text-foreground">
+              {fmtNumber(library.awaitingReview)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-muted">Not machine-readable</dt>
+            <dd className="text-xl font-semibold text-foreground">{fmtNumber(library.unreadable)}</dd>
+          </div>
+        </dl>
+        {library.topCategories.length > 0 && (
+          <ul className="mt-4 space-y-1 border-t border-border pt-3 text-sm">
+            {library.topCategories.map((c) => (
+              <li key={c.name} className="flex justify-between">
+                <span className="text-muted">{c.name}</span>
+                <span className="font-medium text-foreground">{fmtNumber(c.count)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
 function Grid({ children }: { children: ReactNode }) {
   return <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">{children}</div>;
 }
@@ -214,6 +266,7 @@ function StudioDashboard({
           centerValue={fmtNumber(compliance.total)}
           centerLabel="documents"
         />
+        <LibraryCardView library={data.library} />
       </Grid>
 
       <StackedBarCard

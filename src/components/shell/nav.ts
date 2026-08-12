@@ -102,6 +102,9 @@ export const NAV_SECTIONS: readonly NavSection[] = [
   {
     title: "Admin",
     items: [
+      // Hermes proposes actions and waits for authorisation here. Super Admin
+      // only: it is the surface where money-adjacent work gets approved.
+      { href: "/admin/hermes", label: "Hermes", icon: "ai", roles: SA_ONLY },
       { href: "/admin/users", label: "Users", icon: "users", roles: SA_ONLY },
       { href: "/admin/invitations", label: "Invitations", icon: "invitations", roles: SA_ONLY },
       { href: "/admin/audit-log", label: "Audit log", icon: "audit", roles: SA_ONLY },

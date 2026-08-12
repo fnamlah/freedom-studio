@@ -510,6 +510,12 @@ export type Database = {
       }
       documents: {
         Row: {
+          ai_analysis_opt_in: boolean
+          ai_key_figures: Json | null
+          ai_status: Database["public"]["Enums"]["ai_review_status"]
+          ai_summary: string | null
+          analysed_at: string | null
+          analysed_provider: Database["public"]["Enums"]["ai_provider"] | null
           created_at: string
           doc_type: Database["public"]["Enums"]["document_type"]
           expires_at: string | null
@@ -528,6 +534,12 @@ export type Database = {
           uploaded_by: string
         }
         Insert: {
+          ai_analysis_opt_in?: boolean
+          ai_key_figures?: Json | null
+          ai_status?: Database["public"]["Enums"]["ai_review_status"]
+          ai_summary?: string | null
+          analysed_at?: string | null
+          analysed_provider?: Database["public"]["Enums"]["ai_provider"] | null
           created_at?: string
           doc_type: Database["public"]["Enums"]["document_type"]
           expires_at?: string | null
@@ -546,6 +558,12 @@ export type Database = {
           uploaded_by: string
         }
         Update: {
+          ai_analysis_opt_in?: boolean
+          ai_key_figures?: Json | null
+          ai_status?: Database["public"]["Enums"]["ai_review_status"]
+          ai_summary?: string | null
+          analysed_at?: string | null
+          analysed_provider?: Database["public"]["Enums"]["ai_provider"] | null
           created_at?: string
           doc_type?: Database["public"]["Enums"]["document_type"]
           expires_at?: string | null
@@ -1047,9 +1065,11 @@ export type Database = {
         Row: {
           ai_confidence: number | null
           ai_exempt: boolean
+          ai_key_figures: Json | null
           ai_rationale: string | null
           ai_status: Database["public"]["Enums"]["ai_review_status"]
           ai_suggested_category_id: string | null
+          ai_summary: string | null
           category_id: string | null
           classified_at: string | null
           classified_provider: Database["public"]["Enums"]["ai_provider"] | null
@@ -1067,9 +1087,11 @@ export type Database = {
         Insert: {
           ai_confidence?: number | null
           ai_exempt?: boolean
+          ai_key_figures?: Json | null
           ai_rationale?: string | null
           ai_status?: Database["public"]["Enums"]["ai_review_status"]
           ai_suggested_category_id?: string | null
+          ai_summary?: string | null
           category_id?: string | null
           classified_at?: string | null
           classified_provider?:
@@ -1089,9 +1111,11 @@ export type Database = {
         Update: {
           ai_confidence?: number | null
           ai_exempt?: boolean
+          ai_key_figures?: Json | null
           ai_rationale?: string | null
           ai_status?: Database["public"]["Enums"]["ai_review_status"]
           ai_suggested_category_id?: string | null
+          ai_summary?: string | null
           category_id?: string | null
           classified_at?: string | null
           classified_provider?:
@@ -2186,7 +2210,7 @@ export type Database = {
       account_status: "active" | "suspended" | "closed"
       ai_message_role: "user" | "assistant" | "tool"
       ai_provider: "moonshot" | "zhipu"
-      ai_request_kind: "chat" | "embedding" | "report" | "classify"
+      ai_request_kind: "chat" | "embedding" | "report" | "classify" | "analyse"
       ai_review_status:
         | "pending"
         | "suggested"
@@ -2349,7 +2373,7 @@ export const Constants = {
       account_status: ["active", "suspended", "closed"],
       ai_message_role: ["user", "assistant", "tool"],
       ai_provider: ["moonshot", "zhipu"],
-      ai_request_kind: ["chat", "embedding", "report", "classify"],
+      ai_request_kind: ["chat", "embedding", "report", "classify", "analyse"],
       ai_review_status: [
         "pending",
         "suggested",
@@ -2389,7 +2413,6 @@ export const Constants = {
     },
   },
 } as const
-
 
 /* ---------------------------------------------------------------------------
  * Freedom Studio compatibility appendix

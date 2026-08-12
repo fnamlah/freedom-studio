@@ -202,6 +202,8 @@ async function applyResult(
       ai_suggested_category_id: suggestion.categoryId,
       ai_confidence: suggestion.confidence,
       ai_rationale: suggestion.rationale,
+      ai_summary: suggestion.summary || null,
+      ai_key_figures: suggestion.keyFigures.length ? suggestion.keyFigures : null,
       classified_at: now,
       classified_provider: suggestion.provider,
     };

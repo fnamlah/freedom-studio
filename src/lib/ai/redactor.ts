@@ -254,3 +254,47 @@ export function classificationChannel(
   // metadata is accepted here, so nothing else can ride along.
   return input.content;
 }
+
+/* ---------------------------------- THE compliance-analysis carve-out (014) */
+
+export interface ComplianceAnalysisChannelInput {
+  /**
+   * `documents.ai_analysis_opt_in`, read at CROSSING time. The record of a
+   * deliberate per-document consent decision — never assumed, never defaulted
+   * on; revoking it blocks the very next crossing.
+   */
+  aiAnalysisOptIn: boolean;
+  /** The extracted content that must cross — text excerpt or image data URL. */
+  content: ClassificationContent;
+}
+
+/**
+ * ⚠ Owner-approved extension of the egress carve-out to COMPLIANCE documents
+ * (owner decision 2026-08-12; migration 014). docs/12 §6 originally scoped
+ * file-content crossings to the `library` bucket alone, with `model-documents`
+ * — performers' identity papers — unreachable "by any path". The owner has
+ * explicitly extended AI analysis to those documents, under a consent model
+ * STRICTER than the library channel's:
+ *
+ *  • Per-document opt-in, default OFF. A document that has never been opted in
+ *    cannot cross; this function refuses it with `RedactionRefusedError`.
+ *  • The flag is read at crossing time by the caller and passed here, so
+ *    turning it off takes effect on the next analysis immediately.
+ *  • Only the extracted content crosses — like the library channel, this
+ *    function structurally cannot carry `storage_path`, uploader identity,
+ *    `model_id`, or any neighbouring row. The global field blocklist still
+ *    governs everything except the content itself.
+ *  • Auditing (`ai.analyse`) and metering (`ai_usage`) of each crossing are the
+ *    caller's responsibility, exactly as for library classification.
+ *
+ * This is the second, and only other, owner-approved exception to the
+ * aggregates-only policy. Do not add a third path.
+ */
+export function complianceAnalysisChannel(
+  input: ComplianceAnalysisChannelInput,
+): ClassificationContent {
+  if (!input.aiAnalysisOptIn) {
+    throw new RedactionRefusedError("not_opted_in");
+  }
+  return input.content;
+}

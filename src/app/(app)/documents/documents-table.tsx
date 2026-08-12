@@ -10,6 +10,8 @@ import { useToast } from "@/components/ui/toast";
 import { date, fileSize } from "@/lib/format";
 
 import { getDownloadUrl } from "./actions";
+import { AnalysisManager } from "./analysis-manager";
+import type { KeyFigure } from "./ai-meta";
 import {
   COMPLIANCE_META,
   type ComplianceStatus,
@@ -30,6 +32,12 @@ export type DocumentRow = {
   expires_at: string | null;
   is_archived: boolean;
   status: ComplianceStatus;
+  ai_analysis_opt_in: boolean;
+  ai_status: string;
+  ai_summary: string | null;
+  ai_key_figures: KeyFigure[];
+  analysed_at: string | null;
+  analysed_provider: string | null;
 };
 
 /**
@@ -88,6 +96,15 @@ export function DocumentsTable({ rows }: { rows: DocumentRow[] }) {
               <TD align="right">
                 <div className="flex items-center justify-end gap-2">
                   <DownloadButton id={row.id} />
+                  <AnalysisManager
+                    documentId={row.id}
+                    documentTitle={row.title}
+                    optedIn={row.ai_analysis_opt_in}
+                    aiStatus={row.ai_status}
+                    summary={row.ai_summary}
+                    keyFigures={row.ai_key_figures}
+                    analysedProvider={row.analysed_provider}
+                  />
                   <ShareManager documentId={row.id} documentTitle={row.title} />
                 </div>
               </TD>

@@ -106,7 +106,7 @@ begin
 
   if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace
                  where n.nspname = 'public' and t.typname = 'ai_request_kind') then
-    create type public.ai_request_kind as enum ('chat', 'embedding', 'report', 'classify');
+    create type public.ai_request_kind as enum ('chat', 'embedding', 'report', 'classify', 'analyse');
   end if;
 
   -- Document *contents* are never an embedding source (docs/11-ai-llm.md §6.1).

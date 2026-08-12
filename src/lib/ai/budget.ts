@@ -113,7 +113,7 @@ export type UsageStatus = "ok" | "error" | "rate_limited" | "budget_exceeded";
 export interface RecordUsageInput {
   userId: string;
   conversationId?: string | null;
-  requestKind: "chat" | "embedding" | "report" | "classify";
+  requestKind: "chat" | "embedding" | "report" | "classify" | "analyse";
   provider: ProviderId;
   model: string;
   promptTokens: number;

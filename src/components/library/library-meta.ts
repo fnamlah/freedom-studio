@@ -35,6 +35,8 @@ export type LibraryFileLite = {
   ai_suggested_category_id: string | null;
   ai_confidence: number | null;
   ai_rationale: string | null;
+  ai_summary: string | null;
+  ai_key_figures: { label: string; value: string }[];
   ai_status: AiReviewStatus;
   ai_exempt: boolean;
   classified_provider: AiProvider | null;
@@ -249,4 +251,24 @@ export async function runClassify(body: { file_id?: string } = {}): Promise<Clas
   } catch {
     return { status: "error", message: "Unexpected response from the classification service." };
   }
+}
+
+/* --------------------------------------------------------- analysis output --- */
+
+export type KeyFigure = { label: string; value: string };
+
+/** Coerce the jsonb `ai_key_figures` column into a clean {label,value}[]. */
+export function normaliseKeyFigures(raw: unknown): KeyFigure[] {
+  if (!Array.isArray(raw)) return [];
+  const out: KeyFigure[] = [];
+  for (const item of raw) {
+    if (item && typeof item === "object") {
+      const label = (item as Record<string, unknown>).label;
+      const value = (item as Record<string, unknown>).value;
+      if (typeof label === "string" && typeof value === "string") {
+        out.push({ label, value });
+      }
+    }
+  }
+  return out;
 }

@@ -4,6 +4,7 @@ import {
   redactToolResult,
   scrubText,
   classificationChannel,
+  complianceAnalysisChannel,
   RedactionError,
   RedactionRefusedError,
   BLOCKED_KEYS,
@@ -94,4 +95,51 @@ test("classificationChannel passes content through when permitted", () => {
   const content = { kind: "text", text: "an invoice" } as const;
   const out = classificationChannel({ aiExempt: false, categoryAiEnabled: true, content });
   assert.deepEqual(out, content);
+});
+
+/* ------------------- compliance-analysis carve-out (migration 014) --------- */
+
+test("complianceAnalysisChannel refuses a document that is not opted in", () => {
+  assert.throws(
+    () =>
+      complianceAnalysisChannel({
+        aiAnalysisOptIn: false,
+        content: { kind: "text", text: "passport number 123" },
+      }),
+    RedactionRefusedError,
+  );
+});
+
+test("complianceAnalysisChannel refusal names the not_opted_in reason", () => {
+  try {
+    complianceAnalysisChannel({
+      aiAnalysisOptIn: false,
+      content: { kind: "image", dataUrl: "data:image/png;base64,AA", mimeType: "image/png" },
+    });
+    assert.fail("expected a refusal");
+  } catch (e) {
+    assert.ok(e instanceof RedactionRefusedError);
+    assert.equal((e as RedactionRefusedError).reason, "not_opted_in");
+  }
+});
+
+test("complianceAnalysisChannel passes content through only after explicit opt-in", () => {
+  const content = { kind: "text", text: "contract text" } as const;
+  const out = complianceAnalysisChannel({ aiAnalysisOptIn: true, content });
+  assert.deepEqual(out, content);
+});
+
+test("complianceAnalysisChannel carries ONLY content — no metadata can ride along", () => {
+  // The input type has exactly two fields; anything else a caller tries to
+  // attach must not appear in the crossing payload.
+  const content = { kind: "text", text: "only me" } as const;
+  const out = complianceAnalysisChannel({
+    aiAnalysisOptIn: true,
+    content,
+    // @ts-expect-error extra keys are not part of the channel contract
+    storagePath: "model-documents/secret/passport.pdf",
+    modelId: "11111111-1111-1111-1111-111111111111",
+  });
+  assert.deepEqual(out, content);
+  assert.equal(Object.keys(out).length, 2);
 });

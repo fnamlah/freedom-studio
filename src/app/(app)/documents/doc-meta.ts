@@ -61,6 +61,11 @@ export const ALLOWED_MIME_TYPES = [
   "image/heic",
   "image/heif",
   "image/tiff",
+  // Office documents and spreadsheets (contracts, tax forms, statements).
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+  "text/csv",
+  "application/csv",
 ] as const;
 
 export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];
@@ -70,7 +75,7 @@ export function isAllowedMime(mime: string | null | undefined): mime is AllowedM
 }
 
 /** Human-friendly accept summary for the file picker and hint text. */
-export const ALLOWED_MIME_LABEL = "PDF, JPEG, PNG, WebP, HEIC or TIFF";
+export const ALLOWED_MIME_LABEL = "PDF, Word, Excel, CSV, or an image (JPEG, PNG, WebP, HEIC, TIFF)";
 
 /** The `accept` attribute for the `<input type="file">`. */
 export const FILE_ACCEPT_ATTR = ALLOWED_MIME_TYPES.join(",");

@@ -453,6 +453,74 @@ export async function revokeShare(input: { id: string }): Promise<ActionResult> 
   }
 }
 
+/* --------------------------------------------------- AI analysis opt-in (014) --- */
+
+/**
+ * Set (or clear) a compliance document's consent to AI analysis. This is the
+ * ONLY writer of `documents.ai_analysis_opt_in`, and toggling it is itself an
+ * audited governance event — the record of a deliberate decision to send (or
+ * stop sending) a performer's identity document to a third-party AI processor.
+ *
+ * Turning it OFF also resets any prior analysis output so a revoked document
+ * does not keep displaying provider-derived content.
+ */
+export async function setDocumentAnalysisOptIn(input: {
+  document_id: string;
+  opt_in: boolean;
+}): Promise<ActionResult> {
+  const { supabase } = await requireRole("super_admin", "manager");
+  const parsed = z
+    .object({ document_id: z.string().uuid(), opt_in: z.boolean() })
+    .safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid request." };
+
+  try {
+    const patch = parsed.data.opt_in
+      ? { ai_analysis_opt_in: true }
+      : {
+          ai_analysis_opt_in: false,
+          ai_status: "pending" as const,
+          ai_summary: null,
+          ai_key_figures: null,
+          analysed_at: null,
+          analysed_provider: null,
+        };
+
+    const { data: updated, error } = await supabase
+      .from("documents")
+      .update(patch)
+      .eq("id", parsed.data.document_id)
+      .select("id, model_id")
+      .maybeSingle();
+    if (error || !updated) {
+      return { ok: false, error: "Could not update this document. Please try again." };
+    }
+
+    await writeAudit({
+      action: parsed.data.opt_in ? "ai.analyse" : "ai.analyse",
+      entityType: "document",
+      entityId: parsed.data.document_id,
+      metadata: {
+        event: parsed.data.opt_in ? "opt_in" : "opt_out",
+        model_id: updated.model_id,
+      },
+    });
+
+    revalidatePath("/documents");
+    return {
+      ok: true,
+      message: parsed.data.opt_in
+        ? "AI analysis enabled for this document."
+        : "AI analysis disabled and prior analysis cleared.",
+    };
+  } catch (error) {
+    if (isAuthzError(error)) {
+      return { ok: false, error: "You are not authorized to change this setting." };
+    }
+    return { ok: false, error: "Something went wrong. Please try again." };
+  }
+}
+
 /* --------------------------------------------------------------- share: list --- */
 
 export type ShareListItem = {

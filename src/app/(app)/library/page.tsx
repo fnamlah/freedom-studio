@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { LibraryWorkspace } from "@/components/library/library-workspace";
 import type { CategoryLite, LibraryFileLite } from "@/components/library/library-meta";
+import { normaliseKeyFigures } from "@/components/library/library-meta";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { requireRole } from "@/lib/auth/guard";
@@ -37,13 +38,16 @@ export default async function LibraryPage() {
     supabase
       .from("library_files")
       .select(
-        "id, folder_path, name, mime_type, size_bytes, category_id, ai_suggested_category_id, ai_confidence, ai_rationale, ai_status, ai_exempt, classified_provider, classified_at, created_at",
+        "id, folder_path, name, mime_type, size_bytes, category_id, ai_suggested_category_id, ai_confidence, ai_rationale, ai_summary, ai_key_figures, ai_status, ai_exempt, classified_provider, classified_at, created_at",
       )
       .order("created_at", { ascending: false }),
   ]);
 
   const categories = (categoriesData ?? []) as CategoryLite[];
-  const files = (filesData ?? []) as LibraryFileLite[];
+  const files: LibraryFileLite[] = (filesData ?? []).map((f) => ({
+    ...(f as Omit<LibraryFileLite, "ai_key_figures">),
+    ai_key_figures: normaliseKeyFigures((f as { ai_key_figures?: unknown }).ai_key_figures),
+  }));
 
   // Wave-2 route/provider readiness. Keys are server-only env (docs/11 §1); with
   // neither set the workspace shows the graceful "AI not configured" state up

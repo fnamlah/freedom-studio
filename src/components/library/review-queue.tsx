@@ -123,6 +123,21 @@ function ReviewRow({
         </div>
       </div>
 
+      {file.ai_summary ? (
+        <p className="mt-2 text-sm whitespace-pre-wrap text-foreground">{file.ai_summary}</p>
+      ) : null}
+
+      {file.ai_key_figures.length > 0 ? (
+        <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+          {file.ai_key_figures.map((f, i) => (
+            <div key={i} className="flex items-baseline gap-1.5 text-xs">
+              <dt className="text-muted">{f.label}:</dt>
+              <dd className="font-medium tabular-nums text-foreground">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+
       {file.ai_rationale ? (
         <p className="mt-2 text-xs text-muted">
           <span className="font-medium text-foreground">Why: </span>

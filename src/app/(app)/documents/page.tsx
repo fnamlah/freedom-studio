@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/auth/guard";
 
 import { deriveComplianceStatus, type ComplianceStatus } from "./doc-meta";
 import { DocumentUpload, type ModelOption } from "./document-upload";
+import { normaliseKeyFigures } from "./ai-meta";
 import { DocumentsTable, type DocumentRow } from "./documents-table";
 import { ModelFilter } from "./model-filter";
 
@@ -24,6 +25,12 @@ type DocumentQueryRow = {
   expires_at: string | null;
   is_archived: boolean;
   created_at: string;
+  ai_analysis_opt_in: boolean;
+  ai_status: string;
+  ai_summary: string | null;
+  ai_key_figures: unknown;
+  analysed_at: string | null;
+  analysed_provider: string | null;
 };
 
 /**
@@ -60,7 +67,7 @@ export default async function DocumentsPage({
   let documentsQuery = supabase
     .from("documents")
     .select(
-      "id, model_id, doc_type, title, file_name, mime_type, file_size_bytes, issued_date, expires_at, is_archived, created_at",
+      "id, model_id, doc_type, title, file_name, mime_type, file_size_bytes, issued_date, expires_at, is_archived, created_at, ai_analysis_opt_in, ai_status, ai_summary, ai_key_figures, analysed_at, analysed_provider",
     )
     .order("created_at", { ascending: false });
 
@@ -90,6 +97,12 @@ export default async function DocumentsPage({
     expires_at: d.expires_at,
     is_archived: d.is_archived,
     status: deriveComplianceStatus(d.expires_at),
+    ai_analysis_opt_in: d.ai_analysis_opt_in,
+    ai_status: d.ai_status,
+    ai_summary: d.ai_summary,
+    ai_key_figures: normaliseKeyFigures(d.ai_key_figures),
+    analysed_at: d.analysed_at,
+    analysed_provider: d.analysed_provider,
   }));
 
   const counts = rows.reduce(

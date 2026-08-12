@@ -54,6 +54,8 @@ export type AuditAction =
   | "ai.settings_update"
   | "ai.reindex"
   | "ai.report_create"
+  | "ai.classify"
+  | "ai.analyse"
   | "settings.update"
   | (string & {});
 

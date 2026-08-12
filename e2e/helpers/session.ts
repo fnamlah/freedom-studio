@@ -13,11 +13,28 @@ import { totpCode, waitForNextTotpWindow } from "./totp";
  * Drive an invite action_link through accept → forced TOTP enrollment.
  * Returns the base32 TOTP secret scraped from the enrollment page.
  */
+
+/**
+ * Pin the browser context to English BEFORE first render.
+ *
+ * The app's pre-login default is Russian (owner decision, 019): a visitor with
+ * no session and no cookie gets «Войти», not "Sign in". The E2E fixtures pin
+ * `profiles.locale = 'en'`, but that only takes effect after login — this
+ * cookie is what makes the login/accept screens themselves render in English,
+ * so the suite's selectors keep matching. It also lands in the captured
+ * storageState, so every dependent spec inherits it.
+ */
+export async function pinEnglish(page: Page): Promise<void> {
+  const base = process.env.E2E_BASE_URL ?? "http://localhost:3100";
+  await page.context().addCookies([{ name: "NEXT_LOCALE", value: "en", url: base }]);
+}
+
 export async function acceptInviteAndEnroll(
   page: Page,
   actionLink: string,
   password: string,
 ): Promise<string> {
+  await pinEnglish(page);
   await page.goto(actionLink);
   await page.waitForURL(/\/auth\/accept/, { timeout: 30_000 });
 
@@ -42,6 +59,7 @@ export async function login(
   password: string,
   totpSecret: string,
 ): Promise<void> {
+  await pinEnglish(page);
   await page.goto("/auth/login");
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);

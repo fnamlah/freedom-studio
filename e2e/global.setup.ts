@@ -10,11 +10,12 @@ import {
   getProfile,
   insertInvitation,
   resetUserForReseed,
+  setProfileLocale,
   setProfileStatus,
 } from "./helpers/admin";
 import { loadEnv } from "./helpers/env";
 import { e2eEmail, ROLES, type E2ERole } from "./helpers/naming";
-import { acceptInviteAndEnroll, enterOtpUntilAccepted, login } from "./helpers/session";
+import { acceptInviteAndEnroll, enterOtpUntilAccepted, login, pinEnglish } from "./helpers/session";
 import {
   ensureStateDir,
   readUsers,
@@ -62,6 +63,7 @@ async function seedRole(
     const created = await findUserByEmail(email);
     if (!created) throw new Error(`generateLink did not create auth user for ${email}`);
     userId = created.id;
+    await setProfileLocale(userId, "en");
 
     // The trigger must have created an invited profile with the right role.
     const profile = await getProfile(userId);
@@ -71,6 +73,7 @@ async function seedRole(
     // Scenario 1: between password and TOTP enrollment the middleware must
     // refuse the app surface (probe once, on the model role).
     if (role === "model") {
+      await pinEnglish(page);
       await page.goto(actionLink);
       await page.waitForURL(/\/auth\/accept/);
       await page.locator("#password").fill(password);
@@ -90,11 +93,13 @@ async function seedRole(
     userId = existing.id;
     await resetUserForReseed(userId, password);
     await setProfileStatus(userId, "active");
+    await setProfileLocale(userId, "en");
     // Factors were wiped → login lands on forced re-enrollment. The admin
     // password reset can lag GoTrue's token endpoint by a moment, so a
     // rejected first attempt is retried.
     let signedIn = false;
     for (let attempt = 0; attempt < 3 && !signedIn; attempt++) {
+      await pinEnglish(page);
       await page.goto("/auth/login");
       await page.locator("#email").fill(email);
       await page.locator("#password").fill(password);

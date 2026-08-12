@@ -92,6 +92,20 @@ export async function setProfileStatus(
   if (error) throw new Error(`setProfileStatus(${userId}, ${status}): ${error.message}`);
 }
 
+
+/**
+ * Pin a seeded account's UI language. The app renders post-login in
+ * `profiles.locale`, whose default is Russian (019); the suite asserts on
+ * English strings, so every fixture user is forced to English here — belt to
+ * the `pinEnglish` cookie's braces, and the thing that makes the suite correct
+ * on a fresh database rather than only where migration 019 already pinned them.
+ */
+export async function setProfileLocale(userId: string, locale: "en" | "ru"): Promise<void> {
+  const db = serviceDb();
+  const { error } = await db.from("profiles").update({ locale }).eq("id", userId);
+  if (error) throw new Error(`setProfileLocale(${userId}, ${locale}): ${error.message}`);
+}
+
 export async function getProfile(
   userId: string,
 ): Promise<{ id: string; role: string; status: string } | null> {

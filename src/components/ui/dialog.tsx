@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 
+import { useDict } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 export type DialogProps = {
@@ -49,6 +50,7 @@ export function Dialog({
   dismissible = true,
   className,
 }: DialogProps) {
+  const d = useDict();
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -111,7 +113,7 @@ export function Dialog({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close dialog"
+              aria-label={d.common.close}
               className="-mr-1 -mt-1 rounded p-1 text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
             >
               <svg

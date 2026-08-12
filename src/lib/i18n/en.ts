@@ -19,6 +19,7 @@
  * while allowing different words.
  */
 
+import { aiRuntimeEn } from "./areas/ai-runtime";
 import { authFlowEn } from "./areas/auth-flow";
 
 import { documentsEn } from "./areas/documents";
@@ -31,6 +32,7 @@ import { moneyEn } from "./areas/money";
 export const en = {
   common: {
     appName: "Freedom Studio",
+    appDescription: "Back-office management for studio operations.",
     save: "Save",
     cancel: "Cancel",
     close: "Close",
@@ -154,6 +156,8 @@ export const en = {
   studio: studioEn,
   adminAi: adminAiEn,
   money: moneyEn,
+
+  aiRuntime: aiRuntimeEn,
 };
 
 export type Dictionary = typeof en;

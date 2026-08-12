@@ -1,3 +1,4 @@
+import { aiRuntimeRu } from "./areas/ai-runtime";
 import { authFlowRu } from "./areas/auth-flow";
 import { documentsRu } from "./areas/documents";
 import { libraryRu } from "./areas/library";
@@ -21,6 +22,7 @@ import type { Dictionary } from "./en";
 export const ru = {
   common: {
     appName: "Freedom Studio",
+    appDescription: "Внутренняя система управления студией.",
     save: "Сохранить",
     cancel: "Отмена",
     close: "Закрыть",
@@ -144,4 +146,6 @@ export const ru = {
   studio: studioRu,
   adminAi: adminAiRu,
   money: moneyRu,
+
+  aiRuntime: aiRuntimeRu,
 } satisfies Dictionary;

@@ -36,6 +36,7 @@ import { getActiveProviderId, getChatModel, isAiConfigured } from "@/lib/ai/prov
 import { writeAudit } from "@/lib/audit";
 import { guardedAdminClient, isAuthzError } from "@/lib/supabase/admin";
 import { createRouteSupabase } from "@/lib/supabase/server";
+import { getDict } from "@/lib/i18n/server";
 import { getSetting } from "@/lib/settings";
 import type { AiSupabaseClient } from "@/lib/ai/types";
 import type { LibraryFileRow, TablesUpdate } from "@/lib/database.types";
@@ -57,6 +58,7 @@ const bodySchema = z
 type ApplyOutcome = "written" | "not_configured";
 
 export async function POST(request: Request): Promise<Response> {
+  const d = await getDict();
   // 1. Guard + acquire clients. `guardedAdminClient` is the sanctioned path to
   //    the service client (metering + the GLOBAL budget window need it) and
   //    doubles as the SA/MGR role gate; the caller's RLS client does the reads.
@@ -80,11 +82,11 @@ export async function POST(request: Request): Promise<Response> {
     const text = await request.text();
     raw = text.trim() === "" ? {} : JSON.parse(text);
   } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+    return Response.json({ error: d.aiRuntime.invalidJson }, { status: 400 });
   }
   const parsed = bodySchema.safeParse(raw ?? {});
   if (!parsed.success) {
-    return Response.json({ error: "Invalid request." }, { status: 400 });
+    return Response.json({ error: d.aiRuntime.invalidRequest }, { status: 400 });
   }
   const fileId = parsed.data.file_id;
 
@@ -111,7 +113,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!budget.ok) {
     await meterRefusal(userId, admin, budget.status === "rate_limited" ? "rate_limited" : "budget_exceeded");
     return Response.json(
-      { error: budget.reason ?? "AI budget reached. Try again later." },
+      { error: budget.reason ?? d.aiRuntime.budgetReached },
       { status: 429 },
     );
   }

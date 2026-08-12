@@ -24,6 +24,7 @@ import { getActiveProviderId, getChatModel, isAiConfigured } from "@/lib/ai/prov
 import { writeAudit } from "@/lib/audit";
 import { guardedAdminClient, isAuthzError } from "@/lib/supabase/admin";
 import { createRouteSupabase } from "@/lib/supabase/server";
+import { getDict } from "@/lib/i18n/server";
 import { getSetting } from "@/lib/settings";
 import type { AiSupabaseClient } from "@/lib/ai/types";
 import type { DocumentRow, TablesUpdate } from "@/lib/database.types";
@@ -36,6 +37,7 @@ const DEFAULT_MAX_FILE_MB = 10;
 const bodySchema = z.object({ document_id: z.string().uuid() });
 
 export async function POST(request: Request): Promise<Response> {
+  const d = await getDict();
   let admin: AiSupabaseClient;
   let userId: string;
   try {
@@ -52,7 +54,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     raw = JSON.parse(await request.text());
   } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+    return Response.json({ error: d.aiRuntime.invalidJson }, { status: 400 });
   }
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) return Response.json({ error: "document_id is required." }, { status: 400 });
@@ -68,13 +70,13 @@ export async function POST(request: Request): Promise<Response> {
     .select("*")
     .eq("id", parsed.data.document_id)
     .maybeSingle();
-  if (!document) return Response.json({ error: "Document not found." }, { status: 404 });
+  if (!document) return Response.json({ error: d.aiRuntime.documentNotFound }, { status: 404 });
 
   // The consent gate is also enforced deeper in analyseDocument; failing fast
   // here avoids a needless budget check and a clearer message.
   if (!document.ai_analysis_opt_in) {
     return Response.json(
-      { error: "This document is not opted in to AI analysis." },
+      { error: d.aiRuntime.notOptedIn },
       { status: 409 },
     );
   }
@@ -83,7 +85,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!budget.ok) {
     await meterRefusal(userId, admin, budget.status === "rate_limited" ? "rate_limited" : "budget_exceeded");
     return Response.json(
-      { error: budget.reason ?? "AI budget reached. Try again later." },
+      { error: budget.reason ?? d.aiRuntime.budgetReached },
       { status: 429 },
     );
   }

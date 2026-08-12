@@ -8,6 +8,7 @@ import { SideNav } from "@/components/shell/side-nav";
 import { TopBar } from "@/components/shell/top-bar";
 import { ToastProvider } from "@/components/ui/toast";
 import type { Role } from "@/lib/auth/roles";
+import { useDict } from "@/lib/i18n/client";
 
 export type AppShellProps = {
   /** Display name of the signed-in user. */
@@ -27,6 +28,7 @@ export type AppShellProps = {
  * and role is serialized into the client payload.
  */
 export function AppShell({ fullName, email, role, children }: AppShellProps) {
+  const d = useDict();
   const [navOpen, setNavOpen] = useState(false);
 
   return (
@@ -39,7 +41,7 @@ export function AppShell({ fullName, email, role, children }: AppShellProps) {
             <SideNav role={role} />
           </div>
           <p className="px-5 py-3 text-[11px] text-muted/70">
-            Row Level Security is the final authority.
+            {d.shell.rlsFooter}
           </p>
         </aside>
 
@@ -57,7 +59,7 @@ export function AppShell({ fullName, email, role, children }: AppShellProps) {
                 <button
                   type="button"
                   onClick={() => setNavOpen(false)}
-                  aria-label="Close navigation"
+                  aria-label={d.shell.closeMenu}
                   className="rounded-md p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
                 >
                   <CloseIcon width={18} height={18} />

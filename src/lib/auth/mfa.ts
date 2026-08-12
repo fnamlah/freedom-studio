@@ -1,6 +1,7 @@
 import type { Factor, SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/lib/database.types";
+import { dict, DEFAULT_LOCALE, type Locale } from "@/lib/i18n";
 
 /**
  * Thin, typed wrappers over `supabase.auth.mfa` for the auth pages, the guard
@@ -111,7 +112,11 @@ export type TotpEnrollment = {
  */
 export async function enrollTotp(
   supabase: AnySupabase,
+  // `friendlyName` is a Supabase FACTOR IDENTIFIER, not display copy: it must be
+  // stable across languages or a Russian-locale re-enrolment would create a
+  // second factor instead of matching the existing one. It stays English.
   friendlyName = "Authenticator app",
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<TotpEnrollment> {
   const existing = await listTotpFactors(supabase);
   for (const factor of existing) {
@@ -125,7 +130,7 @@ export async function enrollTotp(
     friendlyName,
   });
   if (error || !data) {
-    throw new Error(error?.message ?? "Could not start TOTP enrollment.");
+    throw new Error(error?.message ?? dict(locale).aiRuntime.totpEnrollFailed);
   }
 
   return {
@@ -144,12 +149,13 @@ export async function challengeAndVerifyTotp(
   supabase: AnySupabase,
   factorId: string,
   code: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<void> {
   const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({
     factorId,
   });
   if (challengeError || !challenge) {
-    throw new Error(challengeError?.message ?? "Could not start the TOTP challenge.");
+    throw new Error(challengeError?.message ?? dict(locale).aiRuntime.totpChallengeFailed);
   }
 
   const { error: verifyError } = await supabase.auth.mfa.verify({

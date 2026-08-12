@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { useDict } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 export type ToastVariant = "info" | "success" | "warning" | "error";
@@ -152,6 +153,7 @@ export function Toaster({
   toasts: Toast[];
   onDismiss: (id: string) => void;
 }) {
+  const d = useDict();
   return (
     <div
       role="region"
@@ -185,7 +187,7 @@ export function Toaster({
             <button
               type="button"
               onClick={() => onDismiss(item.id)}
-              aria-label="Dismiss notification"
+              aria-label={d.common.close}
               className="rounded p-0.5 text-muted transition-colors hover:text-foreground"
             >
               <svg

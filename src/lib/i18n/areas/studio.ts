@@ -1,4 +1,4 @@
-import { plural } from "../index";
+import { plural } from "../locales";
 
 /**
  * The Studio entities: models, operators, platforms & platform accounts, work

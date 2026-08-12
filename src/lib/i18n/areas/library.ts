@@ -1,4 +1,4 @@
-import { plural } from "../index";
+import { plural } from "../locales";
 
 /**
  * File Library (docs/12) + the Super-Admin category vocabulary it files against

@@ -1,4 +1,6 @@
-import { plural } from "../index";
+// From `../locales` (dependency-free), not `../index`: index.ts imports en.ts,
+// which imports this file — going through it would close an import cycle.
+import { plural } from "../locales";
 
 /**
  * Dashboard, charts and the whole Money section: ledger, payouts, statements,

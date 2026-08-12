@@ -1,19 +1,22 @@
 import type { Metadata, Viewport } from "next";
 
 import { LocaleProvider } from "@/lib/i18n/client";
-import { getLocale } from "@/lib/i18n/server";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: {
-    default: "Freedom Studio",
-    template: "%s · Freedom Studio",
-  },
-  description: "Back-office management for studio operations.",
-  // Nothing in this application should ever be indexed.
-  robots: { index: false, follow: false, nocache: true },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const d = await getDict();
+  return {
+    title: {
+      default: d.common.appName,
+      template: `%s · ${d.common.appName}`,
+    },
+    description: d.common.appDescription,
+    // Nothing in this application should ever be indexed.
+    robots: { index: false, follow: false, nocache: true },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: "#0b0d10",

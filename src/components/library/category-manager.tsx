@@ -30,7 +30,9 @@ type EditorState = {
   id: string | null;
   slug: string;
   name: string;
+  name_ru: string;
   description: string;
+  description_ru: string;
   ai_enabled: boolean;
   sort: string;
 };
@@ -40,7 +42,9 @@ const NEW_EDITOR: EditorState = {
   id: null,
   slug: "",
   name: "",
+  name_ru: "",
   description: "",
+  description_ru: "",
   ai_enabled: true,
   sort: "0",
 };
@@ -75,7 +79,9 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
       id: category.id,
       slug: category.slug,
       name: category.name,
+      name_ru: category.name_ru ?? "",
       description: category.description ?? "",
+      description_ru: category.description_ru ?? "",
       ai_enabled: category.ai_enabled,
       sort: String(category.sort),
     });
@@ -96,14 +102,18 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
           ? await createCategory({
               slug: editor.slug,
               name: editor.name,
+              name_ru: editor.name_ru,
               description: editor.description,
+              description_ru: editor.description_ru,
               ai_enabled: editor.ai_enabled,
               sort: editor.sort,
             })
           : await updateCategory({
               id: editor.id!,
               name: editor.name,
+              name_ru: editor.name_ru,
               description: editor.description,
+              description_ru: editor.description_ru,
               ai_enabled: editor.ai_enabled,
               sort: editor.sort,
             });
@@ -287,6 +297,16 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
               />
             </Field>
 
+            <Field help={c.nameRuHelp}>
+              <Label htmlFor="cat-name-ru">{c.nameRuLabel}</Label>
+              <Input
+                id="cat-name-ru"
+                maxLength={80}
+                value={editor.name_ru}
+                onChange={(e) => set("name_ru", e.target.value)}
+              />
+            </Field>
+
             <Field help={c.descriptionHelp}>
               <Label htmlFor="cat-description">{c.descriptionLabel}</Label>
               <Textarea
@@ -296,6 +316,17 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
                 value={editor.description}
                 onChange={(e) => set("description", e.target.value)}
                 placeholder={c.descriptionPlaceholder}
+              />
+            </Field>
+
+            <Field help={c.descriptionRuHelp}>
+              <Label htmlFor="cat-description-ru">{c.descriptionRuLabel}</Label>
+              <Textarea
+                id="cat-description-ru"
+                rows={3}
+                maxLength={1000}
+                value={editor.description_ru}
+                onChange={(e) => set("description_ru", e.target.value)}
               />
             </Field>
 

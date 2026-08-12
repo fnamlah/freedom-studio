@@ -67,6 +67,14 @@ const createSchema = (d: Dictionary) =>
     slug: slugSchema(d),
     name: nameSchema(d),
     description: descriptionSchema(d),
+    name_ru: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().max(80, d.library.categories.actions.nameTooLong).nullable().optional(),
+    ),
+    description_ru: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().max(1000, d.library.categories.actions.descriptionTooLong).nullable().optional(),
+    ),
     ai_enabled: z.boolean(),
     sort: sortSchema(d),
   });
@@ -76,6 +84,14 @@ const updateSchema = (d: Dictionary) =>
     id: z.string().uuid(d.library.categories.actions.invalid),
     name: nameSchema(d),
     description: descriptionSchema(d),
+    name_ru: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().max(80, d.library.categories.actions.nameTooLong).nullable().optional(),
+    ),
+    description_ru: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().max(1000, d.library.categories.actions.descriptionTooLong).nullable().optional(),
+    ),
     ai_enabled: z.boolean(),
     sort: sortSchema(d),
   });
@@ -89,7 +105,9 @@ function firstIssue(error: z.ZodError, d: Dictionary): string {
 export async function createCategory(input: {
   slug: string;
   name: string;
+  name_ru?: string | null;
   description?: string | null;
+  description_ru?: string | null;
   ai_enabled: boolean;
   sort?: number | string | null;
 }): Promise<CategoryActionResult> {
@@ -108,7 +126,9 @@ export async function createCategory(input: {
       .insert({
         slug: data.slug,
         name: data.name,
+        name_ru: data.name_ru ?? null,
         description: data.description,
+        description_ru: data.description_ru ?? null,
         ai_enabled: data.ai_enabled,
         sort: data.sort,
       })
@@ -150,7 +170,9 @@ export async function createCategory(input: {
 export async function updateCategory(input: {
   id: string;
   name: string;
+  name_ru?: string | null;
   description?: string | null;
+  description_ru?: string | null;
   ai_enabled: boolean;
   sort?: number | string | null;
 }): Promise<CategoryActionResult> {
@@ -168,7 +190,9 @@ export async function updateCategory(input: {
       .from("doc_categories")
       .update({
         name: data.name,
+        name_ru: data.name_ru ?? null,
         description: data.description,
+        description_ru: data.description_ru ?? null,
         ai_enabled: data.ai_enabled,
         sort: data.sort,
       })

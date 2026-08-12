@@ -225,8 +225,12 @@ export const libraryEn = {
     sortLabel: "Sort",
     sortHelp: "UI ordering. Lower sorts first.",
     nameLabel: "Name",
+    nameRuLabel: "Name (Russian)",
+    nameRuHelp: "Shown to Russian-reading staff wherever the category appears. Leave empty to fall back to the English name.",
     namePlaceholder: "Incoming money",
     descriptionLabel: "Description",
+    descriptionRuLabel: "Description (Russian)",
+    descriptionRuHelp: "The classifier prompt text used when the requesting user reads Russian. Empty falls back to the English description.",
     descriptionHelp:
       "Prompt text: the definition the classifier uses to decide whether a file belongs here.",
     descriptionPlaceholder:
@@ -486,8 +490,12 @@ export const libraryRu: typeof libraryEn = {
     sortLabel: "Порядок",
     sortHelp: "Порядок в интерфейсе. Меньшие значения выше.",
     nameLabel: "Название",
+    nameRuLabel: "Название (по-русски)",
+    nameRuHelp: "Показывается русскоязычным сотрудникам везде, где встречается категория. Если оставить пустым, используется английское название.",
     namePlaceholder: "Поступления",
     descriptionLabel: "Описание",
+    descriptionRuLabel: "Описание (по-русски)",
+    descriptionRuHelp: "Текст подсказки для классификатора, когда запрашивающий пользователь читает по-русски. Если пусто — используется английское описание.",
     descriptionHelp:
       "Текст промпта: определение, по которому классификатор решает, относится ли файл к этой категории.",
     descriptionPlaceholder:

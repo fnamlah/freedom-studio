@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { pinEnglish } from "./helpers/session";
+
 /**
  * Scenario 0 — anonymous surface: fail-closed routing, the uniform share 404,
  * and the per-request security headers. No storageState (signed-out).
@@ -20,6 +22,10 @@ test.describe("anonymous surface", () => {
   });
 
   test("login page renders and is the only anonymous app page", async ({ page }) => {
+    // Anonymous, so no profile locale — the app's pre-login default is Russian
+    // (019). Pin English so this suite's English selectors match; a real
+    // visitor still gets Russian.
+    await pinEnglish(page);
     await page.goto("/auth/login");
     await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
   });

@@ -24,6 +24,8 @@ The layer is built inside the package's existing security stance ([01](01-overvi
 > 1. **The model is a consumer of pre-scoped data, never an authority.** Every data tool executes under the caller's JWT via the anon key; RLS remains the final authority ([02 — System Architecture](02-architecture.md)). The assistant grants no new data access to anyone.
 > 2. **Aggregates-only egress.** Only aggregated, de-identified data may reach Moonshot or Zhipu: stage/display names and numbers are allowed; legal names, dates of birth, contact details, payment details, IP addresses, document contents, and storage paths are **never** sent. This applies equally to chat prompts, tool results, and embedding inputs. The policy is stated canonically here (§5) and referenced everywhere else.
 > 3. **No raw SQL, no write tools, no service role anywhere in the AI request path.** The agent is read-only in v1 (§4); the service role appears only in out-of-band telemetry and indexing writes that carry no caller data authority (§4, §6, §8).
+>
+>    > ⚠ **This clause changed for the agent, not for the assistant.** See [§4.4](#44-owner-approved-exception-freedom-hermes-the-out-of-band-agent). The **in-request assistant described by this document is unchanged**: it still holds no service role, still takes no write tool, and still executes every tool under the caller's JWT. What the owner added on 2026-08-12 is a *separate, out-of-band* worker (Freedom Hermes) that runs on its own schedule with no browser request behind it. **"No raw SQL" is untouched and remains absolute — it binds Hermes exactly as it binds the assistant.**
 > 4. **Provider keys are server-only.** The browser talks only to the Next.js gateway; `MOONSHOT_API_KEY` and `ZHIPU_API_KEY` live in server-scoped Vercel env only (inventory in [08 — Security & Threat Model](08-security-threat-model.md) and [10 — Deployment & Operations](10-deployment-operations.md)).
 
 ---
@@ -171,7 +173,29 @@ Not included — **not even as an SA-only, read-only variant**. Three reasons, r
 
 None in v1. The agent is strictly read-only; every mutation in the system remains a human flow with its existing guards — auth and invites ([05](05-auth-2fa.md)), documents ([06](06-documents-sharing.md)), accounting and maker-checker payouts ([09](09-accounting.md)).
 
-### 4.3 Agentic tool-call flow
+> ⚠ **This clause changed.** It stands as written **for the in-request assistant**, which still has no write tool of any kind. It no longer describes the whole system: [§4.4](#44-owner-approved-exception-freedom-hermes-the-out-of-band-agent) records an owner decision of 2026-08-12 permitting a separate out-of-band worker to *propose* a small, fixed set of writes that **a human must authorise before anything happens**. The sentence "every mutation remains a human flow with its existing guards" is still true, and is the exact property the design preserves: Hermes cannot author a mutation, only ask for one.
+
+### 4.4 Owner-approved exception: Freedom Hermes, the out-of-band agent
+
+Every clause below is a control, not a statement of intent.
+
+**What changed, in one sentence.** An always-on worker (`hermes/`, deployed to Railway, migrations 015–016) may hold a service-role client and may execute three write actions — **but only after a named human has approved that specific proposal, and never one it approved itself.**
+
+**Why the owner accepted it.** The studio's real failure mode is a period that nobody closed and a payee who went unpaid, not an agent that acts too freely. Hermes exists to notice that work and ask. The judgement was that a proposal waiting in a queue is worth more than an alert nobody reads, provided the agent can never be the one who says yes.
+
+1. **It is not in the AI request path.** Hermes runs on a schedule with no browser request behind it. Nothing in this document's gateway (§2), tool registry (§4), or chat surface gains a write capability or a service role. The clause in §1 that forbids the service role in the *request path* is intact because Hermes is not in one.
+2. **Propose and execute are separate; authorise is neither.** A `BEFORE UPDATE` trigger on `hermes_approvals` (migration 015) raises `42501` whenever `state` becomes `approved` or `rejected` outside the `decide_approval` RPC — **for every role, including the service role Hermes runs as**. `decide_approval` is `SECURITY DEFINER`, resolves its actor as `coalesce(auth.uid(), p_actor)` so a real session always wins, and re-verifies that actor's role against the row's `required_role` in the database. Verified against the live database: a direct service-role `UPDATE … SET state='approved'` is refused, as are a model and a manager deciding a finance-required action, while a super_admin succeeds and a second decision is refused.
+3. **Approved actions run as the approving human, not as the agent.** The executor RPCs (`fn_agent_generate_earning_shares`, `fn_agent_snapshot_forecast`, migration 016) take the approver's id, re-check that profile's role **and active status at execution time**, then set `request.jwt.claims` transaction-locally to that human and delegate to the existing `SECURITY INVOKER` functions **unchanged**. There is one implementation of the commission split, and the resulting ledger rows are attributed to a person. Both RPCs are `REVOKE`d from `anon` and `authenticated` and granted to `service_role` only, so no browser session can reach them.
+4. **A fixed, short list of actions, and unknown actions fail safe.** Exactly three are executable: `close_period`, `snapshot_forecast`, and `create_payout` — the last inserting a **`pending`** payout only, so the existing super-admin maker-checker ([09](09-accounting.md)) still stands between Hermes and money moving. `approve_payout`, `mark_payout_paid` and `delete_document` are `human_only` with no executor at all. Any action not in the policy table resolves to `approval`, never `automatic`, and an approved action with no executor **fails loudly rather than reporting success**. Unit tests enforce all of this.
+5. **No raw SQL. [D6] stands, absolutely.** No Hermes tool accepts free-form SQL. This was not weakened and is not open for extension.
+6. **The same chokepoint, imported rather than copied.** The worker lives inside this repository specifically so it can `import` the app's real `src/lib/ai/redactor.ts`. A vendored copy could drift silently; a test asserts the worker holds the app's own `PROJECTIONS` and 17-key `BLOCKED_KEYS`, and that an unregistered tool still throws.
+7. **Reachable by one person, over one channel.** The Telegram surface answers only a chat that is verified *and* bound to an **active super_admin** profile. An unpaired chat can do exactly one thing: redeem a one-time pairing code. Anything else is met with silence.
+8. **Append-only history still binds it.** Migration 013's statement triggers refuse `UPDATE`/`DELETE` on `audit_log` and `ledger_entries` **for every role including `service_role`**, so Hermes inherits tamper-evident history rather than being trusted with it. Every decision writes a `hermes.approve` / `hermes.reject` row naming the deciding human.
+9. **It can be switched off.** `hermes_policy.enabled = false` halts scheduled work, and a daily USD cost cap gates every provider call.
+
+**The honest limitation.** Hermes holds a service-role key, and a key that exists can be stolen. RLS is not a defence against it — the trigger, the fixed action list, and the approval requirement are. The controls above are what make the key survivable, not RLS; the operational consequence is that the Railway environment must be treated with the same seriousness as the Vercel one ([10](10-deployment-operations.md)).
+
+### 4.5 Agentic tool-call flow
 
 ```mermaid
 sequenceDiagram

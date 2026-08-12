@@ -47,5 +47,16 @@ export function jobs(): HermesJob[] {
         return runComplianceWatch();
       },
     },
+    {
+      // Proposes only. Nothing here can close a period on its own — the
+      // proposal waits in the approvals queue for a human.
+      name: "period_close_watch",
+      gate: { hourUtc: env.HERMES_CLOSE_WATCH_HOUR_UTC },
+      usesLlm: false,
+      handler: async () => {
+        const { runPeriodCloseWatch } = await import("../jobs/period-close-watch.js");
+        return runPeriodCloseWatch();
+      },
+    },
   ];
 }

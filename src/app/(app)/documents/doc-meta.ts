@@ -68,6 +68,8 @@ export const ALLOWED_MIME_TYPES = [
   "application/vnd.ms-excel.sheet.macroenabled.12", // .xlsm
   "application/vnd.ms-excel.sheet.binary.macroenabled.12", // .xlsb
   "application/vnd.oasis.opendocument.spreadsheet", // .ods
+  "application/msword", // .doc (legacy binary Word)
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
   "text/csv",
   "application/csv",
 ] as const;
@@ -80,7 +82,7 @@ export function isAllowedMime(mime: string | null | undefined): mime is AllowedM
 
 /** Human-friendly accept summary for the file picker and hint text. */
 export const ALLOWED_MIME_LABEL =
-  "PDF, Word (.docx), Excel (.xls/.xlsx), CSV, or an image (JPEG, PNG, WebP, HEIC, TIFF)";
+  "PDF, Word (.doc/.docx), Excel (.xls/.xlsx), PowerPoint (.pptx), CSV, or an image";
 
 /** The `accept` attribute for the `<input type="file">`. */
 export const FILE_ACCEPT_ATTR = ALLOWED_MIME_TYPES.join(",");

@@ -18,8 +18,18 @@ const MAX_SHEET_ROWS = 400;
 
 export type ExtractBranch = "image" | "text" | "unsupported";
 
-const WORD_MIMES = new Set([
+const DOCX_MIMES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+]);
+
+/** Legacy binary Word (.doc, OLE/BIFF). Read by `word-extractor`, not mammoth. */
+const LEGACY_DOC_MIMES = new Set([
+  "application/msword", // .doc
+]);
+
+/** PowerPoint OOXML (.pptx) — a zip of slide XML; text is pulled from `<a:t>` runs. */
+const PPTX_MIMES = new Set([
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
 ]);
 
 /**
@@ -40,13 +50,12 @@ const SHEET_MIMES = new Set([
 ]);
 
 /**
- * Legacy binary formats we still cannot read. `.doc` and `.ppt` are OLE
- * compound files that the modern parsers do not handle; recognised explicitly
- * so the UI can say "convert this to .docx" instead of a bare "unsupported
- * type". Legacy `.xls` is NOT in this list — SheetJS reads it.
+ * The one legacy binary format still unreadable: `.ppt` (pre-2007 PowerPoint).
+ * Recognised explicitly so the UI can say "convert this to .pptx" instead of a
+ * bare "unsupported type". Legacy `.xls` and `.doc` are NOT in this list —
+ * SheetJS and word-extractor read them respectively.
  */
 const LEGACY_OFFICE_MIMES = new Set([
-  "application/msword", // .doc
   "application/vnd.ms-powerpoint", // .ppt
 ]);
 
@@ -65,7 +74,14 @@ export function extractBranch(mime: string | null | undefined): ExtractBranch {
   if (m === "application/pdf") return "text";
   if (m.startsWith("text/")) return "text";
   if (m === "application/json" || m === "application/csv") return "text";
-  if (WORD_MIMES.has(m) || SHEET_MIMES.has(m)) return "text";
+  if (
+    DOCX_MIMES.has(m) ||
+    LEGACY_DOC_MIMES.has(m) ||
+    PPTX_MIMES.has(m) ||
+    SHEET_MIMES.has(m)
+  ) {
+    return "text";
+  }
   return "unsupported";
 }
 
@@ -97,10 +113,25 @@ export async function extractTextFromBytes(
     return truncateText(text.trim());
   }
 
-  if (WORD_MIMES.has(m)) {
+  if (DOCX_MIMES.has(m)) {
     const { default: mammoth } = await import("mammoth");
     const { value } = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
     return truncateText(value.trim());
+  }
+
+  if (LEGACY_DOC_MIMES.has(m)) {
+    // Legacy binary Word (OLE). word-extractor is CommonJS.
+    const mod = await import("word-extractor");
+    const WordExtractor = (mod as unknown as { default?: unknown }).default ?? mod;
+    const Ctor = WordExtractor as new () => {
+      extract(b: Buffer): Promise<{ getBody(): string; getFootnotes?(): string }>;
+    };
+    const doc = await new Ctor().extract(Buffer.from(bytes));
+    return truncateText(doc.getBody().trim());
+  }
+
+  if (PPTX_MIMES.has(m)) {
+    return truncateText(await extractPptxText(bytes));
   }
 
   if (SHEET_MIMES.has(m)) {
@@ -116,6 +147,62 @@ export async function extractTextFromBytes(
  * cells pipe-separated, each sheet under its own heading. Formulas are read as
  * their cached result — the number on the page is what the document says.
  */
+/**
+ * Flatten a .pptx to text, slide by slide.
+ *
+ * A .pptx is a zip whose `ppt/slides/slideN.xml` parts hold the visible text in
+ * `<a:t>` runs; speaker notes live in `ppt/notesSlides/`. Unzipping with fflate
+ * (8 KB, zero-dependency) and reading the runs is both lighter and more
+ * predictable than a full OOXML library — a deck's text is what a reader needs,
+ * and slide order is what makes it make sense.
+ */
+async function extractPptxText(bytes: Uint8Array): Promise<string> {
+  const { unzipSync } = await import("fflate");
+  const files = unzipSync(bytes);
+
+  const slideNumber = (path: string): number =>
+    Number(path.match(/slide(\d+)\.xml$/)?.[1] ?? 0);
+
+  const slides = Object.keys(files)
+    .filter((p) => /^ppt\/slides\/slide\d+\.xml$/.test(p))
+    .sort((a, b) => slideNumber(a) - slideNumber(b));
+
+  const decoder = new TextDecoder("utf-8");
+  const out: string[] = [];
+
+  for (const path of slides) {
+    const xml = decoder.decode(files[path]);
+    const text = xmlRuns(xml);
+    out.push(`# Slide ${slideNumber(path)}`);
+    if (text) out.push(text);
+
+    // Speaker notes carry the argument behind the slide; include when present.
+    const notesPath = `ppt/notesSlides/notesSlide${slideNumber(path)}.xml`;
+    const notesFile = files[notesPath];
+    if (notesFile) {
+      const notes = xmlRuns(decoder.decode(notesFile));
+      // The notes part repeats the slide number as a placeholder; skip noise.
+      if (notes && notes.replace(/\s|\d/g, "").length > 0) out.push(`Notes: ${notes}`);
+    }
+  }
+  return out.join("\n").trim();
+}
+
+/** Concatenate `<a:t>` text runs from an OOXML part, decoding XML entities. */
+function xmlRuns(xml: string): string {
+  const runs = xml.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) ?? [];
+  return runs
+    .map((r) => r.replace(/<[^>]+>/g, ""))
+    .join(" ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function extractSheetText(bytes: Uint8Array): Promise<string> {
   // SheetJS is CommonJS: under ESM the real exports sit on `.default`.
   const mod = await import("xlsx");

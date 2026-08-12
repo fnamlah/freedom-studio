@@ -1,4 +1,5 @@
-import { money, month, number, percent } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import type { Locale } from "@/lib/i18n/locales";
 
 /**
  * Serializable formatter descriptors for the chart cards.
@@ -7,6 +8,11 @@ import { money, month, number, percent } from "@/lib/format";
  * React cannot serialize functions across that boundary, so callers name a
  * format here and the client resolves it to a function locally. Add a new
  * variant rather than ever reintroducing function props on a card.
+ *
+ * The LOCALE is not part of the descriptor: it is read in the card itself with
+ * `useLocale()` and passed in here. That keeps the serialized prop a plain
+ * string and means a chart can never disagree with the rest of the page about
+ * how a number is written.
  */
 export type ValueFormat =
   | "money" // USD
@@ -17,31 +23,35 @@ export type ValueFormat =
 export type AxisFormat = "month";
 
 export function resolveValueFormat(
-  format?: ValueFormat,
+  format: ValueFormat | undefined,
+  locale: Locale,
 ): ((value: number) => string) | undefined {
+  const fm = fmt(locale);
   if (typeof format === "object") {
-    return (value) => money(value, format.money);
+    return (value) => fm.money(value, format.money);
   }
   switch (format) {
     case "money":
-      return (value) => money(value);
+      return (value) => fm.money(value);
     case "number":
-      return (value) => number(value, { decimals: Number.isInteger(value) ? 0 : 1 });
+      return (value) => fm.number(value, { decimals: Number.isInteger(value) ? 0 : 1 });
     case "percent":
-      return (value) => percent(value);
+      return (value) => fm.percent(value);
     case "percent-signed":
-      return (value) => percent(value, { signed: true });
+      return (value) => fm.percent(value, { signed: true });
     default:
       return undefined;
   }
 }
 
 export function resolveAxisFormat(
-  format?: AxisFormat,
+  format: AxisFormat | undefined,
+  locale: Locale,
 ): ((value: string | number) => string) | undefined {
+  const fm = fmt(locale);
   switch (format) {
     case "month":
-      return (value) => month(String(value));
+      return (value) => fm.month(String(value));
     default:
       return undefined;
   }

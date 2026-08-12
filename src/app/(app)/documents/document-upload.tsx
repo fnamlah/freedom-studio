@@ -10,12 +10,12 @@ import { Field, Label } from "@/components/ui/label";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { fileSize } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { uploadDocument } from "./actions";
 import {
-  ALLOWED_MIME_LABEL,
-  DOCUMENT_TYPE_OPTIONS,
+  documentTypeOptions,
   FILE_ACCEPT_ATTR,
   MAX_FILE_BYTES,
   MAX_FILE_MB,
@@ -51,6 +51,8 @@ const EMPTY: FormState = {
 export function DocumentUpload({ models }: { models: ModelOption[] }) {
   const router = useRouter();
   const { success, error } = useToast();
+  const d = useDict();
+  const fm = fmt(useLocale());
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -63,6 +65,8 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
     () => models.map((m) => ({ value: m.id, label: m.stage_name })),
     [models],
   );
+
+  const typeOptions: SelectOption[] = useMemo(() => documentTypeOptions(d), [d]);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -84,15 +88,18 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
     event.preventDefault();
 
     if (!file) {
-      error("No file chosen", "Pick a document file to upload.");
+      error(d.documents.noFileTitle, d.documents.noFileBody);
       return;
     }
     if (file.size > MAX_FILE_BYTES) {
-      error("File too large", `The limit is ${MAX_FILE_MB} MB.`);
+      error(d.documents.tooLargeTitle, d.documents.tooLargeBody(MAX_FILE_MB));
       return;
     }
     if (!isAllowedMime(file.type)) {
-      error("Unsupported file type", `Upload one of: ${ALLOWED_MIME_LABEL}.`);
+      error(
+        d.documents.badTypeTitle,
+        d.documents.badTypeBody(d.documents.allowedMimeLabel),
+      );
       return;
     }
 
@@ -108,11 +115,11 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
     startTransition(async () => {
       const result = await uploadDocument(fd);
       if (result.ok) {
-        success("Document uploaded", result.message);
+        success(d.documents.uploadedTitle, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not upload document", result.error);
+        error(d.documents.uploadFailedTitle, result.error);
       }
     });
   }
@@ -120,23 +127,23 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
   return (
     <>
       <Button onClick={openDialog} disabled={noModels}>
-        Upload document
+        {d.documents.uploadCta}
       </Button>
 
       <Dialog
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title="Upload a compliance document"
-        description="Stored in a private bucket. Retrieval is only ever a 60-second signed URL or a revocable share link — every access is audited (docs/06)."
+        title={d.documents.uploadTitle}
+        description={d.documents.uploadDescription}
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="document-upload-form" loading={isRunning}>
-              Upload document
+              {d.documents.uploadCta}
             </Button>
           </>
         }
@@ -145,12 +152,12 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field>
               <Label htmlFor="doc-model" required>
-                Model
+                {d.documents.modelLabel}
               </Label>
               <Select
                 id="doc-model"
                 required
-                placeholder="Select a model…"
+                placeholder={d.documents.modelPlaceholder}
                 options={modelOptions}
                 value={form.model_id}
                 onChange={(e) => set("model_id", e.target.value)}
@@ -159,22 +166,22 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
 
             <Field>
               <Label htmlFor="doc-type" required>
-                Document type
+                {d.documents.typeLabel}
               </Label>
               <Select
                 id="doc-type"
                 required
-                placeholder="Select a type…"
-                options={DOCUMENT_TYPE_OPTIONS}
+                placeholder={d.documents.typePlaceholder}
+                options={typeOptions}
                 value={form.doc_type}
                 onChange={(e) => set("doc_type", e.target.value)}
               />
             </Field>
           </div>
 
-          <Field help="A human label, e.g. 'US Passport' or '2026 W-9'.">
+          <Field help={d.documents.titleHelp}>
             <Label htmlFor="doc-title" required>
-              Title
+              {d.documents.titleLabel}
             </Label>
             <Input
               id="doc-title"
@@ -182,13 +189,13 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
               maxLength={200}
               value={form.title}
               onChange={(e) => set("title", e.target.value)}
-              placeholder="Document title"
+              placeholder={d.documents.titlePlaceholder}
             />
           </Field>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field help="When the document was issued (optional).">
-              <Label htmlFor="doc-issued">Issued date</Label>
+            <Field help={d.documents.issuedHelp}>
+              <Label htmlFor="doc-issued">{d.documents.issuedLabel}</Label>
               <Input
                 id="doc-issued"
                 type="date"
@@ -197,8 +204,8 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
               />
             </Field>
 
-            <Field help="Drives the compliance status. Leave blank for non-expiring documents.">
-              <Label htmlFor="doc-expires">Expires</Label>
+            <Field help={d.documents.expiresHelp}>
+              <Label htmlFor="doc-expires">{d.documents.expiresLabel}</Label>
               <Input
                 id="doc-expires"
                 type="date"
@@ -208,9 +215,9 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
             </Field>
           </div>
 
-          <Field help={`${ALLOWED_MIME_LABEL}. Max ${MAX_FILE_MB} MB.`}>
+          <Field help={d.documents.fileHelp(d.documents.allowedMimeLabel, MAX_FILE_MB)}>
             <Label htmlFor="doc-file" required>
-              File
+              {d.documents.fileLabel}
             </Label>
             <Input
               id="doc-file"
@@ -222,20 +229,20 @@ export function DocumentUpload({ models }: { models: ModelOption[] }) {
             />
             {file ? (
               <p className="mt-1 text-xs text-muted">
-                {file.name} · {fileSize(file.size)}
+                {d.documents.filePicked(file.name, fm.fileSize(file.size))}
               </p>
             ) : null}
           </Field>
 
-          <Field help="Optional context stored with the record.">
-            <Label htmlFor="doc-notes">Notes</Label>
+          <Field help={d.documents.notesHelp}>
+            <Label htmlFor="doc-notes">{d.documents.notesLabel}</Label>
             <Textarea
               id="doc-notes"
               rows={2}
               maxLength={2000}
               value={form.notes}
               onChange={(e) => set("notes", e.target.value)}
-              placeholder="Optional notes"
+              placeholder={d.documents.notesPlaceholder}
             />
           </Field>
         </form>

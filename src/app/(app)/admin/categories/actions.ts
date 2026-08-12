@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -23,55 +24,64 @@ export type CategoryActionResult =
   | { ok: true; message?: string }
   | { ok: false; error: string };
 
-const slugSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .min(1, "Give the category a slug.")
-  .max(60, "That slug is too long.")
-  .regex(
-    /^[a-z][a-z0-9_]*$/,
-    "Slug must be lowercase letters, numbers and underscores, starting with a letter.",
+/**
+ * The schemas are FACTORIES, not module constants: a `z.object(...)` evaluated
+ * at import time is built long before any request exists and so cannot know the
+ * caller's language. Each action builds its schema once it holds the auth
+ * context — that is what lets a validation message come back in Russian.
+ */
+const slugSchema = (d: Dictionary) =>
+  z
+    .string()
+    .trim()
+    .toLowerCase()
+    .min(1, d.library.categories.actions.slugRequired)
+    .max(60, d.library.categories.actions.slugTooLong)
+    .regex(/^[a-z][a-z0-9_]*$/, d.library.categories.actions.slugShape);
+
+const nameSchema = (d: Dictionary) =>
+  z
+    .string()
+    .trim()
+    .min(1, d.library.categories.actions.nameRequired)
+    .max(80, d.library.categories.actions.nameTooLong);
+
+const descriptionSchema = (d: Dictionary) =>
+  z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+    z.string().max(1000, d.library.categories.actions.descriptionTooLong).nullable(),
   );
 
-const nameSchema = z
-  .string()
-  .trim()
-  .min(1, "Give the category a name.")
-  .max(80, "That name is too long.");
+const sortSchema = (d: Dictionary) =>
+  z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? 0 : v),
+    z.coerce
+      .number()
+      .int(d.library.categories.actions.sortInteger)
+      .min(0, d.library.categories.actions.sortNegative)
+      .max(9999, d.library.categories.actions.sortTooLarge),
+  );
 
-const descriptionSchema = z.preprocess(
-  (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-  z.string().max(1000, "That description is too long.").nullable(),
-);
+const createSchema = (d: Dictionary) =>
+  z.object({
+    slug: slugSchema(d),
+    name: nameSchema(d),
+    description: descriptionSchema(d),
+    ai_enabled: z.boolean(),
+    sort: sortSchema(d),
+  });
 
-const sortSchema = z.preprocess(
-  (v) => (v === "" || v === null || v === undefined ? 0 : v),
-  z.coerce
-    .number()
-    .int("Sort must be a whole number.")
-    .min(0, "Sort cannot be negative.")
-    .max(9999, "That sort value is too large."),
-);
+const updateSchema = (d: Dictionary) =>
+  z.object({
+    id: z.string().uuid(d.library.categories.actions.invalid),
+    name: nameSchema(d),
+    description: descriptionSchema(d),
+    ai_enabled: z.boolean(),
+    sort: sortSchema(d),
+  });
 
-const createSchema = z.object({
-  slug: slugSchema,
-  name: nameSchema,
-  description: descriptionSchema,
-  ai_enabled: z.boolean(),
-  sort: sortSchema,
-});
-
-const updateSchema = z.object({
-  id: z.string().uuid("Invalid category."),
-  name: nameSchema,
-  description: descriptionSchema,
-  ai_enabled: z.boolean(),
-  sort: sortSchema,
-});
-
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Please check the form and try again.";
+function firstIssue(error: z.ZodError, d: Dictionary): string {
+  return error.issues[0]?.message ?? d.library.categories.actions.checkForm;
 }
 
 /* ------------------------------------------------------------------ create --- */
@@ -83,11 +93,12 @@ export async function createCategory(input: {
   ai_enabled: boolean;
   sort?: number | string | null;
 }): Promise<CategoryActionResult> {
-  const { supabase } = await requireRole("super_admin");
+  const { supabase, profile } = await requireRole("super_admin");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = createSchema.safeParse(input);
+  const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -106,9 +117,9 @@ export async function createCategory(input: {
 
     if (error || !created) {
       if (error?.code === "23505") {
-        return { ok: false, error: "A category with that slug already exists." };
+        return { ok: false, error: d.library.categories.actions.slugTaken };
       }
-      return { ok: false, error: "Could not create the category. Please try again." };
+      return { ok: false, error: d.library.categories.actions.createFailed };
     }
 
     await writeAudit({
@@ -120,12 +131,12 @@ export async function createCategory(input: {
 
     revalidatePath("/admin/categories");
     revalidatePath("/library");
-    return { ok: true, message: "Category created." };
+    return { ok: true, message: d.library.categories.actions.created };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to manage categories." };
+      return { ok: false, error: d.library.categories.actions.forbidden };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -143,11 +154,12 @@ export async function updateCategory(input: {
   ai_enabled: boolean;
   sort?: number | string | null;
 }): Promise<CategoryActionResult> {
-  const { supabase } = await requireRole("super_admin");
+  const { supabase, profile } = await requireRole("super_admin");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = updateSchema.safeParse(input);
+  const parsed = updateSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -165,7 +177,7 @@ export async function updateCategory(input: {
       .maybeSingle();
 
     if (error || !updated) {
-      return { ok: false, error: "Could not update the category. Please try again." };
+      return { ok: false, error: d.library.categories.actions.updateFailed };
     }
 
     await writeAudit({
@@ -182,12 +194,12 @@ export async function updateCategory(input: {
 
     revalidatePath("/admin/categories");
     revalidatePath("/library");
-    return { ok: true, message: "Category updated." };
+    return { ok: true, message: d.library.categories.actions.updated };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to manage categories." };
+      return { ok: false, error: d.library.categories.actions.forbidden };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -202,13 +214,17 @@ export async function setCategoryEnabled(input: {
   id: string;
   ai_enabled: boolean;
 }): Promise<CategoryActionResult> {
-  const { supabase } = await requireRole("super_admin");
+  const { supabase, profile } = await requireRole("super_admin");
+  const d = dict(toLocale(profile.locale));
 
   const parsed = z
-    .object({ id: z.string().uuid("Invalid category."), ai_enabled: z.boolean() })
+    .object({
+      id: z.string().uuid(d.library.categories.actions.invalid),
+      ai_enabled: z.boolean(),
+    })
     .safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const { id, ai_enabled } = parsed.data;
 
@@ -221,7 +237,7 @@ export async function setCategoryEnabled(input: {
       .maybeSingle();
 
     if (error || !updated) {
-      return { ok: false, error: "Could not update the category. Please try again." };
+      return { ok: false, error: d.library.categories.actions.updateFailed };
     }
 
     await writeAudit({
@@ -235,13 +251,15 @@ export async function setCategoryEnabled(input: {
     revalidatePath("/library");
     return {
       ok: true,
-      message: ai_enabled ? "Category enabled for AI suggestions." : "Category is now human-only filing.",
+      message: ai_enabled
+        ? d.library.categories.actions.aiEnabled
+        : d.library.categories.actions.aiDisabled,
     };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to manage categories." };
+      return { ok: false, error: d.library.categories.actions.forbidden };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -253,10 +271,11 @@ export async function setCategoryEnabled(input: {
  * database rejects it and this action surfaces a clear message.
  */
 export async function deleteCategory(input: { id: string }): Promise<CategoryActionResult> {
-  const { supabase } = await requireRole("super_admin");
+  const { supabase, profile } = await requireRole("super_admin");
+  const d = dict(toLocale(profile.locale));
 
   if (!z.string().uuid().safeParse(input.id).success) {
-    return { ok: false, error: "Invalid category." };
+    return { ok: false, error: d.library.categories.actions.invalid };
   }
 
   try {
@@ -270,12 +289,9 @@ export async function deleteCategory(input: { id: string }): Promise<CategoryAct
 
     if (error) {
       if (error.code === "23503") {
-        return {
-          ok: false,
-          error: "This category is in use by one or more files and cannot be deleted.",
-        };
+        return { ok: false, error: d.library.categories.actions.inUse };
       }
-      return { ok: false, error: "Could not delete the category. Please try again." };
+      return { ok: false, error: d.library.categories.actions.deleteFailed };
     }
 
     await writeAudit({
@@ -287,11 +303,11 @@ export async function deleteCategory(input: { id: string }): Promise<CategoryAct
 
     revalidatePath("/admin/categories");
     revalidatePath("/library");
-    return { ok: true, message: "Category deleted." };
+    return { ok: true, message: d.library.categories.actions.deleted };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to manage categories." };
+      return { ok: false, error: d.library.categories.actions.forbidden };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }

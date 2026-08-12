@@ -11,13 +11,18 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { ROLE_LABELS, type Role } from "@/lib/auth/roles";
+import { roleLabel, type Role } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/guard";
 import type { Json } from "@/lib/database.types";
-import { dateTime, EM_DASH, number as fmtNumber } from "@/lib/format";
+import type { Dictionary } from "@/lib/i18n";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
+import { EM_DASH } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-export const metadata: Metadata = { title: "Audit log" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).adminAi.auditLog.metaTitle };
+}
 
 const PAGE_SIZE = 50;
 
@@ -40,83 +45,97 @@ type AuditRow = {
 
 type ProfileLite = { id: string; full_name: string; email: string; role: Role };
 
-/** The action-prefix filter options. Values are validated against this list. */
-const ACTION_GROUPS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "", label: "All actions" },
-  { value: "ai", label: "AI (ai.*)" },
-  { value: "settings", label: "Settings" },
-  { value: "user", label: "Users" },
-  { value: "auth", label: "Auth & MFA" },
-  { value: "account", label: "Platform accounts" },
-  { value: "model", label: "Models" },
-  { value: "operator", label: "Operators" },
-  { value: "platform", label: "Platforms" },
-  { value: "session", label: "Work sessions" },
-  { value: "earning", label: "Earnings" },
-  { value: "scheme", label: "Commission schemes" },
-  { value: "ledger", label: "Ledger" },
-  { value: "payout", label: "Payouts" },
-  { value: "forecast", label: "Forecasts" },
-  { value: "document", label: "Documents" },
-  { value: "share", label: "Document shares" },
-  { value: "library", label: "Library" },
+/**
+ * The action-prefix filter. The PREFIXES are `audit_log.action` values and are
+ * never translated — they go into the query — so only the order lives here and
+ * the label for each is read from `d.auditLog.actionGroups` at render time.
+ */
+type ActionGroupKey = keyof Dictionary["adminAi"]["auditLog"]["actionGroups"];
+
+const ACTION_GROUP_KEYS: readonly ActionGroupKey[] = [
+  "all",
+  "ai",
+  "settings",
+  "user",
+  "auth",
+  "account",
+  "model",
+  "operator",
+  "platform",
+  "session",
+  "earning",
+  "scheme",
+  "ledger",
+  "payout",
+  "forecast",
+  "document",
+  "share",
+  "library",
 ];
-const ALLOWED_PREFIXES = new Set(ACTION_GROUPS.map((g) => g.value).filter(Boolean));
+/** `all` is the empty filter; every other key IS the prefix it filters on. */
+const ALLOWED_PREFIXES = new Set<string>(ACTION_GROUP_KEYS.filter((k) => k !== "all"));
 
 /**
  * The dotted-verb catalogue legend (docs/04 §4.16, docs/05 §9). AI-governance
  * verbs first — those are the reason this viewer exists alongside the AI
  * settings surface.
+ *
+ * Only the STRUCTURE lives here: which verbs belong to which group, and in what
+ * order. The verbs themselves are `audit_log.action` values (never translated),
+ * and each one's gloss comes from `d.auditLog.verbs`.
  */
+type VerbKey = keyof Dictionary["adminAi"]["auditLog"]["verbs"];
+type GroupTitleKey = "catalogGroupAi" | "catalogGroupUsers" | "catalogGroupDocuments" | "catalogGroupMoney";
+
 const VERB_CATALOG: ReadonlyArray<{
-  group: string;
-  verbs: ReadonlyArray<{ verb: string; desc: string }>;
+  titleKey: GroupTitleKey;
+  verbs: readonly VerbKey[];
 }> = [
   {
-    group: "AI & settings",
+    titleKey: "catalogGroupAi",
     verbs: [
-      { verb: "ai.model_switch", desc: "Active AI provider switched (old → new in metadata)." },
-      { verb: "ai.settings_update", desc: "An ai.* setting changed — model ID or budget." },
-      { verb: "ai.classify", desc: "A Library file classified by the AI (one per provider crossing)." },
-      { verb: "ai.reindex", desc: "Semantic-search embeddings rebuilt / re-embedded." },
-      { verb: "ai.report_create", desc: "An AI market report was generated." },
-      { verb: "settings.update", desc: "A non-AI application setting changed." },
+      "ai.model_switch",
+      "ai.settings_update",
+      "ai.classify",
+      "ai.reindex",
+      "ai.report_create",
+      "settings.update",
     ],
   },
   {
-    group: "Users & auth",
+    titleKey: "catalogGroupUsers",
     verbs: [
-      { verb: "user.create", desc: "A profile row was created." },
-      { verb: "user.invite", desc: "An invitation was issued." },
-      { verb: "user.deactivate", desc: "An account was deactivated and its sessions revoked." },
-      { verb: "user.reactivate", desc: "A deactivated account was re-enabled." },
-      { verb: "user.role_change", desc: "A user's role changed." },
-      { verb: "auth.mfa_enrolled", desc: "A TOTP factor was enrolled." },
-      { verb: "auth.mfa_reset", desc: "A user's authenticator was reset." },
+      "user.create",
+      "user.invite",
+      "user.deactivate",
+      "user.reactivate",
+      "user.role_change",
+      "auth.mfa_enrolled",
+      "auth.mfa_reset",
     ],
   },
   {
-    group: "Documents & library",
+    titleKey: "catalogGroupDocuments",
     verbs: [
-      { verb: "document.upload", desc: "A compliance document was uploaded." },
-      { verb: "document.download", desc: "A document was downloaded via signed URL." },
-      { verb: "share.create", desc: "A shareable document link was created." },
-      { verb: "share.revoke", desc: "A share link was revoked." },
-      { verb: "share.view", desc: "A share link was opened by an anonymous viewer." },
-      { verb: "library.upload", desc: "A Library file was uploaded." },
-      { verb: "library.categorize", desc: "A Library file was filed under a category." },
+      "document.upload",
+      "document.download",
+      "share.create",
+      "share.revoke",
+      "share.view",
+      "library.upload",
+      "library.categorize",
     ],
   },
   {
-    group: "Money",
+    titleKey: "catalogGroupMoney",
     verbs: [
-      { verb: "payout.create", desc: "A payout was drafted." },
-      { verb: "payout.approve", desc: "A payout was approved (maker-checker)." },
-      { verb: "payout.paid", desc: "A payout was marked paid and settled to the ledger." },
-      { verb: "payout.cancel", desc: "A payout was cancelled." },
-      { verb: "ledger.post", desc: "A ledger entry (adjustment / deduction / share) was posted." },
-      { verb: "scheme.update", desc: "A commission scheme was created or amended." },
-      { verb: "forecast.snapshot", desc: "A forecast snapshot was taken for accuracy tracking." },
+      "payout.create",
+      "payout.approve",
+      "payout.paid",
+      "payout.cancel",
+      "ledger.post",
+      "scheme.update",
+      "forecast.snapshot",
     ],
   },
 ];
@@ -141,7 +160,13 @@ function scalarText(v: unknown): string {
   return JSON.stringify(v);
 }
 
-function MetaCell({ metadata }: { metadata: Json }) {
+function MetaCell({
+  metadata,
+  fieldsCount,
+}: {
+  metadata: Json;
+  fieldsCount: (n: number) => string;
+}) {
   if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) {
     return <span className="text-muted">{EM_DASH}</span>;
   }
@@ -168,7 +193,7 @@ function MetaCell({ metadata }: { metadata: Json }) {
   return (
     <details className="text-xs">
       <summary className="cursor-pointer text-muted hover:text-foreground">
-        {keys.length} field{keys.length > 1 ? "s" : ""}
+        {fieldsCount(keys.length)}
       </summary>
       <pre className="mt-1 max-w-md overflow-x-auto rounded bg-surface-2 p-2 text-[11px] leading-relaxed text-foreground">
         {JSON.stringify(obj, null, 2)}
@@ -193,6 +218,10 @@ export default async function AdminAuditLogPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { supabase } = await requireRole("super_admin");
+  const locale = await getLocale();
+  const dict = await getDict();
+  const d = dict.adminAi.auditLog;
+  const fm = fmt(locale);
   const sp = await searchParams;
 
   const rawAction = firstString(sp.action);
@@ -258,28 +287,40 @@ export default async function AdminAuditLogPage({
     return qs ? `/admin/audit-log?${qs}` : "/admin/audit-log";
   }
 
+  const actionOptions = ACTION_GROUP_KEYS.map((key) => ({
+    value: key === "all" ? "" : key,
+    label: d.actionGroups[key],
+  }));
+
   const actorOptions = [
-    { value: "", label: "All actors" },
-    { value: "system", label: "System / triggers" },
-    ...profiles.map((p) => ({ value: p.id, label: `${p.full_name} · ${ROLE_LABELS[p.role]}` })),
+    { value: "", label: d.allActors },
+    { value: "system", label: d.systemActors },
+    ...profiles.map((p) => ({
+      value: p.id,
+      label: `${p.full_name} · ${roleLabel(locale, p.role)}`,
+    })),
   ];
 
   return (
     <>
       <PageHeader
-        title="Audit log"
-        description="The append-only trail of every security-relevant event. Super Admin only; readable, never editable. Filter by action, actor and date."
-        breadcrumbs={[{ label: "Admin" }, { label: "Audit log" }]}
+        title={d.title}
+        description={d.description}
+        breadcrumbs={[{ label: dict.nav.sectionAdmin }, { label: d.title }]}
       />
 
       <StatTileRow className="mb-6" columns={3}>
         <StatTile
-          label={hasFilter ? "Matching events" : "Total events"}
-          value={fmtNumber(total)}
-          hint={hasFilter ? "For the current filter" : "Across the whole trail"}
+          label={hasFilter ? d.statMatching : d.statTotal}
+          value={fm.number(total)}
+          hint={hasFilter ? d.hintFiltered : d.hintAll}
         />
-        <StatTile label="This page" value={rows.length} hint={`Up to ${PAGE_SIZE} per page`} />
-        <StatTile label="Page" value={`${page} / ${totalPages}`} hint="Newest first" />
+        <StatTile label={d.statThisPage} value={rows.length} hint={d.hintPerPage(PAGE_SIZE)} />
+        <StatTile
+          label={d.statPage}
+          value={`${page} / ${totalPages}`}
+          hint={d.hintNewestFirst}
+        />
       </StatTileRow>
 
       {/* -------------------------------------------------------- filters --- */}
@@ -287,34 +328,34 @@ export default async function AdminAuditLogPage({
         <CardBody>
           <form method="get" className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Field>
-              <Label htmlFor="filter-action">Action</Label>
+              <Label htmlFor="filter-action">{d.filterAction}</Label>
               <Select
                 id="filter-action"
                 name="action"
                 defaultValue={actionPrefix}
-                options={ACTION_GROUPS}
+                options={actionOptions}
               />
             </Field>
             <Field>
-              <Label htmlFor="filter-actor">Actor</Label>
+              <Label htmlFor="filter-actor">{d.filterActor}</Label>
               <Select id="filter-actor" name="actor" defaultValue={actor} options={actorOptions} />
             </Field>
             <Field>
-              <Label htmlFor="filter-from">From</Label>
+              <Label htmlFor="filter-from">{d.filterFrom}</Label>
               <Input id="filter-from" name="from" type="date" defaultValue={from} />
             </Field>
             <Field>
-              <Label htmlFor="filter-to">To</Label>
+              <Label htmlFor="filter-to">{d.filterTo}</Label>
               <Input id="filter-to" name="to" type="date" defaultValue={to} />
             </Field>
             <div className="flex items-center gap-2">
-              <Button type="submit">Apply</Button>
+              <Button type="submit">{dict.common.apply}</Button>
               {hasFilter ? (
                 <Link
                   href="/admin/audit-log"
                   className="text-xs text-muted underline-offset-4 hover:text-foreground hover:underline"
                 >
-                  Clear
+                  {dict.common.clear}
                 </Link>
               ) : null}
             </div>
@@ -325,23 +366,19 @@ export default async function AdminAuditLogPage({
       {/* --------------------------------------------------------- results --- */}
       {rows.length === 0 ? (
         <EmptyState
-          title="No matching events"
-          description={
-            hasFilter
-              ? "Nothing in the trail matches this filter. Widen the date range or clear the filter."
-              : "The audit trail is empty. Events appear here as soon as they are recorded."
-          }
+          title={d.emptyTitle}
+          description={hasFilter ? d.emptyFiltered : d.emptyAll}
         />
       ) : (
         <Table containerClassName="rounded-lg border border-border">
           <THead>
             <TR>
-              <TH>When</TH>
-              <TH>Actor</TH>
-              <TH>Action</TH>
-              <TH>Target</TH>
-              <TH>Details</TH>
-              <TH>IP</TH>
+              <TH>{d.colWhen}</TH>
+              <TH>{d.colActor}</TH>
+              <TH>{d.colAction}</TH>
+              <TH>{d.colTarget}</TH>
+              <TH>{d.colDetails}</TH>
+              <TH>{d.colIp}</TH>
             </TR>
           </THead>
           <TBody>
@@ -349,13 +386,13 @@ export default async function AdminAuditLogPage({
               const profile = row.actor_id ? profileById.get(row.actor_id) : null;
               return (
                 <TR key={row.id}>
-                  <TD className="whitespace-nowrap text-muted">{dateTime(row.created_at)}</TD>
+                  <TD className="whitespace-nowrap text-muted">{fm.dateTime(row.created_at)}</TD>
                   <TD>
                     {profile ? (
                       <>
                         <div className="font-medium text-foreground">{profile.full_name}</div>
                         <div className="text-xs text-muted">
-                          {row.actor_role ? ROLE_LABELS[row.actor_role] : profile.email}
+                          {row.actor_role ? roleLabel(locale, row.actor_role) : profile.email}
                         </div>
                       </>
                     ) : row.actor_id ? (
@@ -363,7 +400,7 @@ export default async function AdminAuditLogPage({
                         {row.actor_id.slice(0, 8)}…
                       </span>
                     ) : (
-                      <Badge variant="muted">System</Badge>
+                      <Badge variant="muted">{d.systemBadge}</Badge>
                     )}
                   </TD>
                   <TD>
@@ -388,7 +425,7 @@ export default async function AdminAuditLogPage({
                     )}
                   </TD>
                   <TD>
-                    <MetaCell metadata={row.metadata} />
+                    <MetaCell metadata={row.metadata} fieldsCount={d.fieldsCount} />
                   </TD>
                   <TD className="whitespace-nowrap font-mono text-xs text-muted">
                     {row.ip ?? EM_DASH}
@@ -404,22 +441,22 @@ export default async function AdminAuditLogPage({
       {rows.length > 0 ? (
         <div className="mt-4 flex items-center justify-between gap-3">
           <span className="text-xs text-muted">
-            Showing {rangeFrom + 1}–{rangeFrom + rows.length} of {fmtNumber(total)}
+            {d.showingRange(rangeFrom + 1, rangeFrom + rows.length, fm.number(total))}
           </span>
           <div className="flex items-center gap-2">
             {page > 1 ? (
               <Link href={hrefFor({ page: page - 1 })} className={PAGER_LINK}>
-                Previous
+                {dict.common.previous}
               </Link>
             ) : (
-              <span className={cn(PAGER_LINK, PAGER_DISABLED)}>Previous</span>
+              <span className={cn(PAGER_LINK, PAGER_DISABLED)}>{dict.common.previous}</span>
             )}
             {page < totalPages ? (
               <Link href={hrefFor({ page: page + 1 })} className={PAGER_LINK}>
-                Next
+                {dict.common.next}
               </Link>
             ) : (
-              <span className={cn(PAGER_LINK, PAGER_DISABLED)}>Next</span>
+              <span className={cn(PAGER_LINK, PAGER_DISABLED)}>{dict.common.next}</span>
             )}
           </div>
         </div>
@@ -427,26 +464,23 @@ export default async function AdminAuditLogPage({
 
       {/* ---------------------------------------------------------- legend --- */}
       <Card className="mt-8">
-        <CardHeader
-          title="Verb catalogue"
-          description="The canonical dotted-verb vocabulary of the audit trail (docs/04 §4.16, docs/05 §9)."
-        />
+        <CardHeader title={d.catalogTitle} description={d.catalogDescription} />
         <CardBody>
           <div className="grid gap-6 sm:grid-cols-2">
             {VERB_CATALOG.map((group) => (
-              <div key={group.group}>
+              <div key={group.titleKey}>
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-                  {group.group}
+                  {d[group.titleKey]}
                 </h3>
                 <dl className="flex flex-col gap-2">
-                  {group.verbs.map((entry) => (
-                    <div key={entry.verb} className="flex flex-col gap-0.5">
+                  {group.verbs.map((verb) => (
+                    <div key={verb} className="flex flex-col gap-0.5">
                       <dt>
-                        <Badge variant={verbVariant(entry.verb)}>
-                          <span className="font-mono">{entry.verb}</span>
+                        <Badge variant={verbVariant(verb)}>
+                          <span className="font-mono">{verb}</span>
                         </Badge>
                       </dt>
-                      <dd className="text-xs text-muted">{entry.desc}</dd>
+                      <dd className="text-xs text-muted">{d.verbs[verb]}</dd>
                     </div>
                   ))}
                 </dl>

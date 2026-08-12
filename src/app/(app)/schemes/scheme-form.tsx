@@ -12,6 +12,8 @@ import { Select, type SelectOption } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { toNumber } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { createScheme, updateScheme } from "./actions";
 import { SCOPE_META, type SchemeScope } from "./scheme-meta";
@@ -95,6 +97,8 @@ export function SchemeForm({
   accountOptions?: SelectOption[];
 }) {
   const router = useRouter();
+  const d = useDict();
+  const fm = fmt(useLocale());
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
@@ -155,28 +159,34 @@ export function SchemeForm({
           });
 
       if (result.ok) {
-        success(isCreate ? "Scheme added" : "Scheme updated", result.message);
+        success(
+          isCreate ? d.money.schemes.formAddToastOk : d.money.schemes.formEditToastOk,
+          result.message,
+        );
         setOpen(false);
         router.refresh();
       } else {
-        error(isCreate ? "Could not add scheme" : "Could not update scheme", result.error);
+        error(
+          isCreate ? d.money.schemes.formAddToastErr : d.money.schemes.formEditToastErr,
+          result.error,
+        );
       }
     });
   }
 
   const scopeOptions: SelectOption[] = [
-    { value: "default", label: SCOPE_META.default.label },
-    { value: "model", label: SCOPE_META.model.label },
-    { value: "account", label: SCOPE_META.account.label },
+    { value: "default", label: d.money.schemes.scope.default.label },
+    { value: "model", label: d.money.schemes.scope.model.label },
+    { value: "account", label: d.money.schemes.scope.account.label },
   ];
 
   return (
     <>
       {isCreate ? (
-        <Button onClick={openDialog}>New scheme</Button>
+        <Button onClick={openDialog}>{d.money.schemes.formNewCta}</Button>
       ) : (
         <Button variant="outline" size="sm" onClick={openDialog}>
-          Edit
+          {d.common.edit}
         </Button>
       )}
 
@@ -184,20 +194,16 @@ export function SchemeForm({
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title={isCreate ? "Add a commission scheme" : "Edit commission scheme"}
-        description={
-          isCreate
-            ? "Split studio net revenue three ways. Resolution runs account → model → default; the most specific effective scheme wins."
-            : "Adjust this scheme's split or effective window. Its scope is fixed — a different scope is a different scheme."
-        }
+        title={isCreate ? d.money.schemes.formAddTitle : d.money.schemes.formEditTitle}
+        description={isCreate ? d.money.schemes.formAddDesc : d.money.schemes.formEditDesc}
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="scheme-form" loading={isRunning} disabled={!sumOk}>
-              {isCreate ? "Add scheme" : "Save changes"}
+              {isCreate ? d.money.schemes.formAddSubmit : d.money.schemes.formSaveSubmit}
             </Button>
           </>
         }
@@ -206,9 +212,9 @@ export function SchemeForm({
           {/* -------------------------------------------------------- scope --- */}
           {isCreate ? (
             <>
-              <Field help={SCOPE_META[form.scope].description}>
+              <Field help={d.money.schemes.scope[form.scope].description}>
                 <Label htmlFor="scheme-scope" required>
-                  Scope
+                  {d.money.schemes.formScope}
                 </Label>
                 <Select
                   id="scheme-scope"
@@ -219,13 +225,13 @@ export function SchemeForm({
               </Field>
 
               {form.scope === "model" ? (
-                <Field help="The scheme applies to every account this model owns.">
+                <Field help={d.money.schemes.formModelHelp}>
                   <Label htmlFor="scheme-model" required>
-                    Model
+                    {d.money.schemes.formModel}
                   </Label>
                   <Select
                     id="scheme-model"
-                    placeholder="Select a model…"
+                    placeholder={d.money.schemes.formSelectModel}
                     required
                     options={modelOptions}
                     value={form.model_id}
@@ -235,13 +241,13 @@ export function SchemeForm({
               ) : null}
 
               {form.scope === "account" ? (
-                <Field help="The scheme applies to this single platform account only.">
+                <Field help={d.money.schemes.formAccountHelp}>
                   <Label htmlFor="scheme-account" required>
-                    Platform account
+                    {d.money.schemes.formAccount}
                   </Label>
                   <Select
                     id="scheme-account"
-                    placeholder="Select an account…"
+                    placeholder={d.money.schemes.formSelectAccount}
                     required
                     options={accountOptions}
                     value={form.platform_account_id}
@@ -251,11 +257,11 @@ export function SchemeForm({
               ) : null}
             </>
           ) : scheme ? (
-            <Field help="A scheme's scope cannot change — create a new scheme for a different scope.">
-              <Label>Scope</Label>
+            <Field help={d.money.schemes.formScopeLockedHelp}>
+              <Label>{d.money.schemes.formScope}</Label>
               <div className="flex items-center gap-2">
                 <Badge variant={SCOPE_META[scheme.scope].badge}>
-                  {SCOPE_META[scheme.scope].label}
+                  {d.money.schemes.scope[scheme.scope].label}
                 </Badge>
                 <span className="text-sm text-muted">{scheme.scopeLabel}</span>
               </div>
@@ -265,8 +271,8 @@ export function SchemeForm({
           {/* ------------------------------------------------------- splits --- */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Field>
-              <Label htmlFor="scheme-model-pct" required hint="0–100%">
-                Model %
+              <Label htmlFor="scheme-model-pct" required hint={d.money.schemes.formPctHint}>
+                {d.money.schemes.formModelPct}
               </Label>
               <Input
                 id="scheme-model-pct"
@@ -282,8 +288,12 @@ export function SchemeForm({
             </Field>
 
             <Field>
-              <Label htmlFor="scheme-operator-pct" required hint="pool, 0–100%">
-                Operator %
+              <Label
+                htmlFor="scheme-operator-pct"
+                required
+                hint={d.money.schemes.formOperatorPctHint}
+              >
+                {d.money.schemes.formOperatorPct}
               </Label>
               <Input
                 id="scheme-operator-pct"
@@ -299,8 +309,8 @@ export function SchemeForm({
             </Field>
 
             <Field>
-              <Label htmlFor="scheme-studio-pct" required hint="0–100%">
-                Studio %
+              <Label htmlFor="scheme-studio-pct" required hint={d.money.schemes.formPctHint}>
+                {d.money.schemes.formStudioPct}
               </Label>
               <Input
                 id="scheme-studio-pct"
@@ -323,15 +333,15 @@ export function SchemeForm({
                 : "flex items-center justify-between rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
             }
           >
-            <span>Must total exactly 100%. Operator % is the pool, split later by assignment weights.</span>
-            <span className="font-semibold tabular-nums">{sum}%</span>
+            <span>{d.money.schemes.formSumRule}</span>
+            <span className="font-semibold tabular-nums">{fm.percent(sum)}</span>
           </div>
 
           {/* ----------------------------------------------- effective dates --- */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field help="The scheme governs periods whose close date falls in this window.">
+            <Field help={d.money.schemes.formEffectiveFromHelp}>
               <Label htmlFor="scheme-from" required>
-                Effective from
+                {d.money.schemes.formEffectiveFrom}
               </Label>
               <Input
                 id="scheme-from"
@@ -342,8 +352,8 @@ export function SchemeForm({
               />
             </Field>
 
-            <Field help="Leave blank for open-ended. Set a date to close (supersede) this scheme.">
-              <Label htmlFor="scheme-to">Effective to</Label>
+            <Field help={d.money.schemes.formEffectiveToHelp}>
+              <Label htmlFor="scheme-to">{d.money.schemes.formEffectiveTo}</Label>
               <Input
                 id="scheme-to"
                 type="date"
@@ -354,13 +364,13 @@ export function SchemeForm({
             </Field>
           </div>
 
-          <Field help="Optional context — why this split, or the agreement it reflects.">
-            <Label htmlFor="scheme-notes">Notes</Label>
+          <Field help={d.money.schemes.formNotesHelp}>
+            <Label htmlFor="scheme-notes">{d.common.notes}</Label>
             <Textarea
               id="scheme-notes"
               value={form.notes}
               onChange={(e) => field("notes")(e.target.value)}
-              placeholder="Anything the finance team should know"
+              placeholder={d.money.schemes.formNotesPlaceholder}
             />
           </Field>
         </form>

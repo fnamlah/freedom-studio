@@ -3,14 +3,21 @@
  * module (docs/12). No server-only imports here, so this file may be pulled into
  * both the server actions/pages and the `"use client"` components.
  *
- * It carries: the review-status and category badge vocabularies; the REQUIRED
- * upload notice from docs/12 §6; the virtual-folder helpers (docs/12 §1 — the
- * folder is a DB column only, so the tree is derived, never stored); and the
- * client-side driver for the batch classification loop of docs/12 §4.4.
+ * It carries: the review-status and category badge vocabularies; the
+ * virtual-folder helpers (docs/12 §1 — the folder is a DB column only, so the
+ * tree is derived, never stored); and the client-side driver for the batch
+ * classification loop of docs/12 §4.4.
+ *
+ * Display TEXT lives in `@/lib/i18n` — including the REQUIRED upload notice of
+ * docs/12 §6 (`d.library.exemptNotice`). The one exception is a category's own
+ * name and description: the vocabulary is user-manageable, so those come from
+ * `doc_categories` (`name`/`name_ru`, migration 019) and are picked below.
  */
 
 import type { BadgeVariant } from "@/components/ui/badge";
 import type { Database } from "@/lib/database.types";
+import type { Dictionary } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n/locales";
 
 export type AiReviewStatus = Database["public"]["Enums"]["ai_review_status"];
 export type AiProvider = Database["public"]["Enums"]["ai_provider"];
@@ -20,10 +27,42 @@ export type CategoryLite = {
   id: string;
   slug: string;
   name: string;
+  /** Russian display name (migration 019). Null falls back to `name`. */
+  name_ru: string | null;
   description: string | null;
+  /** Russian prompt text (migration 019). Null falls back to `description`. */
+  description_ru: string | null;
   ai_enabled: boolean;
   sort: number;
 };
+
+/** The columns every category query must select for the helpers below to work. */
+export const CATEGORY_COLUMNS =
+  "id, slug, name, name_ru, description, description_ru, ai_enabled, sort";
+
+/**
+ * A category's display name in the reader's language. The vocabulary is
+ * user-manageable — a Super Admin may add a category the dictionary has never
+ * heard of — so the translation lives in the row, not in `@/lib/i18n`. A
+ * category added without a Russian name still renders (as its `name`) rather
+ * than as a blank pill.
+ */
+export function categoryName(
+  category: Pick<CategoryLite, "name" | "name_ru"> | null | undefined,
+  locale: Locale,
+): string {
+  if (!category) return "";
+  return (locale === "ru" ? category.name_ru : null) || category.name;
+}
+
+/** The same fallback for the classifier prompt text shown in the admin table. */
+export function categoryDescription(
+  category: Pick<CategoryLite, "description" | "description_ru"> | null | undefined,
+  locale: Locale,
+): string | null {
+  if (!category) return null;
+  return (locale === "ru" ? category.description_ru : null) || category.description;
+}
 
 export type LibraryFileLite = {
   id: string;
@@ -46,16 +85,21 @@ export type LibraryFileLite = {
 
 /* ------------------------------------------------------- review-status meta --- */
 
+/**
+ * Badge appearance per review status. The LABELS live in `d.library.aiStatus`
+ * — keyed by the same enum values — because they are read by people; only the
+ * colour is a property of the state itself.
+ */
 export const AI_STATUS_META: Record<
   AiReviewStatus,
-  { label: string; variant: BadgeVariant; dot?: boolean }
+  { variant: BadgeVariant; dot?: boolean }
 > = {
-  pending: { label: "Pending", variant: "muted" },
-  suggested: { label: "Needs review", variant: "warning", dot: true },
-  confirmed: { label: "Confirmed", variant: "success" },
-  overridden: { label: "Overridden", variant: "primary" },
-  skipped: { label: "Skipped", variant: "muted" },
-  failed: { label: "Failed", variant: "danger" },
+  pending: { variant: "muted" },
+  suggested: { variant: "warning", dot: true },
+  confirmed: { variant: "success" },
+  overridden: { variant: "primary" },
+  skipped: { variant: "muted" },
+  failed: { variant: "danger" },
 };
 
 /**
@@ -78,15 +122,6 @@ export const CATEGORY_SLUG_VARIANT: Record<string, BadgeVariant> = {
 export function categoryVariant(slug: string | null | undefined): BadgeVariant {
   return (slug && CATEGORY_SLUG_VARIANT[slug]) || "neutral";
 }
-
-/**
- * The REQUIRED sentence from docs/12 §6 ("The honest limitation"). Exemption is
- * a decision made AT UPLOAD: a file nobody marks exempt transits the provider
- * once, before any suggestion exists to review. This must be stated plainly in
- * the upload UI — it is the studio's procedural protection, not a technical one.
- */
-export const EXEMPT_NOTICE =
-  "Anything not marked exempt will be sent to the AI provider once for classification.";
 
 /* --------------------------------------------------------------- upload caps --- */
 
@@ -133,8 +168,16 @@ export function normalizeFolderPath(input: string | null | undefined): string {
   return segments.length === 0 ? "/" : `/${segments.join("/")}`;
 }
 
-/** Builds the folder tree rooted at `/` from the files' `folder_path` values. */
-export function buildFolderTree(files: { folder_path: string }[]): FolderNode {
+/**
+ * Builds the folder tree rooted at `/` from the files' `folder_path` values.
+ * `rootName` is the only piece of display text in the tree — every other node is
+ * named by a path segment the user typed — so it is passed in translated rather
+ * than hardcoded here (`d.library.allFiles`).
+ */
+export function buildFolderTree(
+  files: { folder_path: string }[],
+  rootName: string,
+): FolderNode {
   const direct = new Map<string, number>();
   const allPaths = new Set<string>(["/"]);
 
@@ -155,7 +198,7 @@ export function buildFolderTree(files: { folder_path: string }[]): FolderNode {
   for (const path of allPaths) {
     nodes.set(path, {
       path,
-      name: path === "/" ? "All files" : path.slice(path.lastIndexOf("/") + 1),
+      name: path === "/" ? rootName : path.slice(path.lastIndexOf("/") + 1),
       directCount: direct.get(path) ?? 0,
       totalCount: 0,
       depth: path === "/" ? 0 : path.split("/").length - 1,
@@ -209,7 +252,10 @@ export type ClassifyOutcome =
  * expected to return `{ done, remaining }`; a 404/501/503 (route absent) or a
  * `{ configured: false }` body flips the UI into the not-configured state.
  */
-export async function runClassify(body: { file_id?: string } = {}): Promise<ClassifyOutcome> {
+export async function runClassify(
+  d: Dictionary,
+  body: { file_id?: string } = {},
+): Promise<ClassifyOutcome> {
   let res: Response;
   try {
     res = await fetch("/api/ai/classify", {
@@ -218,7 +264,7 @@ export async function runClassify(body: { file_id?: string } = {}): Promise<Clas
       body: JSON.stringify(body ?? {}),
     });
   } catch {
-    return { status: "error", message: "Could not reach the classification service." };
+    return { status: "error", message: d.library.classifyUnreachable };
   }
 
   if (res.status === 404 || res.status === 501 || res.status === 503) {
@@ -226,7 +272,7 @@ export async function runClassify(body: { file_id?: string } = {}): Promise<Clas
   }
 
   if (!res.ok) {
-    let message = "Classification failed. Please try again.";
+    let message = d.library.classifyFailed;
     try {
       const data = (await res.json()) as { error?: unknown };
       if (typeof data?.error === "string") message = data.error;
@@ -249,7 +295,7 @@ export async function runClassify(body: { file_id?: string } = {}): Promise<Clas
       remaining: Number(data?.remaining ?? 0),
     };
   } catch {
-    return { status: "error", message: "Unexpected response from the classification service." };
+    return { status: "error", message: d.library.classifyBadResponse };
   }
 }
 

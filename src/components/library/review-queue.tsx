@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { ratioPercent } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { categorizeLibraryFile } from "@/app/(app)/library/actions";
 
 import { CategoryBadge } from "./category-badge";
-import type { CategoryLite, LibraryFileLite } from "./library-meta";
+import { categoryName, type CategoryLite, type LibraryFileLite } from "./library-meta";
 
 /**
  * Review queue (docs/12 §4.3) — files with `ai_status = 'suggested'`. Human
@@ -30,11 +31,13 @@ export function ReviewQueue({
   categories: CategoryLite[];
   categoryById: Map<string, CategoryLite>;
 }) {
+  const d = useDict();
+
   if (files.length === 0) {
     return (
       <EmptyState
-        title="Nothing to review"
-        description="When the classifier proposes a category, the file appears here for you to confirm or override. The machine never files anything on its own."
+        title={d.library.reviewEmptyTitle}
+        description={d.library.reviewEmptyDescription}
       />
     );
   }
@@ -68,6 +71,9 @@ function ReviewRow({
 }) {
   const router = useRouter();
   const { success, error } = useToast();
+  const d = useDict();
+  const locale = useLocale();
+  const fm = fmt(locale);
   const [override, setOverride] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -75,17 +81,17 @@ function ReviewRow({
     startTransition(async () => {
       const res = await categorizeLibraryFile({ file_id: file.id, decision: "confirm" });
       if (res.ok) {
-        success("Suggestion confirmed", res.message);
+        success(d.library.confirmedTitle, res.message);
         router.refresh();
       } else {
-        error("Could not confirm", res.error);
+        error(d.library.confirmFailedTitle, res.error);
       }
     });
   }
 
   function applyOverride() {
     if (!override) {
-      error("Choose a category", "Pick a category to file this file under.");
+      error(d.library.chooseCategoryTitle, d.library.chooseCategoryBody);
       return;
     }
     startTransition(async () => {
@@ -95,10 +101,10 @@ function ReviewRow({
         category_id: override,
       });
       if (res.ok) {
-        success("Filed", res.message);
+        success(d.library.filedTitle, res.message);
         router.refresh();
       } else {
-        error("Could not file", res.error);
+        error(d.library.fileFailedTitle, res.error);
       }
     });
   }
@@ -115,10 +121,12 @@ function ReviewRow({
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted">
-          <span>Suggested</span>
+          <span>{d.library.suggestedLabel}</span>
           <CategoryBadge category={suggestion} />
           {file.ai_confidence !== null ? (
-            <span className="tabular-nums">{ratioPercent(file.ai_confidence, { decimals: 0 })}</span>
+            <span className="tabular-nums">
+              {fm.percent(file.ai_confidence * 100, { decimals: 0 })}
+            </span>
           ) : null}
         </div>
       </div>
@@ -140,7 +148,7 @@ function ReviewRow({
 
       {file.ai_rationale ? (
         <p className="mt-2 text-xs text-muted">
-          <span className="font-medium text-foreground">Why: </span>
+          <span className="font-medium text-foreground">{d.library.why}</span>
           {file.ai_rationale}
         </p>
       ) : null}
@@ -152,22 +160,22 @@ function ReviewRow({
           loading={pending}
           disabled={!file.ai_suggested_category_id}
         >
-          Confirm suggestion
+          {d.library.confirmSuggestion}
         </Button>
-        <span className="text-xs text-muted">or override:</span>
+        <span className="text-xs text-muted">{d.library.orOverride}</span>
         <Select
-          aria-label={`Override category for ${file.name}`}
-          placeholder="Choose a category…"
+          aria-label={d.library.overrideAria(file.name)}
+          placeholder={d.library.chooseCategoryPlaceholder}
           className="h-9 w-auto min-w-44"
-          options={categories.map((c) => ({
-            value: c.id,
-            label: c.ai_enabled ? c.name : `${c.name} (AI off)`,
-          }))}
+          options={categories.map((c) => {
+            const name = categoryName(c, locale);
+            return { value: c.id, label: c.ai_enabled ? name : d.library.aiOff(name) };
+          })}
           value={override}
           onChange={(e) => setOverride(e.target.value)}
         />
         <Button variant="outline" size="sm" onClick={applyOverride} loading={pending} disabled={!override}>
-          Apply override
+          {d.library.applyOverride}
         </Button>
       </div>
     </div>

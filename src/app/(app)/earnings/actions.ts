@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -28,14 +29,18 @@ import { isAuthzError } from "@/lib/supabase/admin";
  *
  * `model_id` is denormalized onto the row (docs/04 §4.7) and derived server-side
  * from the chosen account, so it always matches the account's owner.
+ *
+ * Schemas are FACTORIES taking the caller's dictionary: a module-scope schema is
+ * built at import time, where no locale exists, so its messages could only ever be
+ * English. The language comes off the profile `requireRole()` already loaded.
+ *
+ * The `USD` currency default is data, not display — it is the column default and
+ * stays untranslated in every locale.
  */
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
 /* -------------------------------------------------------------- validation --- */
-
-const emptyToNull = (value: unknown) =>
-  typeof value === "string" && value.trim() === "" ? null : value;
 
 /** Parses a strict `YYYY-MM-DD` and rejects impossible calendar dates. */
 function isValidYmd(value: string): boolean {
@@ -52,45 +57,48 @@ function isValidYmd(value: string): boolean {
   );
 }
 
-const dateOnly = z.string().refine(isValidYmd, "Enter a valid date (YYYY-MM-DD).");
+const dateOnly = (d: Dictionary) =>
+  z.string().refine(isValidYmd, d.studio.earnings.errDateInvalid);
 
-const money2 = z.coerce
-  .number({ invalid_type_error: "Enter an amount." })
-  .min(0, "Amount can't be negative.")
-  .max(9_999_999_999.99, "That amount is too large.");
+const money2 = (d: Dictionary) =>
+  z.coerce
+    .number({ invalid_type_error: d.studio.earnings.errAmountType })
+    .min(0, d.studio.earnings.errAmountMin)
+    .max(9_999_999_999.99, d.studio.earnings.errAmountTooLarge);
 
 /** Optional money field that defaults to 0 (matches `platform_fee_amount` default). */
-const money2OrZero = z.preprocess(
-  (v) => (v === "" || v === null || v === undefined ? 0 : v),
-  money2,
-);
+const money2OrZero = (d: Dictionary) =>
+  z.preprocess((v) => (v === "" || v === null || v === undefined ? 0 : v), money2(d));
 
-const currency = z.preprocess(
-  (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : "USD"),
-  z.string().regex(/^[A-Z]{3}$/, "Use a 3-letter currency code, e.g. USD."),
-);
+const currency = (d: Dictionary) =>
+  z.preprocess(
+    (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : "USD"),
+    z.string().regex(/^[A-Z]{3}$/, d.studio.earnings.errCurrency),
+  );
 
-const earningFields = {
-  platform_account_id: z.string().uuid("Choose a platform account."),
-  period_start: dateOnly,
-  period_end: dateOnly,
-  gross_amount: money2,
-  platform_fee_amount: money2OrZero,
-  net_amount: money2,
-  currency,
-};
+const earningFields = (d: Dictionary) => ({
+  platform_account_id: z.string().uuid(d.studio.earnings.errAccountRequired),
+  period_start: dateOnly(d),
+  period_end: dateOnly(d),
+  gross_amount: money2(d),
+  platform_fee_amount: money2OrZero(d),
+  net_amount: money2(d),
+  currency: currency(d),
+});
 
 const periodOrdered = (data: { period_start: string; period_end: string }) =>
   data.period_end >= data.period_start;
-const periodOrderedMessage = {
-  message: "The period end must be on or after the period start.",
+const periodOrderedMessage = (d: Dictionary) => ({
+  message: d.studio.earnings.errPeriodOrder,
   path: ["period_end"],
-};
+});
 
-const createSchema = z.object(earningFields).refine(periodOrdered, periodOrderedMessage);
-const updateSchema = z
-  .object({ id: z.string().uuid(), ...earningFields })
-  .refine(periodOrdered, periodOrderedMessage);
+const createSchema = (d: Dictionary) =>
+  z.object(earningFields(d)).refine(periodOrdered, periodOrderedMessage(d));
+const updateSchema = (d: Dictionary) =>
+  z
+    .object({ id: z.string().uuid(), ...earningFields(d) })
+    .refine(periodOrdered, periodOrderedMessage(d));
 const deleteSchema = z.object({ id: z.string().uuid() });
 
 /* ------------------------------------------------------------------ types --- */
@@ -109,25 +117,25 @@ export type UpdateEarningInput = EarningInput & { id: string };
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Please check the form and try again.";
+function firstIssue(error: z.ZodError, d: Dictionary): string {
+  return error.issues[0]?.message ?? d.studio.earnings.errForm;
 }
 
 /**
  * Maps a Postgres error to a friendly message. The unique-violation is the one the
  * brief calls out: each account can hold only one statement per period.
  */
-function describeDbError(code: string | undefined): string {
+function describeDbError(code: string | undefined, d: Dictionary): string {
   if (code === "23505") {
-    return "A statement already exists for this account and period. Each platform account can have only one earnings row per statement period — edit the existing one instead.";
+    return d.studio.earnings.errDuplicate;
   }
   if (code === "23514") {
-    return "That doesn't satisfy a database rule — the period end must be on or after the start, and amounts can't be negative.";
+    return d.studio.earnings.errDbCheck;
   }
   if (code === "23503") {
-    return "That platform account no longer exists. Refresh and try again.";
+    return d.studio.earnings.errAccountFk;
   }
-  return "Could not save the earnings statement. Please try again.";
+  return d.studio.earnings.errSaveFailed;
 }
 
 /**
@@ -137,6 +145,7 @@ function describeDbError(code: string | undefined): string {
 async function resolveAccountModel(
   supabase: Awaited<ReturnType<typeof requireRole>>["supabase"],
   platformAccountId: string,
+  d: Dictionary,
 ): Promise<{ ok: true; modelId: string } | { ok: false; error: string }> {
   const { data, error } = await supabase
     .from("platform_accounts")
@@ -145,10 +154,10 @@ async function resolveAccountModel(
     .maybeSingle();
 
   if (error) {
-    return { ok: false, error: "Could not verify the platform account. Please try again." };
+    return { ok: false, error: d.studio.earnings.errVerifyAccount };
   }
   if (!data) {
-    return { ok: false, error: "That platform account no longer exists. Refresh and try again." };
+    return { ok: false, error: d.studio.earnings.errAccountFk };
   }
   return { ok: true, modelId: data.model_id };
 }
@@ -156,16 +165,17 @@ async function resolveAccountModel(
 /* ------------------------------------------------------------------ create --- */
 
 export async function createEarning(input: EarningInput): Promise<ActionResult> {
-  const { supabase, user } = await requireRole("super_admin", "manager");
+  const { supabase, user, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = createSchema.safeParse(input);
+  const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
   try {
-    const owner = await resolveAccountModel(supabase, data.platform_account_id);
+    const owner = await resolveAccountModel(supabase, data.platform_account_id, d);
     if (!owner.ok) return owner;
 
     const { data: created, error } = await supabase
@@ -185,7 +195,7 @@ export async function createEarning(input: EarningInput): Promise<ActionResult> 
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(error?.code) };
+      return { ok: false, error: describeDbError(error?.code, d) };
     }
 
     await writeAudit({
@@ -203,28 +213,29 @@ export async function createEarning(input: EarningInput): Promise<ActionResult> 
 
     revalidatePath("/earnings");
     revalidatePath(`/models/${owner.modelId}`);
-    return { ok: true, message: "Statement recorded." };
+    return { ok: true, message: d.studio.earnings.msgRecorded };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to record earnings." };
+      return { ok: false, error: d.studio.earnings.errNotAuthorizedRecord };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* ------------------------------------------------------------------ update --- */
 
 export async function updateEarning(input: UpdateEarningInput): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = updateSchema.safeParse(input);
+  const parsed = updateSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
   try {
-    const owner = await resolveAccountModel(supabase, data.platform_account_id);
+    const owner = await resolveAccountModel(supabase, data.platform_account_id, d);
     if (!owner.ok) return owner;
 
     const { data: updated, error } = await supabase
@@ -244,10 +255,10 @@ export async function updateEarning(input: UpdateEarningInput): Promise<ActionRe
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(error.code) };
+      return { ok: false, error: describeDbError(error.code, d) };
     }
     if (!updated) {
-      return { ok: false, error: "That statement no longer exists." };
+      return { ok: false, error: d.studio.earnings.errGone };
     }
 
     await writeAudit({
@@ -265,23 +276,24 @@ export async function updateEarning(input: UpdateEarningInput): Promise<ActionRe
 
     revalidatePath("/earnings");
     revalidatePath(`/models/${owner.modelId}`);
-    return { ok: true, message: "Statement updated." };
+    return { ok: true, message: d.studio.earnings.msgUpdated };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to edit earnings." };
+      return { ok: false, error: d.studio.earnings.errNotAuthorizedEdit };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* ------------------------------------------------------------------ delete --- */
 
 export async function deleteEarning(input: { id: string }): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   const parsed = deleteSchema.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid statement." };
+    return { ok: false, error: d.studio.earnings.errInvalid };
   }
   const { id } = parsed.data;
 
@@ -294,10 +306,10 @@ export async function deleteEarning(input: { id: string }): Promise<ActionResult
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: "Could not delete the statement. Please try again." };
+      return { ok: false, error: d.studio.earnings.errDeleteFailed };
     }
     if (!deleted) {
-      return { ok: false, error: "That statement no longer exists." };
+      return { ok: false, error: d.studio.earnings.errGone };
     }
 
     await writeAudit({
@@ -309,11 +321,11 @@ export async function deleteEarning(input: { id: string }): Promise<ActionResult
 
     revalidatePath("/earnings");
     revalidatePath(`/models/${deleted.model_id}`);
-    return { ok: true, message: "Statement deleted." };
+    return { ok: true, message: d.studio.earnings.msgDeleted };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to delete earnings." };
+      return { ok: false, error: d.studio.earnings.errNotAuthorizedDelete };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 
 import { Select, type SelectOption } from "@/components/ui/select";
+import { useDict } from "@/lib/i18n/client";
 
 /**
  * URL-driven model filter (`?model=`), so the selection is shareable and survives
@@ -18,17 +19,18 @@ export function ModelFilter({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const d = useDict();
 
   const options: SelectOption[] = [
-    { value: "all", label: "All models" },
+    { value: "all", label: d.studio.sessions.allModels },
     ...models.map((m) => ({ value: m.id, label: m.stage_name })),
   ];
 
   return (
     <label className="flex items-center gap-2 text-xs text-muted">
-      <span className="whitespace-nowrap">Filter</span>
+      <span className="whitespace-nowrap">{d.studio.sessions.filterLabel}</span>
       <Select
-        aria-label="Filter sessions by model"
+        aria-label={d.studio.sessions.filterAria}
         className="h-9 w-56"
         options={options}
         value={current}

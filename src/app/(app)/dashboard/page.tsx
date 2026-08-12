@@ -15,8 +15,10 @@ import { PayoutTable } from "@/components/dashboard/payout-table";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
-import { requireUser, ROLE_LABELS } from "@/lib/auth/guard";
-import { money, month, number, percent } from "@/lib/format";
+import { requireUser } from "@/lib/auth/guard";
+import type { Dictionary } from "@/lib/i18n";
+import { fmt, type Formatters } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import {
   loadFinanceDashboard,
@@ -25,34 +27,50 @@ import {
   loadStudioDashboard,
 } from "./data";
 
-export const metadata: Metadata = { title: "Dashboard" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).money.dashboard.metaTitle };
+}
 
 /* ------------------------------------------------------------- formatters */
 
-const fmtNumber = (value: number) => number(value, { decimals: Number.isInteger(value) ? 0 : 1 });
-const fmtHoursTile = (value: number) => `${number(value, { decimals: 1 })}h`;
+/**
+ * Every widget below needs both the dictionary and the locale-bound formatters,
+ * so they travel together as one bundle rather than as two threaded params.
+ */
+type Ctx = { d: Dictionary; fm: Formatters };
 
-function moneyFmt(currency: string) {
-  return (value: number) => money(value, currency);
+const fmtNumber = (fm: Formatters, value: number) =>
+  fm.number(value, { decimals: Number.isInteger(value) ? 0 : 1 });
+
+/** The hours KPI: a localized number plus the translated unit ("h" / "ч"). */
+const fmtHoursTile = ({ d, fm }: Ctx, value: number) =>
+  `${fm.number(value, { decimals: 1 })} ${d.money.dashboard.hoursUnit}`;
+
+function moneyFmt(fm: Formatters, currency: string) {
+  return (value: number) => fm.money(value, currency);
 }
 
-const COMPLIANCE_COLORS = {
-  Valid: STATUS_COLORS.success,
-  Expiring: STATUS_COLORS.warning,
-  Expired: STATUS_COLORS.danger,
-} as const;
-
-function complianceData(counts: {
-  valid_count: number;
-  expiring_count: number;
-  expired_count: number;
-}) {
+/**
+ * Compliance is a STATUS chart, so its slices are coloured by name — and the
+ * names are now translated, so the colour map is keyed off the same dictionary
+ * values the slices carry.
+ */
+function complianceView(
+  { d }: Ctx,
+  counts: { valid_count: number; expiring_count: number; expired_count: number },
+) {
+  const { complianceValid, complianceExpiring, complianceExpired } = d.money.dashboard;
   return {
     slices: [
-      { name: "Valid", value: counts.valid_count },
-      { name: "Expiring", value: counts.expiring_count },
-      { name: "Expired", value: counts.expired_count },
+      { name: complianceValid, value: counts.valid_count },
+      { name: complianceExpiring, value: counts.expiring_count },
+      { name: complianceExpired, value: counts.expired_count },
     ],
+    colors: {
+      [complianceValid]: STATUS_COLORS.success,
+      [complianceExpiring]: STATUS_COLORS.warning,
+      [complianceExpired]: STATUS_COLORS.danger,
+    } as Record<string, string>,
     total: counts.valid_count + counts.expiring_count + counts.expired_count,
   };
 }
@@ -64,35 +82,44 @@ function complianceData(counts: {
  * see an empty card path never rendered (the studio view is SA/MGR only).
  */
 function LibraryCardView({
+  ctx,
   library,
 }: {
+  ctx: Ctx;
   library: Awaited<ReturnType<typeof loadStudioDashboard>>["library"];
 }) {
+  const { d, fm } = ctx;
   return (
     <Card>
       <CardHeader
-        title="Library knowledge base"
-        description="Files ingested and AI-analyzed for the assistant."
+        title={d.money.dashboard.libraryTitle}
+        description={d.money.dashboard.libraryDesc}
       />
       <CardBody>
         <dl className="grid grid-cols-2 gap-3 text-sm">
           <div>
-            <dt className="text-muted">Files</dt>
-            <dd className="text-xl font-semibold text-foreground">{fmtNumber(library.total)}</dd>
-          </div>
-          <div>
-            <dt className="text-muted">AI-analyzed</dt>
-            <dd className="text-xl font-semibold text-foreground">{fmtNumber(library.analyzed)}</dd>
-          </div>
-          <div>
-            <dt className="text-muted">Awaiting review</dt>
+            <dt className="text-muted">{d.money.dashboard.libraryFiles}</dt>
             <dd className="text-xl font-semibold text-foreground">
-              {fmtNumber(library.awaitingReview)}
+              {fmtNumber(fm, library.total)}
             </dd>
           </div>
           <div>
-            <dt className="text-muted">Not machine-readable</dt>
-            <dd className="text-xl font-semibold text-foreground">{fmtNumber(library.unreadable)}</dd>
+            <dt className="text-muted">{d.money.dashboard.libraryAnalyzed}</dt>
+            <dd className="text-xl font-semibold text-foreground">
+              {fmtNumber(fm, library.analyzed)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-muted">{d.money.dashboard.libraryAwaitingReview}</dt>
+            <dd className="text-xl font-semibold text-foreground">
+              {fmtNumber(fm, library.awaitingReview)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-muted">{d.money.dashboard.libraryUnreadable}</dt>
+            <dd className="text-xl font-semibold text-foreground">
+              {fmtNumber(fm, library.unreadable)}
+            </dd>
           </div>
         </dl>
         {library.topCategories.length > 0 && (
@@ -100,7 +127,7 @@ function LibraryCardView({
             {library.topCategories.map((c) => (
               <li key={c.name} className="flex justify-between">
                 <span className="text-muted">{c.name}</span>
-                <span className="font-medium text-foreground">{fmtNumber(c.count)}</span>
+                <span className="font-medium text-foreground">{fmtNumber(fm, c.count)}</span>
               </li>
             ))}
           </ul>
@@ -124,50 +151,52 @@ function Grid({ children }: { children: ReactNode }) {
  */
 export default async function DashboardPage() {
   const { supabase, profile, role } = await requireUser();
+  const d = await getDict();
+  const ctx: Ctx = { d, fm: fmt(await getLocale()) };
 
   const header = (
     <PageHeader
-      title={`Welcome back, ${profile.full_name.split(" ")[0]}`}
-      description={`Signed in as ${ROLE_LABELS[role]}. Your dashboard shows only what your role permits.`}
+      title={d.money.dashboard.welcome(profile.full_name.split(" ")[0])}
+      description={d.money.dashboard.signedInAs(d.roles[role])}
     />
   );
 
   if (role === "super_admin" || role === "manager") {
     const governance = role === "super_admin";
-    const data = await loadStudioDashboard(supabase, { governance });
+    const data = await loadStudioDashboard(supabase, { governance, d });
     return (
       <>
         {header}
-        <StudioDashboard data={data} governance={governance} />
+        <StudioDashboard ctx={ctx} data={data} governance={governance} />
       </>
     );
   }
 
   if (role === "finance") {
-    const data = await loadFinanceDashboard(supabase);
+    const data = await loadFinanceDashboard(supabase, d);
     return (
       <>
         {header}
-        <FinanceDashboard data={data} />
+        <FinanceDashboard ctx={ctx} data={data} />
       </>
     );
   }
 
   if (role === "model") {
-    const data = await loadModelDashboard(supabase);
+    const data = await loadModelDashboard(supabase, d);
     return (
       <>
         {header}
-        <ModelDashboard data={data} />
+        <ModelDashboard ctx={ctx} data={data} />
       </>
     );
   }
 
-  const data = await loadOperatorDashboard(supabase);
+  const data = await loadOperatorDashboard(supabase, d);
   return (
     <>
       {header}
-      <OperatorDashboard data={data} />
+      <OperatorDashboard ctx={ctx} data={data} />
     </>
   );
 }
@@ -175,37 +204,52 @@ export default async function DashboardPage() {
 /* --------------------------------------------------------- Studio (SA/MGR) */
 
 function StudioDashboard({
+  ctx,
   data,
   governance,
 }: {
+  ctx: Ctx;
   data: Awaited<ReturnType<typeof loadStudioDashboard>>;
   governance: boolean;
 }) {
-  const fmtMoney = moneyFmt(data.currency);
-  const compliance = complianceData(data.compliance);
+  const { d, fm } = ctx;
+  const fmtMoney = moneyFmt(fm, data.currency);
+  const compliance = complianceView(ctx, data.compliance);
 
   return (
     <div className="flex flex-col gap-6">
       <StatTileRow>
-        <StatTile label="Gross revenue" value={fmtMoney(data.kpis.periodGross)} hint="Month to date" />
-        <StatTile label="Net revenue" value={fmtMoney(data.kpis.periodNet)} hint="Month to date" />
-        <StatTile label="Hours worked" value={fmtHoursTile(data.kpis.periodHours)} hint="Month to date" />
         <StatTile
-          label="Pending payouts"
+          label={d.money.dashboard.grossRevenue}
+          value={fmtMoney(data.kpis.periodGross)}
+          hint={d.money.dashboard.monthToDate}
+        />
+        <StatTile
+          label={d.money.dashboard.netRevenue}
+          value={fmtMoney(data.kpis.periodNet)}
+          hint={d.money.dashboard.monthToDate}
+        />
+        <StatTile
+          label={d.money.dashboard.hoursWorked}
+          value={fmtHoursTile(ctx, data.kpis.periodHours)}
+          hint={d.money.dashboard.monthToDate}
+        />
+        <StatTile
+          label={d.money.dashboard.pendingPayouts}
           value={fmtMoney(data.kpis.pendingTotal)}
-          hint={`${data.kpis.pendingCount} awaiting`}
+          hint={d.money.dashboard.awaiting(data.kpis.pendingCount)}
         />
       </StatTileRow>
 
       <LineChartCard
         className="lg:col-span-2"
-        title="Earnings trend"
-        description="Net and gross by month (last 12 months)."
+        title={d.money.dashboard.earningsTrendTitle}
+        description={d.money.dashboard.earningsTrendDesc}
         data={data.earningsTrend}
         xKey="month"
         series={[
-          { key: "net", label: "Net" },
-          { key: "gross", label: "Gross" },
+          { key: "net", label: d.money.dashboard.seriesNet },
+          { key: "gross", label: d.money.dashboard.seriesGross },
         ]}
         valueFormat={{ money: data.currency }}
         xFormat="month"
@@ -213,66 +257,66 @@ function StudioDashboard({
 
       <Grid>
         <PieChartCard
-          title="Earnings share by model"
-          description="Net revenue mix across models (last 12 months)."
+          title={d.money.dashboard.shareByModelTitle}
+          description={d.money.dashboard.shareByModelDesc}
           data={data.shareByModel}
           valueFormat={{ money: data.currency }}
         />
         <PieChartCard
-          title="Earnings share by platform"
-          description="Net revenue mix across platforms (last 12 months)."
+          title={d.money.dashboard.shareByPlatformTitle}
+          description={d.money.dashboard.shareByPlatformDesc}
           data={data.shareByPlatform}
           valueFormat={{ money: data.currency }}
         />
         <LineChartCard
-          title="Hours & sessions"
-          description="Hours worked and session count by month."
+          title={d.money.dashboard.hoursSessionsTitle}
+          description={d.money.dashboard.hoursSessionsDesc}
           data={data.hoursTrend}
           xKey="month"
           series={[
-            { key: "hours", label: "Hours" },
-            { key: "sessions", label: "Sessions" },
+            { key: "hours", label: d.money.dashboard.seriesHours },
+            { key: "sessions", label: d.money.dashboard.seriesSessions },
           ]}
           valueFormat="number"
           xFormat="month"
         />
         <GroupedBarCard
-          title="Model comparison"
-          description="Net revenue by model, this month vs last."
+          title={d.money.dashboard.modelComparisonTitle}
+          description={d.money.dashboard.modelComparisonDesc}
           data={data.modelComparison.data}
           xKey="name"
           series={data.modelComparison.series}
           valueFormat={{ money: data.currency }}
         />
         <LineChartCard
-          title="Projected vs actual net"
-          description="Realised net (solid) against the live forecast (dashed)."
+          title={d.money.dashboard.projectedVsActualTitle}
+          description={d.money.dashboard.projectedVsActualDesc}
           data={data.projectedVsActual}
           xKey="month"
           series={[
-            { key: "actual", label: "Actual" },
-            { key: "predicted", label: "Projected", dash: "6 4" },
+            { key: "actual", label: d.money.dashboard.seriesActual },
+            { key: "predicted", label: d.money.dashboard.seriesProjected, dash: "6 4" },
           ]}
           valueFormat={{ money: data.currency }}
           xFormat="month"
           connectNulls
         />
         <DonutChartCard
-          title="Document compliance"
-          description="Studio-wide document status."
+          title={d.money.dashboard.complianceTitle}
+          description={d.money.dashboard.complianceDesc}
           data={compliance.slices}
-          colorByName={COMPLIANCE_COLORS}
+          colorByName={compliance.colors}
           valueFormat="number"
-          centerValue={fmtNumber(compliance.total)}
-          centerLabel="documents"
+          centerValue={fmtNumber(fm, compliance.total)}
+          centerLabel={d.money.dashboard.complianceCenterLabel(compliance.total)}
         />
-        <LibraryCardView library={data.library} />
+        <LibraryCardView ctx={ctx} library={data.library} />
       </Grid>
 
       <StackedBarCard
         className="lg:col-span-2"
-        title="Forecast breakdown by model"
-        description="Predicted net revenue for the coming months, stacked by model."
+        title={d.money.dashboard.forecastBreakdownTitle}
+        description={d.money.dashboard.forecastBreakdownDesc}
         data={data.forecastBreakdown.data}
         xKey="month"
         series={data.forecastBreakdown.series}
@@ -282,8 +326,8 @@ function StudioDashboard({
 
       <StackedBarCard
         className="lg:col-span-2"
-        title="Payout history"
-        description="Payout totals by month, stacked by status."
+        title={d.money.dashboard.payoutHistoryTitle}
+        description={d.money.dashboard.payoutHistoryDesc}
         data={data.payouts.data}
         xKey="month"
         series={data.payouts.series}
@@ -294,17 +338,17 @@ function StudioDashboard({
       {governance ? (
         <Grid>
           <PieChartCard
-            title="Split distribution"
-            description="Net revenue split across studio, model and operator pools."
+            title={d.money.dashboard.splitTitle}
+            description={d.money.dashboard.splitDesc}
             data={data.split}
             valueFormat={{ money: data.currency }}
           />
           <GroupedBarCard
-            title="Forecast accuracy"
-            description="Studio-wide forecast error, trailing 3 months."
+            title={d.money.dashboard.accuracyTitle}
+            description={d.money.dashboard.accuracyDesc}
             data={data.accuracy}
             xKey="month"
-            series={[{ key: "error", label: "Error %" }]}
+            series={[{ key: "error", label: d.money.dashboard.accuracyError }]}
             valueFormat="percent"
             xFormat="month"
           />
@@ -313,16 +357,16 @@ function StudioDashboard({
 
       {governance ? (
         <HorizontalBarCard
-          title="Payee outstanding balances"
+          title={d.money.dashboard.balancesTitle}
           data={data.balances}
           valueFormat={{ money: data.currency }}
           highlightNegative
-          emptyMessage="No outstanding balances"
+          emptyMessage={d.money.dashboard.balancesEmpty}
         />
       ) : null}
 
       <Card>
-        <CardHeader title="Recent payouts" />
+        <CardHeader title={d.money.dashboard.recentPayouts} />
         <CardBody flush>
           <PayoutTable rows={data.payoutRows} showPayee />
         </CardBody>
@@ -335,35 +379,50 @@ function StudioDashboard({
 
 /* ------------------------------------------------------------- Finance */
 
-function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanceDashboard>> }) {
-  const fmtMoney = moneyFmt(data.currency);
+function FinanceDashboard({
+  ctx,
+  data,
+}: {
+  ctx: Ctx;
+  data: Awaited<ReturnType<typeof loadFinanceDashboard>>;
+}) {
+  const { d, fm } = ctx;
+  const fmtMoney = moneyFmt(fm, data.currency);
 
   return (
     <div className="flex flex-col gap-6">
       <StatTileRow>
-        <StatTile label="Gross revenue" value={fmtMoney(data.kpis.periodGross)} hint="Month to date" />
-        <StatTile label="Net revenue" value={fmtMoney(data.kpis.periodNet)} hint="Month to date" />
         <StatTile
-          label="Pending payouts"
-          value={fmtMoney(data.kpis.pendingTotal)}
-          hint={`${data.kpis.pendingCount} awaiting`}
+          label={d.money.dashboard.grossRevenue}
+          value={fmtMoney(data.kpis.periodGross)}
+          hint={d.money.dashboard.monthToDate}
         />
         <StatTile
-          label="Outstanding balances"
+          label={d.money.dashboard.netRevenue}
+          value={fmtMoney(data.kpis.periodNet)}
+          hint={d.money.dashboard.monthToDate}
+        />
+        <StatTile
+          label={d.money.dashboard.pendingPayouts}
+          value={fmtMoney(data.kpis.pendingTotal)}
+          hint={d.money.dashboard.awaiting(data.kpis.pendingCount)}
+        />
+        <StatTile
+          label={d.money.dashboard.outstandingBalances}
           value={fmtMoney(data.kpis.outstanding)}
-          hint="Owed to payees"
+          hint={d.money.dashboard.owedToPayees}
         />
       </StatTileRow>
 
       <LineChartCard
         className="lg:col-span-2"
-        title="Earnings trend"
-        description="Net and gross by month (last 12 months)."
+        title={d.money.dashboard.earningsTrendTitle}
+        description={d.money.dashboard.earningsTrendDesc}
         data={data.earningsTrend}
         xKey="month"
         series={[
-          { key: "net", label: "Net" },
-          { key: "gross", label: "Gross" },
+          { key: "net", label: d.money.dashboard.seriesNet },
+          { key: "gross", label: d.money.dashboard.seriesGross },
         ]}
         valueFormat={{ money: data.currency }}
         xFormat="month"
@@ -371,19 +430,19 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
 
       <Grid>
         <PieChartCard
-          title="Split distribution"
-          description="Net revenue split across studio, model and operator pools."
+          title={d.money.dashboard.splitTitle}
+          description={d.money.dashboard.splitDesc}
           data={data.split}
           valueFormat={{ money: data.currency }}
         />
         <LineChartCard
-          title="Projected vs actual net"
-          description="Realised net (solid) against the live forecast (dashed)."
+          title={d.money.dashboard.projectedVsActualTitle}
+          description={d.money.dashboard.projectedVsActualDesc}
           data={data.projectedVsActual}
           xKey="month"
           series={[
-            { key: "actual", label: "Actual" },
-            { key: "predicted", label: "Projected", dash: "6 4" },
+            { key: "actual", label: d.money.dashboard.seriesActual },
+            { key: "predicted", label: d.money.dashboard.seriesProjected, dash: "6 4" },
           ]}
           valueFormat={{ money: data.currency }}
           xFormat="month"
@@ -393,8 +452,8 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
 
       <StackedBarCard
         className="lg:col-span-2"
-        title="Forecast breakdown by model"
-        description="Predicted net revenue for the coming months, stacked by model."
+        title={d.money.dashboard.forecastBreakdownTitle}
+        description={d.money.dashboard.forecastBreakdownDesc}
         data={data.forecastBreakdown.data}
         xKey="month"
         series={data.forecastBreakdown.series}
@@ -404,27 +463,27 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
 
       <Grid>
         <GroupedBarCard
-          title="Forecast accuracy"
-          description="Studio-wide forecast error, trailing 3 months."
+          title={d.money.dashboard.accuracyTitle}
+          description={d.money.dashboard.accuracyDesc}
           data={data.accuracy}
           xKey="month"
-          series={[{ key: "error", label: "Error %" }]}
+          series={[{ key: "error", label: d.money.dashboard.accuracyError }]}
           valueFormat="percent"
           xFormat="month"
         />
         <HorizontalBarCard
-          title="Payee outstanding balances"
+          title={d.money.dashboard.balancesTitle}
           data={data.balances}
           valueFormat={{ money: data.currency }}
           highlightNegative
-          emptyMessage="No outstanding balances"
+          emptyMessage={d.money.dashboard.balancesEmpty}
         />
       </Grid>
 
       <StackedBarCard
         className="lg:col-span-2"
-        title="Payout history"
-        description="Payout totals by month, stacked by status."
+        title={d.money.dashboard.payoutHistoryTitle}
+        description={d.money.dashboard.payoutHistoryDesc}
         data={data.payouts.data}
         xKey="month"
         series={data.payouts.series}
@@ -433,7 +492,7 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
       />
 
       <Card>
-        <CardHeader title="Recent payouts" />
+        <CardHeader title={d.money.dashboard.recentPayouts} />
         <CardBody flush>
           <PayoutTable rows={data.payoutRows} showPayee />
         </CardBody>
@@ -446,32 +505,51 @@ function FinanceDashboard({ data }: { data: Awaited<ReturnType<typeof loadFinanc
 
 /* --------------------------------------------------------------- Model */
 
-function ModelDashboard({ data }: { data: Awaited<ReturnType<typeof loadModelDashboard>> }) {
-  const fmtMoney = moneyFmt(data.currency);
-  const compliance = complianceData(data.compliance);
+function ModelDashboard({
+  ctx,
+  data,
+}: {
+  ctx: Ctx;
+  data: Awaited<ReturnType<typeof loadModelDashboard>>;
+}) {
+  const { d, fm } = ctx;
+  const fmtMoney = moneyFmt(fm, data.currency);
+  const compliance = complianceView(ctx, data.compliance);
 
   return (
     <div className="flex flex-col gap-6">
       <StatTileRow>
-        <StatTile label="Gross earnings" value={fmtMoney(data.kpis.periodGross)} hint="Month to date" />
-        <StatTile label="Net earnings" value={fmtMoney(data.kpis.periodNet)} hint="Month to date" />
-        <StatTile label="Hours worked" value={fmtHoursTile(data.kpis.periodHours)} hint="Month to date" />
         <StatTile
-          label="Pending payout"
+          label={d.money.dashboard.grossEarnings}
+          value={fmtMoney(data.kpis.periodGross)}
+          hint={d.money.dashboard.monthToDate}
+        />
+        <StatTile
+          label={d.money.dashboard.netEarnings}
+          value={fmtMoney(data.kpis.periodNet)}
+          hint={d.money.dashboard.monthToDate}
+        />
+        <StatTile
+          label={d.money.dashboard.hoursWorked}
+          value={fmtHoursTile(ctx, data.kpis.periodHours)}
+          hint={d.money.dashboard.monthToDate}
+        />
+        <StatTile
+          label={d.money.dashboard.pendingPayout}
           value={fmtMoney(data.kpis.pendingTotal)}
-          hint={`${data.kpis.pendingCount} awaiting`}
+          hint={d.money.dashboard.awaiting(data.kpis.pendingCount)}
         />
       </StatTileRow>
 
       <LineChartCard
         className="lg:col-span-2"
-        title="Earnings trend"
-        description="Your net and gross earnings by month."
+        title={d.money.dashboard.earningsTrendTitle}
+        description={d.money.dashboard.earningsTrendDescOwn}
         data={data.earningsTrend}
         xKey="month"
         series={[
-          { key: "net", label: "Net" },
-          { key: "gross", label: "Gross" },
+          { key: "net", label: d.money.dashboard.seriesNet },
+          { key: "gross", label: d.money.dashboard.seriesGross },
         ]}
         valueFormat={{ money: data.currency }}
         xFormat="month"
@@ -479,35 +557,35 @@ function ModelDashboard({ data }: { data: Awaited<ReturnType<typeof loadModelDas
 
       <Grid>
         <PieChartCard
-          title="Platform share"
-          description="Your net earnings mix across platforms."
+          title={d.money.dashboard.platformShareTitle}
+          description={d.money.dashboard.platformShareDesc}
           data={data.shareByPlatform}
           valueFormat={{ money: data.currency }}
         />
         <LineChartCard
-          title="Hours & sessions"
-          description="Your hours worked and session count by month."
+          title={d.money.dashboard.hoursSessionsTitle}
+          description={d.money.dashboard.hoursSessionsDescOwn}
           data={data.hoursTrend}
           xKey="month"
           series={[
-            { key: "hours", label: "Hours" },
-            { key: "sessions", label: "Sessions" },
+            { key: "hours", label: d.money.dashboard.seriesHours },
+            { key: "sessions", label: d.money.dashboard.seriesSessions },
           ]}
           valueFormat="number"
           xFormat="month"
         />
         <DonutChartCard
-          title="Document compliance"
-          description="Your document status."
+          title={d.money.dashboard.complianceTitle}
+          description={d.money.dashboard.complianceDescOwn}
           data={compliance.slices}
-          colorByName={COMPLIANCE_COLORS}
+          colorByName={compliance.colors}
           valueFormat="number"
-          centerValue={fmtNumber(compliance.total)}
-          centerLabel="documents"
+          centerValue={fmtNumber(fm, compliance.total)}
+          centerLabel={d.money.dashboard.complianceCenterLabel(compliance.total)}
         />
         <StackedBarCard
-          title="Payout history"
-          description="Your payout totals by month, stacked by status."
+          title={d.money.dashboard.payoutHistoryTitle}
+          description={d.money.dashboard.payoutHistoryDescOwn}
           data={data.payouts.data}
           xKey="month"
           series={data.payouts.series}
@@ -517,7 +595,7 @@ function ModelDashboard({ data }: { data: Awaited<ReturnType<typeof loadModelDas
       </Grid>
 
       <Card>
-        <CardHeader title="Recent payouts" />
+        <CardHeader title={d.money.dashboard.recentPayouts} />
         <CardBody flush>
           <PayoutTable rows={data.payoutRows} showPayee={false} />
         </CardBody>
@@ -528,34 +606,49 @@ function ModelDashboard({ data }: { data: Awaited<ReturnType<typeof loadModelDas
 
 /* ------------------------------------------------------------- Operator */
 
-function OperatorDashboard({ data }: { data: Awaited<ReturnType<typeof loadOperatorDashboard>> }) {
-  const fmtMoney = moneyFmt(data.currency);
+function OperatorDashboard({
+  ctx,
+  data,
+}: {
+  ctx: Ctx;
+  data: Awaited<ReturnType<typeof loadOperatorDashboard>>;
+}) {
+  const { d, fm } = ctx;
+  const fmtMoney = moneyFmt(fm, data.currency);
 
   return (
     <div className="flex flex-col gap-6">
       <StatTileRow columns={3}>
-        <StatTile label="Current balance" value={fmtMoney(data.kpis.balance)} hint="Owed to you" />
-        <StatTile label="Ledger share" value={fmtMoney(data.kpis.periodShare)} hint="Month to date" />
         <StatTile
-          label="Pending payout"
+          label={d.money.dashboard.currentBalance}
+          value={fmtMoney(data.kpis.balance)}
+          hint={d.money.dashboard.owedToYou}
+        />
+        <StatTile
+          label={d.money.dashboard.ledgerShare}
+          value={fmtMoney(data.kpis.periodShare)}
+          hint={d.money.dashboard.monthToDate}
+        />
+        <StatTile
+          label={d.money.dashboard.pendingPayout}
           value={fmtMoney(data.kpis.pendingTotal)}
-          hint={`${data.kpis.pendingCount} awaiting`}
+          hint={d.money.dashboard.awaiting(data.kpis.pendingCount)}
         />
       </StatTileRow>
 
       <LineChartCard
-        title="Ledger share trend"
-        description="Your revenue-share credits by month, from the ledger."
+        title={d.money.dashboard.shareTrendTitle}
+        description={d.money.dashboard.shareTrendDesc}
         data={data.shareTrend}
         xKey="month"
-        series={[{ key: "share", label: "Share credited" }]}
+        series={[{ key: "share", label: d.money.dashboard.shareTrendSeries }]}
         valueFormat={{ money: data.currency }}
         xFormat="month"
       />
 
       <StackedBarCard
-        title="Payout history"
-        description="Your payout totals by month, stacked by status."
+        title={d.money.dashboard.payoutHistoryTitle}
+        description={d.money.dashboard.payoutHistoryDescOwn}
         data={data.payouts.data}
         xKey="month"
         series={data.payouts.series}
@@ -564,7 +657,7 @@ function OperatorDashboard({ data }: { data: Awaited<ReturnType<typeof loadOpera
       />
 
       <Card>
-        <CardHeader title="Recent payouts" />
+        <CardHeader title={d.money.dashboard.recentPayouts} />
         <CardBody flush>
           <PayoutTable rows={data.payoutRows} showPayee={false} />
         </CardBody>

@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -23,6 +24,11 @@ import { isAuthzError } from "@/lib/supabase/admin";
  * The 18+ age gate is enforced twice: in the zod schema below (fast, friendly
  * message) and by the `date_of_birth <= current_date - interval '18 years'` CHECK
  * constraint on the table (authoritative — the DB is the last word).
+ *
+ * Every schema is a FACTORY taking the caller's dictionary: a module-scope schema
+ * is built at import time, where no locale exists, so its messages could only ever
+ * be English. The caller's language comes off the profile `requireRole()` already
+ * loaded — no second lookup.
  */
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -63,70 +69,88 @@ function isAdult({ y, m, d }: Ymd): boolean {
 const emptyToNull = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? null : value;
 
-const dateOfBirth = z
-  .string()
-  .refine((v) => parseYmd(v) !== null, "Enter a valid date of birth (YYYY-MM-DD).")
-  .refine((v) => {
-    const parsed = parseYmd(v);
-    return parsed !== null && isAdult(parsed);
-  }, "Models must be at least 18 years old.");
+const dateOfBirth = (d: Dictionary) =>
+  z
+    .string()
+    .refine((v) => parseYmd(v) !== null, d.studio.models.errDobInvalid)
+    .refine((v) => {
+      const parsed = parseYmd(v);
+      return parsed !== null && isAdult(parsed);
+    }, d.studio.models.errAdult);
 
-const optionalDate = z
-  .preprocess(
-    emptyToNull,
-    z
-      .string()
-      .refine((v) => parseYmd(v) !== null, "Enter a valid date (YYYY-MM-DD).")
-      .nullable(),
-  )
-  .optional();
+const optionalDate = (d: Dictionary) =>
+  z
+    .preprocess(
+      emptyToNull,
+      z
+        .string()
+        .refine((v) => parseYmd(v) !== null, d.studio.models.errDateInvalid)
+        .nullable(),
+    )
+    .optional();
 
-const optionalEmail = z
-  .preprocess(emptyToNull, z.string().trim().email("Enter a valid email address.").nullable())
-  .optional();
+const optionalEmail = (d: Dictionary) =>
+  z
+    .preprocess(
+      emptyToNull,
+      z.string().trim().email(d.studio.models.errEmail).nullable(),
+    )
+    .optional();
 
-const optionalPhone = z
-  .preprocess(emptyToNull, z.string().trim().max(40, "Phone number is too long.").nullable())
-  .optional();
+const optionalPhone = (d: Dictionary) =>
+  z
+    .preprocess(
+      emptyToNull,
+      z.string().trim().max(40, d.studio.models.errPhoneLong).nullable(),
+    )
+    .optional();
 
-const optionalCountry = z
-  .preprocess(
-    (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null),
-    z.string().regex(/^[A-Z]{2}$/, "Use a 2-letter ISO country code.").nullable(),
-  )
-  .optional();
+const optionalCountry = (d: Dictionary) =>
+  z
+    .preprocess(
+      (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null),
+      z.string().regex(/^[A-Z]{2}$/, d.studio.models.errCountry).nullable(),
+    )
+    .optional();
 
-const optionalNotes = z
-  .preprocess(emptyToNull, z.string().trim().max(4000, "Notes are too long.").nullable())
-  .optional();
+const optionalNotes = (d: Dictionary) =>
+  z
+    .preprocess(
+      emptyToNull,
+      z.string().trim().max(4000, d.studio.models.errNotesLong).nullable(),
+    )
+    .optional();
 
-const commissionPercent = z.coerce
-  .number({ invalid_type_error: "Enter a commission percentage." })
-  .min(0, "Commission can't be negative.")
-  .max(100, "Commission can't exceed 100%.");
+const commissionPercent = (d: Dictionary) =>
+  z.coerce
+    .number({ invalid_type_error: d.studio.models.errCommissionType })
+    .min(0, d.studio.models.errCommissionMin)
+    .max(100, d.studio.models.errCommissionMax);
 
 /** Shared profile fields (everything except lifecycle status). */
-const profileFields = {
-  stage_name: z.string().trim().min(1, "Stage name is required.").max(160),
-  legal_name: z.string().trim().min(1, "Legal name is required.").max(200),
-  date_of_birth: dateOfBirth,
-  email: optionalEmail,
-  phone: optionalPhone,
-  country: optionalCountry,
-  start_date: optionalDate,
-  commission_percent: commissionPercent,
-  notes: optionalNotes,
-};
-
-const createSchema = z.object({
-  ...profileFields,
-  status: z.enum(MODEL_STATUSES),
+const profileFields = (d: Dictionary) => ({
+  stage_name: z.string().trim().min(1, d.studio.models.errStageNameRequired).max(160),
+  legal_name: z.string().trim().min(1, d.studio.models.errLegalNameRequired).max(200),
+  date_of_birth: dateOfBirth(d),
+  email: optionalEmail(d),
+  phone: optionalPhone(d),
+  country: optionalCountry(d),
+  start_date: optionalDate(d),
+  commission_percent: commissionPercent(d),
+  notes: optionalNotes(d),
 });
 
-const updateSchema = z.object({
-  id: z.string().uuid(),
-  ...profileFields,
-});
+const createSchema = (d: Dictionary) =>
+  z.object({
+    ...profileFields(d),
+    status: z.enum(MODEL_STATUSES),
+  });
+
+const updateSchema = (d: Dictionary) =>
+  z.object({
+    id: z.string().uuid(),
+    ...profileFields(d),
+  });
 
 const statusSchema = z.object({
   id: z.string().uuid(),
@@ -152,29 +176,30 @@ export type UpdateModelInput = Omit<CreateModelInput, "status"> & { id: string }
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Please check the form and try again.";
+function firstIssue(error: z.ZodError, d: Dictionary): string {
+  return error.issues[0]?.message ?? d.studio.models.errForm;
 }
 
 /** Maps a Postgres error to a friendly message; CHECK violations back-stop zod. */
-function describeDbError(code: string | undefined): string {
+function describeDbError(code: string | undefined, d: Dictionary): string {
   if (code === "23514") {
-    return "That doesn't satisfy a database rule — check the date of birth (18+) and commission (0–100%).";
+    return d.studio.models.errDbCheck;
   }
   if (code === "23505") {
-    return "A model with those details already exists.";
+    return d.studio.models.errDuplicate;
   }
-  return "Could not save the model. Please try again.";
+  return d.studio.models.errSaveFailed;
 }
 
 /* ------------------------------------------------------------------ create --- */
 
 export async function createModel(input: CreateModelInput): Promise<ActionResult> {
-  const { supabase, user } = await requireRole("super_admin", "manager");
+  const { supabase, user, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = createSchema.safeParse(input);
+  const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -198,7 +223,7 @@ export async function createModel(input: CreateModelInput): Promise<ActionResult
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(error?.code) };
+      return { ok: false, error: describeDbError(error?.code, d) };
     }
 
     await writeAudit({
@@ -209,23 +234,24 @@ export async function createModel(input: CreateModelInput): Promise<ActionResult
     });
 
     revalidatePath("/models");
-    return { ok: true, message: `${data.stage_name} added.` };
+    return { ok: true, message: d.studio.models.msgAdded(data.stage_name) };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to add models." };
+      return { ok: false, error: d.studio.models.errNotAuthorizedAdd };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* ------------------------------------------------------------------ update --- */
 
 export async function updateModel(input: UpdateModelInput): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = updateSchema.safeParse(input);
+  const parsed = updateSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -248,10 +274,10 @@ export async function updateModel(input: UpdateModelInput): Promise<ActionResult
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(error.code) };
+      return { ok: false, error: describeDbError(error.code, d) };
     }
     if (!updated) {
-      return { ok: false, error: "That model no longer exists." };
+      return { ok: false, error: d.studio.models.errGone };
     }
 
     await writeAudit({
@@ -263,12 +289,12 @@ export async function updateModel(input: UpdateModelInput): Promise<ActionResult
 
     revalidatePath("/models");
     revalidatePath(`/models/${data.id}`);
-    return { ok: true, message: "Model updated." };
+    return { ok: true, message: d.studio.models.msgUpdated };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to edit models." };
+      return { ok: false, error: d.studio.models.errNotAuthorizedEdit };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -278,11 +304,12 @@ export async function setModelStatus(input: {
   id: string;
   status: string;
 }): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   const parsed = statusSchema.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid status change." };
+    return { ok: false, error: d.studio.models.errInvalidStatus };
   }
   const { id, status } = parsed.data;
 
@@ -294,13 +321,16 @@ export async function setModelStatus(input: {
       .maybeSingle();
 
     if (readError) {
-      return { ok: false, error: "Could not load that model." };
+      return { ok: false, error: d.studio.models.errLoadFailed };
     }
     if (!current) {
-      return { ok: false, error: "That model no longer exists." };
+      return { ok: false, error: d.studio.models.errGone };
     }
     if (current.status === status) {
-      return { ok: false, error: `Model is already ${status.replace("_", " ")}.` };
+      return {
+        ok: false,
+        error: d.studio.models.msgAlreadyStatus(d.studio.lifecycleStatus[status]),
+      };
     }
 
     const { error: updateError } = await supabase
@@ -309,7 +339,7 @@ export async function setModelStatus(input: {
       .eq("id", id);
 
     if (updateError) {
-      return { ok: false, error: "Could not change the status. Please try again." };
+      return { ok: false, error: d.studio.models.errStatusFailed };
     }
 
     await writeAudit({
@@ -321,11 +351,17 @@ export async function setModelStatus(input: {
 
     revalidatePath("/models");
     revalidatePath(`/models/${id}`);
-    return { ok: true, message: `${current.stage_name} is now ${status.replace("_", " ")}.` };
+    return {
+      ok: true,
+      message: d.studio.models.msgStatusChanged(
+        current.stage_name,
+        d.studio.lifecycleStatus[status],
+      ),
+    };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to change model status." };
+      return { ok: false, error: d.studio.models.errNotAuthorizedStatus };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }

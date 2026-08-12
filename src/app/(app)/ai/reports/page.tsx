@@ -6,12 +6,16 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { getActiveProviderId, isAiConfigured } from "@/lib/ai/provider";
 import { requireRole } from "@/lib/auth/guard";
-import { dateTime, month as fmtMonth } from "@/lib/format";
+import type { Dictionary } from "@/lib/i18n";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { GenerateReportButton } from "./generate-report-button";
 import { ReportMarkdown } from "./report-markdown";
 
-export const metadata: Metadata = { title: "AI market reports" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).adminAi.reports.metaTitle };
+}
 
 /** Human labels for the two switchable providers (docs/11 §3). */
 const PROVIDER_LABEL: Record<string, string> = {
@@ -41,6 +45,8 @@ type ReportRow = {
  */
 export default async function AiReportsPage() {
   const { supabase } = await requireRole("super_admin", "finance");
+  const d = (await getDict()).adminAi.reports;
+  const fm = fmt(await getLocale());
 
   const [configured, activeProvider, reportsRes] = await Promise.all([
     isAiConfigured(),
@@ -59,8 +65,8 @@ export default async function AiReportsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="AI market reports"
-        description="Monthly commentary generated from the studio's own aggregate figures. Only de-identified aggregates ever reach the AI provider."
+        title={d.title}
+        description={d.description}
         actions={<GenerateReportButton disabled={!configured} />}
       />
 
@@ -68,35 +74,30 @@ export default async function AiReportsPage() {
         <Card>
           <CardBody>
             <p className="text-sm text-muted">
-              <span className="font-medium text-foreground">AI is not configured. </span>
-              Set the active provider&apos;s API key to generate new reports. Any reports already
-              generated remain readable below.
+              <span className="font-medium text-foreground">{d.notConfiguredTitle} </span>
+              {d.notConfiguredBody}
             </p>
           </CardBody>
         </Card>
       ) : (
         <p className="text-xs text-muted">
-          Active provider:{" "}
+          {d.activeProvider}{" "}
           <span className="text-foreground">{PROVIDER_LABEL[activeProvider] ?? activeProvider}</span>
         </p>
       )}
 
       {reports.length === 0 ? (
         <EmptyState
-          title="No reports yet"
-          description={
-            configured
-              ? "Generate this month's report to build a commentary from the studio's earnings, split distribution, forecast and balances."
-              : "When AI is configured, generate a monthly report to build a commentary from the studio's own aggregates."
-          }
+          title={d.emptyTitle}
+          description={configured ? d.emptyConfigured : d.emptyNotConfigured}
         />
       ) : (
         <div className="flex flex-col gap-6">
-          <ReportCard report={latest} highlighted />
+          <ReportCard report={latest} highlighted d={d} fm={fm} />
 
           {previous.length > 0 ? (
             <section className="flex flex-col gap-3">
-              <h2 className="text-sm font-semibold text-foreground">Earlier reports</h2>
+              <h2 className="text-sm font-semibold text-foreground">{d.earlierReports}</h2>
               <div className="flex flex-col gap-2">
                 {previous.map((report) => (
                   <details
@@ -106,7 +107,7 @@ export default async function AiReportsPage() {
                     <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
                       <span className="font-medium text-foreground">{report.title}</span>
                       <span className="flex items-center gap-2 text-xs text-muted">
-                        <span>{fmtMonth(report.report_month)}</span>
+                        <span>{fm.month(report.report_month)}</span>
                         <Badge variant="muted">
                           {PROVIDER_LABEL[report.provider] ?? report.provider}
                         </Badge>
@@ -126,15 +127,25 @@ export default async function AiReportsPage() {
   );
 }
 
-function ReportCard({ report, highlighted }: { report: ReportRow; highlighted?: boolean }) {
+function ReportCard({
+  report,
+  highlighted,
+  d,
+  fm,
+}: {
+  report: ReportRow;
+  highlighted?: boolean;
+  d: Dictionary["adminAi"]["reports"];
+  fm: ReturnType<typeof fmt>;
+}) {
   return (
     <Card>
       <CardHeader
         title={report.title}
-        description={`Generated ${dateTime(report.created_at)} · ${report.model}`}
+        description={d.generatedAt(fm.dateTime(report.created_at), report.model)}
         action={
           <div className="flex items-center gap-2">
-            {highlighted ? <Badge variant="primary">Latest</Badge> : null}
+            {highlighted ? <Badge variant="primary">{d.latest}</Badge> : null}
             <Badge variant="muted">{PROVIDER_LABEL[report.provider] ?? report.provider}</Badge>
           </div>
         }

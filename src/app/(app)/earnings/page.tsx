@@ -4,13 +4,19 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { requireRole } from "@/lib/auth/guard";
-import { money } from "@/lib/format";
+import type { Database } from "@/lib/database.types";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { EarningForm, type AccountOption, type ModelOption } from "./earning-form";
 import { EarningsTable, type EarningRow } from "./earnings-table";
 import { ModelFilter } from "./model-filter";
 
-export const metadata: Metadata = { title: "Earnings" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).studio.earnings.metaTitle };
+}
+
+type AccountStatus = Database["public"]["Enums"]["account_status"];
 
 type EarningQueryRow = {
   id: string;
@@ -44,6 +50,8 @@ export default async function EarningsPage({
 }) {
   const { supabase } = await requireRole("super_admin", "manager");
   const { model } = await searchParams;
+  const d = await getDict();
+  const fm = fmt(await getLocale());
 
   const [modelsResult, accountsResult, platformsResult] = await Promise.all([
     supabase.from("models").select("id, stage_name").order("stage_name", { ascending: true }),
@@ -80,9 +88,10 @@ export default async function EarningsPage({
   const platformName = new Map(platforms.map((p) => [p.id, p.name]));
   const modelName = new Map(models.map((m) => [m.id, m.stage_name]));
 
-  const buildLabel = (platformId: string, username: string, status: string) =>
-    `${platformName.get(platformId) ?? "Platform"} · ${username}${
-      status === "active" ? "" : ` (${status})`
+  /** The status suffix is a translated label, never the raw enum value. */
+  const buildLabel = (platformId: string, username: string, status: AccountStatus) =>
+    `${platformName.get(platformId) ?? d.studio.earnings.platformFallback} · ${username}${
+      status === "active" ? "" : ` (${d.studio.accountStatus[status]})`
     }`;
 
   const accountLabel = new Map(
@@ -106,8 +115,9 @@ export default async function EarningsPage({
     id: e.id,
     model_id: e.model_id,
     platform_account_id: e.platform_account_id,
-    model_name: modelName.get(e.model_id) ?? "Unknown model",
-    account_label: accountLabel.get(e.platform_account_id) ?? "Unknown account",
+    model_name: modelName.get(e.model_id) ?? d.studio.earnings.unknownModel,
+    account_label:
+      accountLabel.get(e.platform_account_id) ?? d.studio.earnings.unknownAccount,
     period_start: e.period_start,
     period_end: e.period_end,
     gross_amount: e.gross_amount,
@@ -122,14 +132,17 @@ export default async function EarningsPage({
   const feeTotal = earnings.reduce((sum, e) => sum + Number(e.platform_fee_amount ?? 0), 0);
   const netTotal = earnings.reduce((sum, e) => sum + Number(e.net_amount ?? 0), 0);
 
-  const scopeHint = activeModelFilter === "all" ? "All models" : "Filtered model";
+  const scopeHint =
+    activeModelFilter === "all"
+      ? d.studio.earnings.scopeAll
+      : d.studio.earnings.scopeFiltered;
 
   return (
     <>
       <PageHeader
-        title="Earnings"
-        description="Money tracking — the source of truth. Record one statement per platform account per period; net is the input to the commission split."
-        breadcrumbs={[{ label: "Earnings" }]}
+        title={d.studio.earnings.title}
+        description={d.studio.earnings.description}
+        breadcrumbs={[{ label: d.studio.earnings.title }]}
         actions={
           <EarningForm mode="create" models={modelOptions} accounts={accountOptions} />
         }
@@ -137,21 +150,37 @@ export default async function EarningsPage({
 
       {models.length === 0 ? (
         <EmptyState
-          title="No models yet"
-          description="Earnings statements are recorded against a model's platform account. Add a model and a platform account first, then come back to record statements."
+          title={d.studio.earnings.noModelsTitle}
+          description={d.studio.earnings.noModelsDescription}
         />
       ) : (
         <>
           <StatTileRow className="mb-6" columns={4}>
-            <StatTile label="Statements" value={earnings.length} hint={scopeHint} />
-            <StatTile label="Gross" value={money(grossTotal)} hint="Billed by platforms" />
-            <StatTile label="Platform fees" value={money(feeTotal)} hint="Platforms' cut" />
-            <StatTile label="Net received" value={money(netTotal)} hint="Split input (docs/09)" />
+            <StatTile
+              label={d.studio.earnings.statStatements}
+              value={earnings.length}
+              hint={scopeHint}
+            />
+            <StatTile
+              label={d.studio.earnings.statGross}
+              value={fm.money(grossTotal)}
+              hint={d.studio.earnings.statGrossHint}
+            />
+            <StatTile
+              label={d.studio.earnings.statFees}
+              value={fm.money(feeTotal)}
+              hint={d.studio.earnings.statFeesHint}
+            />
+            <StatTile
+              label={d.studio.earnings.statNet}
+              value={fm.money(netTotal)}
+              hint={d.studio.earnings.statNetHint}
+            />
           </StatTileRow>
 
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <ModelFilter current={activeModelFilter} models={modelOptions} />
-            <span className="text-xs text-muted">{rows.length} shown</span>
+            <span className="text-xs text-muted">{d.studio.earnings.shown(rows.length)}</span>
           </div>
 
           <EarningsTable rows={rows} models={modelOptions} accounts={accountOptions} />

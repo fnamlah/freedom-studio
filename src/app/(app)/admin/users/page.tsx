@@ -3,10 +3,13 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { requireRole } from "@/lib/auth/guard";
+import { getDict } from "@/lib/i18n/server";
 
 import { UsersTable, type AdminUserRow } from "./users-table";
 
-export const metadata: Metadata = { title: "Users" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).adminAi.users.metaTitle };
+}
 
 /**
  * Super-Admin-only user administration surface (docs/03 §3, docs/05 §8).
@@ -18,6 +21,8 @@ export const metadata: Metadata = { title: "Users" };
  */
 export default async function AdminUsersPage() {
   const { supabase, user } = await requireRole("super_admin");
+  const dict = await getDict();
+  const d = dict.adminAi.users;
 
   const { data } = await supabase
     .from("profiles")
@@ -33,15 +38,19 @@ export default async function AdminUsersPage() {
   return (
     <>
       <PageHeader
-        title="Users"
-        description="Every account in the studio. Deactivate access or reset a lost authenticator — both are audited."
-        breadcrumbs={[{ label: "Admin" }, { label: "Users" }]}
+        title={d.title}
+        description={d.description}
+        breadcrumbs={[{ label: dict.nav.sectionAdmin }, { label: d.title }]}
       />
 
       <StatTileRow className="mb-6" columns={3}>
-        <StatTile label="Active" value={activeCount} hint="Enrolled and able to sign in" />
-        <StatTile label="Invited" value={invitedCount} hint="Awaiting first enrollment" />
-        <StatTile label="Deactivated" value={deactivatedCount} hint="Access revoked" />
+        <StatTile label={d.statActive} value={activeCount} hint={d.statActiveHint} />
+        <StatTile label={d.statInvited} value={invitedCount} hint={d.statInvitedHint} />
+        <StatTile
+          label={d.statDeactivated}
+          value={deactivatedCount}
+          hint={d.statDeactivatedHint}
+        />
       </StatTileRow>
 
       <UsersTable users={users} currentUserId={user.id} />

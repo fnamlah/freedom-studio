@@ -8,19 +8,26 @@ import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/guard";
 import type { Enums } from "@/lib/database.types";
-import { date, dateRange, money } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { StatementControls, type PayeeOption } from "./statement-controls";
 
-export const metadata: Metadata = { title: "Statements" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).money.statements.metaTitle };
+}
 
 type LedgerEntryType = Enums<"ledger_entry_type">;
 
-const ENTRY_META: Record<LedgerEntryType, { label: string; variant: BadgeVariant }> = {
-  earning_share: { label: "Earning share", variant: "success" },
-  adjustment: { label: "Adjustment", variant: "primary" },
-  deduction: { label: "Deduction", variant: "warning" },
-  payout_settlement: { label: "Settlement", variant: "muted" },
+/**
+ * Badge colour per entry type; the LABEL comes from `d.money.ledger.entryType`,
+ * shared with the ledger page so the two never drift apart in either language.
+ */
+const ENTRY_VARIANT: Record<LedgerEntryType, BadgeVariant> = {
+  earning_share: "success",
+  adjustment: "primary",
+  deduction: "warning",
+  payout_settlement: "muted",
 };
 
 type StatementLine = {
@@ -60,6 +67,8 @@ export default async function StatementsPage({
     "operator",
   );
   const { payee, from, to } = await searchParams;
+  const d = await getDict();
+  const fm = fmt(await getLocale());
 
   const [modelDir, operatorDir] = await Promise.all([
     supabase.from("v_model_directory").select("id, stage_name"),
@@ -72,12 +81,15 @@ export default async function StatementsPage({
   const payeeOptions: PayeeOption[] = [
     ...models
       .filter((m): m is { id: string; stage_name: string } => !!m.id)
-      .map((m) => ({ value: `model:${m.id}`, label: `${m.stage_name ?? "Model"} · model` })),
+      .map((m) => ({
+        value: `model:${m.id}`,
+        label: `${m.stage_name ?? d.money.ledger.fallbackModel} · ${d.money.ledger.payeeType.model}`,
+      })),
     ...operators
       .filter((o): o is { id: string; display_name: string } => !!o.id)
       .map((o) => ({
         value: `operator:${o.id}`,
-        label: `${o.display_name ?? "Operator"} · operator`,
+        label: `${o.display_name ?? d.money.ledger.fallbackOperator} · ${d.money.ledger.payeeType.operator}`,
       })),
   ].sort((a, b) => a.label.localeCompare(b.label));
 
@@ -136,9 +148,9 @@ export default async function StatementsPage({
   return (
     <>
       <PageHeader
-        title="Statements"
-        description="Reproduce any payee's ledger for a period: opening balance, entries in order, closing balance. Append-only, so a past statement never changes retroactively (docs/09 §7)."
-        breadcrumbs={[{ label: "Statements" }]}
+        title={d.money.statements.title}
+        description={d.money.statements.description}
+        breadcrumbs={[{ label: d.money.statements.title }]}
       />
 
       <div className="mb-6">
@@ -150,51 +162,53 @@ export default async function StatementsPage({
 
       {payeeOptions.length === 0 ? (
         <EmptyState
-          title="No payees available"
-          description="There are no payees you can produce a statement for."
+          title={d.money.statements.noPayeesTitle}
+          description={d.money.statements.noPayeesDesc}
         />
       ) : !hasQuery ? (
         <EmptyState
-          title="Pick a payee and period"
-          description="Choose a payee and a date range above, then Generate to render their statement."
+          title={d.money.statements.pickTitle}
+          description={d.money.statements.pickDesc}
         />
       ) : !orderValid ? (
         <EmptyState
-          title="Check the dates"
-          description="The end date must be on or after the start date."
+          title={d.money.statements.datesTitle}
+          description={d.money.statements.datesDesc}
         />
       ) : rpcError ? (
         <EmptyState
-          title="Could not build the statement"
-          description="Something went wrong producing this statement. Adjust the inputs and try again."
+          title={d.money.statements.errorTitle}
+          description={d.money.statements.errorDesc}
         />
       ) : (
         <>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-semibold text-foreground">
-                {payeeLabel.get(activePayee) ?? "Statement"}
+                {payeeLabel.get(activePayee) ?? d.money.statements.headingFallback}
               </h2>
-              <p className="text-xs text-muted">{dateRange(activeFrom, activeTo)}</p>
+              <p className="text-xs text-muted">{fm.dateRange(activeFrom, activeTo)}</p>
             </div>
-            <span className="text-xs text-muted">{body.length} entries</span>
+            <span className="text-xs text-muted">
+              {d.money.statements.entriesCount(body.length)}
+            </span>
           </div>
 
           <StatTileRow className="mb-6" columns={3}>
             <StatTile
-              label="Opening balance"
-              value={money(openingBalance, currencyCode)}
-              hint={`Before ${activeFrom}`}
+              label={d.money.statements.openingBalance}
+              value={fm.money(openingBalance, currencyCode)}
+              hint={d.money.statements.openingHint(fm.date(activeFrom))}
             />
             <StatTile
-              label="Movement"
-              value={money(movement, currencyCode, { signed: true })}
-              hint="Sum of entries in period"
+              label={d.money.statements.movement}
+              value={fm.money(movement, currencyCode, { signed: true })}
+              hint={d.money.statements.movementHint}
             />
             <StatTile
-              label="Closing balance"
-              value={money(closingBalance, currencyCode)}
-              hint={`As of ${activeTo}`}
+              label={d.money.statements.closingBalance}
+              value={fm.money(closingBalance, currencyCode)}
+              hint={d.money.statements.closingHint(fm.date(activeTo))}
             />
           </StatTileRow>
 
@@ -202,11 +216,7 @@ export default async function StatementsPage({
             <Card>
               <CardBody>
                 <p className="text-sm text-muted">
-                  No ledger entries in this window. Opening and closing balances are equal at{" "}
-                  <span className="font-medium text-foreground">
-                    {money(openingBalance, currencyCode)}
-                  </span>
-                  .
+                  {d.money.statements.noEntriesInWindow(fm.money(openingBalance, currencyCode))}
                 </p>
               </CardBody>
             </Card>
@@ -214,42 +224,43 @@ export default async function StatementsPage({
             <Table containerClassName="rounded-lg border border-border">
               <THead>
                 <TR>
-                  <TH>Date</TH>
-                  <TH>Type</TH>
-                  <TH>Description</TH>
-                  <TH align="right">Amount</TH>
-                  <TH align="right">Balance</TH>
+                  <TH>{d.money.statements.colDate}</TH>
+                  <TH>{d.money.statements.colType}</TH>
+                  <TH>{d.money.statements.colDescription}</TH>
+                  <TH align="right">{d.money.statements.colAmount}</TH>
+                  <TH align="right">{d.money.statements.colBalance}</TH>
                 </TR>
               </THead>
               <TBody>
                 {/* Opening balance as the first row for continuity */}
                 <TR>
-                  <TD className="whitespace-nowrap text-muted">{activeFrom}</TD>
+                  <TD className="whitespace-nowrap text-muted">{fm.date(activeFrom)}</TD>
                   <TD>
-                    <Badge variant="neutral">Opening</Badge>
+                    <Badge variant="neutral">{d.money.statements.rowOpening}</Badge>
                   </TD>
-                  <TD className="text-muted">Balance carried forward</TD>
+                  <TD className="text-muted">{d.money.statements.rowOpeningDesc}</TD>
                   <TD numeric className="text-muted">
                     —
                   </TD>
                   <TD numeric className="font-medium text-foreground">
-                    {money(openingBalance, currencyCode)}
+                    {fm.money(openingBalance, currencyCode)}
                   </TD>
                 </TR>
 
                 {body.map((line, i) => {
-                  const meta = line.entry_type ? ENTRY_META[line.entry_type] : null;
                   const amount = Number(line.amount ?? 0);
                   return (
                     <TR key={line.entry_id ?? `line-${i}`}>
                       <TD className="whitespace-nowrap text-muted">
-                        {line.entry_date ? date(line.entry_date) : "—"}
+                        {line.entry_date ? fm.date(line.entry_date) : "—"}
                       </TD>
                       <TD>
-                        {meta ? (
-                          <Badge variant={meta.variant}>{meta.label}</Badge>
+                        {line.entry_type ? (
+                          <Badge variant={ENTRY_VARIANT[line.entry_type]}>
+                            {d.money.ledger.entryType[line.entry_type]}
+                          </Badge>
                         ) : (
-                          <Badge variant="neutral">{line.entry_type ?? "Entry"}</Badge>
+                          <Badge variant="neutral">{d.money.statements.entryFallback}</Badge>
                         )}
                       </TD>
                       <TD className="text-muted">
@@ -261,11 +272,11 @@ export default async function StatementsPage({
                       </TD>
                       <TD numeric>
                         <span className={amount < 0 ? "text-danger" : "text-foreground"}>
-                          {money(amount, line.currency ?? currencyCode, { signed: true })}
+                          {fm.money(amount, line.currency ?? currencyCode, { signed: true })}
                         </span>
                       </TD>
                       <TD numeric className="text-muted">
-                        {money(Number(line.running_balance ?? 0), line.currency ?? currencyCode)}
+                        {fm.money(Number(line.running_balance ?? 0), line.currency ?? currencyCode)}
                       </TD>
                     </TR>
                   );
@@ -273,16 +284,18 @@ export default async function StatementsPage({
 
                 {/* Closing balance footer row */}
                 <TR>
-                  <TD className="whitespace-nowrap font-medium text-foreground">{activeTo}</TD>
-                  <TD>
-                    <Badge variant="neutral">Closing</Badge>
+                  <TD className="whitespace-nowrap font-medium text-foreground">
+                    {fm.date(activeTo)}
                   </TD>
-                  <TD className="text-muted">Balance at period end</TD>
+                  <TD>
+                    <Badge variant="neutral">{d.money.statements.rowClosing}</Badge>
+                  </TD>
+                  <TD className="text-muted">{d.money.statements.rowClosingDesc}</TD>
                   <TD numeric className="text-muted">
                     —
                   </TD>
                   <TD numeric className="font-semibold text-foreground">
-                    {money(closingBalance, currencyCode)}
+                    {fm.money(closingBalance, currencyCode)}
                   </TD>
                 </TR>
               </TBody>

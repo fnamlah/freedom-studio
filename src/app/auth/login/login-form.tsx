@@ -8,12 +8,19 @@ import { AuthCard, AuthError } from "@/components/auth/auth-card";
 import { Button, Field, Input, Label } from "@/components/ui";
 import { AUTH_ROUTES } from "@/lib/auth/routes";
 import { getAssurance } from "@/lib/auth/mfa";
+import type { Dictionary } from "@/lib/i18n";
+import { useDict } from "@/lib/i18n/client";
 import { createBrowserSupabase } from "@/lib/supabase/browser";
 
-const schema = z.object({
-  email: z.string().trim().min(1, "Enter your email.").email("Enter a valid email address."),
-  password: z.string().min(1, "Enter your password."),
-});
+/**
+ * A factory, not a constant: a module-scope schema is evaluated at import time,
+ * before any locale is known, and would freeze its messages in one language.
+ */
+const makeSchema = (d: Dictionary) =>
+  z.object({
+    email: z.string().trim().min(1, d.authFlow.emailRequired).email(d.authFlow.emailInvalid),
+    password: z.string().min(1, d.authFlow.passwordRequired),
+  });
 
 /**
  * Password sign-in, then assurance-based routing (docs/05 §4):
@@ -26,6 +33,7 @@ const schema = z.object({
  */
 export function LoginForm({ next, initialError }: { next: string; initialError: string | null }) {
   const router = useRouter();
+  const d = useDict();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(initialError);
@@ -35,9 +43,9 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
     event.preventDefault();
     setError(null);
 
-    const parsed = schema.safeParse({ email, password });
+    const parsed = makeSchema(d).safeParse({ email, password });
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "Check your details and try again.");
+      setError(parsed.error.issues[0]?.message ?? d.authFlow.checkDetails);
       return;
     }
 
@@ -50,7 +58,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
     });
     if (signInError) {
       // Deliberately generic — never reveal whether the email exists.
-      setError("Incorrect email or password.");
+      setError(d.auth.invalidCredentials);
       setPending(false);
       return;
     }
@@ -69,16 +77,13 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
   }
 
   return (
-    <AuthCard
-      title="Sign in"
-      description="Access is invite-only. Sign in with the email your administrator invited."
-    >
+    <AuthCard title={d.auth.signInTitle} description={d.authFlow.signInDescription}>
       {error ? <AuthError>{error}</AuthError> : null}
 
       <form onSubmit={onSubmit} noValidate className="space-y-4">
         <Field>
           <Label htmlFor="email" required>
-            Email
+            {d.auth.email}
           </Label>
           <Input
             id="email"
@@ -95,7 +100,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
 
         <Field>
           <Label htmlFor="password" required>
-            Password
+            {d.auth.password}
           </Label>
           <Input
             id="password"
@@ -110,7 +115,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
         </Field>
 
         <Button type="submit" fullWidth loading={pending}>
-          Sign in
+          {pending ? d.auth.signingIn : d.auth.signIn}
         </Button>
       </form>
     </AuthCard>

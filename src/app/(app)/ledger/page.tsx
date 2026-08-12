@@ -7,13 +7,16 @@ import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/guard";
 import type { Enums } from "@/lib/database.types";
-import { date, money } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { ClosePeriodForm } from "./close-period-form";
 import { PayeeFilter, type PayeeOption } from "./payee-filter";
 import { PostEntryForm, type PayeePickOption } from "./post-entry-form";
 
-export const metadata: Metadata = { title: "Ledger" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).money.ledger.metaTitle };
+}
 
 type LedgerEntryType = Enums<"ledger_entry_type">;
 
@@ -33,11 +36,16 @@ type EntryRow = {
   created_at: string;
 };
 
-const ENTRY_META: Record<LedgerEntryType, { label: string; variant: BadgeVariant }> = {
-  earning_share: { label: "Earning share", variant: "success" },
-  adjustment: { label: "Adjustment", variant: "primary" },
-  deduction: { label: "Deduction", variant: "warning" },
-  payout_settlement: { label: "Settlement", variant: "muted" },
+/**
+ * Badge colour per entry type. The LABEL lives in the dictionary
+ * (`d.money.ledger.entryType`) — only the colour is language-independent, so
+ * only the colour is a module constant.
+ */
+const ENTRY_VARIANT: Record<LedgerEntryType, BadgeVariant> = {
+  earning_share: "success",
+  adjustment: "primary",
+  deduction: "warning",
+  payout_settlement: "muted",
 };
 
 /**
@@ -63,6 +71,8 @@ export default async function LedgerPage({
     "operator",
   );
   const { payee } = await searchParams;
+  const d = await getDict();
+  const fm = fmt(await getLocale());
 
   const canWrite = role === "super_admin" || role === "finance";
 
@@ -84,14 +94,14 @@ export default async function LedgerPage({
       .map((m) => ({
         payee_type: "model" as const,
         payee_id: m.id,
-        label: `${m.stage_name ?? "Model"} · model`,
+        label: `${m.stage_name ?? d.money.ledger.fallbackModel} · ${d.money.ledger.payeeType.model}`,
       })),
     ...operators
       .filter((o): o is { id: string; display_name: string } => !!o.id)
       .map((o) => ({
         payee_type: "operator" as const,
         payee_id: o.id,
-        label: `${o.display_name ?? "Operator"} · operator`,
+        label: `${o.display_name ?? d.money.ledger.fallbackOperator} · ${d.money.ledger.payeeType.operator}`,
       })),
   ].sort((a, b) => a.label.localeCompare(b.label));
 
@@ -100,7 +110,9 @@ export default async function LedgerPage({
   for (const b of balanceRows) {
     if (b.payee_type && b.payee_id && b.display_name) {
       const key = `${b.payee_type}:${b.payee_id}`;
-      if (!payeeName.has(key)) payeeName.set(key, `${b.display_name} · ${b.payee_type}`);
+      if (!payeeName.has(key)) {
+        payeeName.set(key, `${b.display_name} · ${d.money.ledger.payeeType[b.payee_type]}`);
+      }
     }
   }
 
@@ -145,14 +157,16 @@ export default async function LedgerPage({
     ? balanceRows.find((b) => `${b.payee_type}:${b.payee_id}` === active)
     : null;
 
-  const scopeHint = active ? payeeName.get(active) ?? "Filtered payee" : "All payees";
+  const scopeHint = active
+    ? payeeName.get(active) ?? d.money.ledger.filteredPayee
+    : d.money.ledger.allPayees;
 
   return (
     <>
       <PageHeader
-        title="Ledger"
-        description="The append-only source of truth for what each payee is owed. Balances are SUM(amount) per payee; corrections are reversing entries, never edits (docs/09 §5)."
-        breadcrumbs={[{ label: "Ledger" }]}
+        title={d.money.ledger.title}
+        description={d.money.ledger.description}
+        breadcrumbs={[{ label: d.money.ledger.title }]}
         actions={
           canWrite ? (
             <div className="flex items-center gap-2">
@@ -164,63 +178,79 @@ export default async function LedgerPage({
       />
 
       <StatTileRow className="mb-6" columns={4}>
-        <StatTile label="Entries" value={entries.length} hint={scopeHint} />
-        <StatTile label="Credits" value={money(credits)} hint="Positive movements" />
-        <StatTile label="Debits" value={money(debits)} hint="Deductions & settlements" />
         <StatTile
-          label={active ? "Payee balance" : "Net (this view)"}
-          value={money(active ? Number(selectedBalance?.balance ?? 0) : net)}
-          hint={active ? "Owed to payee" : "Credits + debits shown"}
+          label={d.money.ledger.statEntries}
+          value={fm.number(entries.length)}
+          hint={scopeHint}
+        />
+        <StatTile
+          label={d.money.ledger.statCredits}
+          value={fm.money(credits)}
+          hint={d.money.ledger.statCreditsHint}
+        />
+        <StatTile
+          label={d.money.ledger.statDebits}
+          value={fm.money(debits)}
+          hint={d.money.ledger.statDebitsHint}
+        />
+        <StatTile
+          label={active ? d.money.ledger.statPayeeBalance : d.money.ledger.statNetThisView}
+          value={fm.money(active ? Number(selectedBalance?.balance ?? 0) : net)}
+          hint={active ? d.money.ledger.statOwedToPayee : d.money.ledger.statCreditsPlusDebits}
         />
       </StatTileRow>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <PayeeFilter current={active ?? "all"} payees={filterOptions} />
-        <span className="text-xs text-muted">{entries.length} shown (max 500)</span>
+        <span className="text-xs text-muted">{d.money.ledger.shown(entries.length)}</span>
       </div>
 
       {entries.length === 0 ? (
         <EmptyState
-          title="No ledger entries"
+          title={d.money.ledger.emptyTitle}
           description={
             active
-              ? "This payee has no ledger movements in view. Clear the filter to see the full journal."
+              ? d.money.ledger.emptyFiltered
               : canWrite
-                ? "Nothing posted yet. Close a period to generate earning-share credits, or post a manual adjustment."
-                : "Nothing posted yet. Ledger movements will appear here as they are recorded."
+                ? d.money.ledger.emptyWriter
+                : d.money.ledger.emptyReader
           }
         />
       ) : (
         <Table containerClassName="rounded-lg border border-border">
           <THead>
             <TR>
-              <TH>Date</TH>
-              <TH>Payee</TH>
-              <TH>Type</TH>
-              <TH>Details</TH>
-              <TH align="right">Amount</TH>
+              <TH>{d.money.ledger.colDate}</TH>
+              <TH>{d.money.ledger.colPayee}</TH>
+              <TH>{d.money.ledger.colType}</TH>
+              <TH>{d.money.ledger.colDetails}</TH>
+              <TH align="right">{d.money.ledger.colAmount}</TH>
             </TR>
           </THead>
           <TBody>
             {entries.map((e) => {
-              const meta = ENTRY_META[e.entry_type];
               const key = `${e.payee_type}:${e.payee_id}`;
               const provenance: string[] = [];
               if (e.period_start && e.period_end) {
-                provenance.push(`Period ${e.period_start} → ${e.period_end}`);
+                // Raw ISO on purpose: provenance is a machine-readable stamp,
+                // and it has to stay short inside the details column.
+                provenance.push(d.money.ledger.provenancePeriod(e.period_start, e.period_end));
               }
-              if (e.earning_id) provenance.push("from earning");
-              if (e.payout_id) provenance.push("from payout");
-              if (e.commission_scheme_id) provenance.push("scheme-priced");
+              if (e.earning_id) provenance.push(d.money.ledger.provenanceEarning);
+              if (e.payout_id) provenance.push(d.money.ledger.provenancePayout);
+              if (e.commission_scheme_id) provenance.push(d.money.ledger.provenanceScheme);
 
               return (
                 <TR key={e.id}>
-                  <TD className="whitespace-nowrap text-muted">{date(e.created_at)}</TD>
+                  <TD className="whitespace-nowrap text-muted">{fm.date(e.created_at)}</TD>
                   <TD className="font-medium text-foreground">
-                    {payeeName.get(key) ?? `${e.payee_type} · ${e.payee_id.slice(0, 8)}`}
+                    {payeeName.get(key) ??
+                      `${d.money.ledger.payeeType[e.payee_type]} · ${e.payee_id.slice(0, 8)}`}
                   </TD>
                   <TD>
-                    <Badge variant={meta.variant}>{meta.label}</Badge>
+                    <Badge variant={ENTRY_VARIANT[e.entry_type]}>
+                      {d.money.ledger.entryType[e.entry_type]}
+                    </Badge>
                   </TD>
                   <TD className="text-muted">
                     {e.description ? <span className="text-foreground">{e.description}</span> : null}
@@ -233,7 +263,7 @@ export default async function LedgerPage({
                   </TD>
                   <TD numeric>
                     <span className={e.amount < 0 ? "text-danger" : "text-foreground"}>
-                      {money(e.amount, e.currency, { signed: true })}
+                      {fm.money(e.amount, e.currency, { signed: true })}
                     </span>
                   </TD>
                 </TR>

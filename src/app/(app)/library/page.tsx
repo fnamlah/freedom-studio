@@ -3,14 +3,20 @@ import Link from "next/link";
 
 import { LibraryWorkspace } from "@/components/library/library-workspace";
 import type { CategoryLite, LibraryFileLite } from "@/components/library/library-meta";
-import { normaliseKeyFigures } from "@/components/library/library-meta";
+import {
+  CATEGORY_COLUMNS,
+  normaliseKeyFigures,
+} from "@/components/library/library-meta";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { requireRole } from "@/lib/auth/guard";
 import { optionalEnv } from "@/lib/env";
+import { getDict } from "@/lib/i18n/server";
 import { getSetting } from "@/lib/settings";
 
-export const metadata: Metadata = { title: "Library" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).library.metaTitle };
+}
 
 /**
  * File Library — the studio's own filing cabinet (docs/12 §1). Super Admin and
@@ -28,11 +34,12 @@ export const metadata: Metadata = { title: "Library" };
 export default async function LibraryPage() {
   const { supabase, role } = await requireRole("super_admin", "manager");
   const isSuperAdmin = role === "super_admin";
+  const d = await getDict();
 
   const [{ data: categoriesData }, { data: filesData }] = await Promise.all([
     supabase
       .from("doc_categories")
-      .select("id, slug, name, description, ai_enabled, sort")
+      .select(CATEGORY_COLUMNS)
       .order("sort", { ascending: true })
       .order("name", { ascending: true }),
     supabase
@@ -79,40 +86,55 @@ export default async function LibraryPage() {
   return (
     <>
       <PageHeader
-        title="Library"
-        description="The studio's own operating documents — statements, receipts, contracts, policies, tax records. Org-wide, filed into folders and categories. Anything not marked exempt is sent to the AI once for a category suggestion you confirm (docs/12)."
-        breadcrumbs={[{ label: "Library" }]}
+        title={d.library.title}
+        description={d.library.description}
+        breadcrumbs={[{ label: d.library.title }]}
         actions={
           isSuperAdmin ? (
             <Link
               href="/admin/categories"
               className="text-sm text-primary hover:underline"
             >
-              Manage categories
+              {d.library.manageCategories}
             </Link>
           ) : undefined
         }
       />
 
       <StatTileRow className="mb-6" columns={4}>
-        <StatTile label="Files" value={counts.total} hint="In the Library" />
-        <StatTile label="Filed" value={counts.filed} hint="A category set by a human" />
-        <StatTile label="Pending" value={counts.pending} hint="Awaiting classification" />
-        <StatTile label="Needs review" value={counts.suggested} hint="AI suggested a category" />
+        <StatTile
+          label={d.library.statFiles}
+          value={counts.total}
+          hint={d.library.statFilesHint}
+        />
+        <StatTile
+          label={d.library.statFiled}
+          value={counts.filed}
+          hint={d.library.statFiledHint}
+        />
+        <StatTile
+          label={d.library.statPending}
+          value={counts.pending}
+          hint={d.library.statPendingHint}
+        />
+        <StatTile
+          label={d.library.statNeedsReview}
+          value={counts.suggested}
+          hint={d.library.statNeedsReviewHint}
+        />
       </StatTileRow>
 
       {categories.length === 0 ? (
         <p className="mb-4 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-foreground">
-          No categories exist yet. A Super Admin defines the classification
-          vocabulary under{" "}
+          {d.library.noCategories}
           {isSuperAdmin ? (
-            <Link href="/admin/categories" className="text-primary hover:underline">
-              Admin → Categories
-            </Link>
-          ) : (
-            "Admin → Categories"
-          )}{" "}
-          before the classifier has anything to suggest.
+            <>
+              {" "}
+              <Link href="/admin/categories" className="text-primary hover:underline">
+                {d.library.noCategoriesCta}
+              </Link>
+            </>
+          ) : null}
         </p>
       ) : null}
 

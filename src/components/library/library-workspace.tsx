@@ -9,6 +9,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
+import { useDict } from "@/lib/i18n/client";
 
 import { FileGrid } from "./file-grid";
 import { FolderTree } from "./folder-tree";
@@ -42,6 +43,7 @@ export function LibraryWorkspace({
 }) {
   const router = useRouter();
   const { success, error } = useToast();
+  const d = useDict();
 
   const [selectedFolder, setSelectedFolder] = useState("/");
   const [notConfigured, setNotConfigured] = useState(!aiConfigured);
@@ -54,7 +56,10 @@ export function LibraryWorkspace({
     [categories],
   );
 
-  const folderTree = useMemo(() => buildFolderTree(files), [files]);
+  const folderTree = useMemo(
+    () => buildFolderTree(files, d.library.allFiles),
+    [files, d.library.allFiles],
+  );
 
   const existingFolders = useMemo(() => {
     const set = new Set<string>(["/"]);
@@ -88,30 +93,30 @@ export function LibraryWorkspace({
       // Client-driven batching (docs/12 §4.4): each call takes the next batch and
       // returns { done, remaining }; re-invoke while remaining > 0.
       for (let guard = 0; guard < 1000; guard += 1) {
-        const outcome = await runClassify({});
+        const outcome = await runClassify(d, {});
         if (outcome.status === "not_configured") {
           setNotConfigured(true);
-          error("AI not configured", "The classification service is not available yet.");
+          error(d.library.aiNotConfiguredTitle, d.library.aiNotConfiguredBody);
           break;
         }
         if (outcome.status === "error") {
-          error("Classification error", outcome.message);
+          error(d.library.classifyErrorTitle, outcome.message);
           break;
         }
         totalDone += outcome.done;
         setProgress({ done: totalDone, remaining: outcome.remaining });
         if (outcome.remaining <= 0) {
           success(
-            "Classification complete",
+            d.library.classifyDoneTitle,
             totalDone > 0
-              ? `Classified ${totalDone} file(s). Review the suggestions.`
-              : "No pending files remained.",
+              ? d.library.classifyDoneBody(totalDone)
+              : d.library.classifyNoneLeft,
           );
           break;
         }
         if (outcome.done <= 0) {
           // No forward progress — stop rather than spin forever.
-          error("Classification stalled", "No files were processed. Please try again later.");
+          error(d.library.classifyStalledTitle, d.library.classifyStalledBody);
           break;
         }
       }
@@ -126,14 +131,14 @@ export function LibraryWorkspace({
     if (classifyingId || classifyingAll) return;
     setClassifyingId(fileId);
     try {
-      const outcome = await runClassify({ file_id: fileId });
+      const outcome = await runClassify(d, { file_id: fileId });
       if (outcome.status === "not_configured") {
         setNotConfigured(true);
-        error("AI not configured", "The classification service is not available yet.");
+        error(d.library.aiNotConfiguredTitle, d.library.aiNotConfiguredBody);
       } else if (outcome.status === "error") {
-        error("Classification error", outcome.message);
+        error(d.library.classifyErrorTitle, outcome.message);
       } else {
-        success("Classified", "Review the suggestion in the review queue.");
+        success(d.library.classifiedOneTitle, d.library.classifiedOneBody);
       }
     } finally {
       setClassifyingId(null);
@@ -143,15 +148,15 @@ export function LibraryWorkspace({
 
   const classifyLabel = classifyingAll
     ? progress
-      ? `Classifying… (${progress.done} done, ${progress.remaining} left)`
-      : "Classifying…"
-    : `Classify all pending${pendingCount > 0 ? ` (${pendingCount})` : ""}`;
+      ? d.library.classifyingProgress(progress.done, progress.remaining)
+      : d.library.classifying
+    : d.library.classifyAll(pendingCount);
 
   return (
     <Tabs defaultValue="files">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <TabsList>
-          <TabsTrigger value="files">Files</TabsTrigger>
+          <TabsTrigger value="files">{d.library.tabFiles}</TabsTrigger>
           <TabsTrigger
             value="review"
             badge={
@@ -160,7 +165,7 @@ export function LibraryWorkspace({
               ) : undefined
             }
           >
-            Review queue
+            {d.library.tabReview}
           </TabsTrigger>
         </TabsList>
 
@@ -184,21 +189,20 @@ export function LibraryWorkspace({
 
       {notConfigured ? (
         <p className="mt-3 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
-          AI classification is not configured. Files can still be filed by hand; the
-          classifier and the review queue activate once a provider is set up (docs/12 §4.4).
+          {d.library.aiNotConfiguredNotice}
         </p>
       ) : null}
 
       <TabsContent value="files" className="mt-4">
         {files.length === 0 ? (
           <EmptyState
-            title="The Library is empty"
-            description="Upload the studio's operating paperwork — statements, receipts, contracts, policies, tax records. Files are org-wide and filed into virtual folders and categories."
+            title={d.library.emptyTitle}
+            description={d.library.emptyDescription}
           />
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[15rem_1fr]">
             <Card className="h-max">
-              <CardHeader title="Folders" />
+              <CardHeader title={d.library.folders} />
               <CardBody className="p-2">
                 <FolderTree
                   root={folderTree}
@@ -211,15 +215,17 @@ export function LibraryWorkspace({
             <div className="min-w-0">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <span className="text-xs text-muted">
-                  {selectedFolder === "/" ? "All files" : selectedFolder}
+                  {selectedFolder === "/" ? d.library.allFiles : selectedFolder}
                 </span>
-                <span className="text-xs text-muted">{filteredFiles.length} shown</span>
+                <span className="text-xs text-muted">
+                  {d.library.shown(filteredFiles.length)}
+                </span>
               </div>
               {filteredFiles.length === 0 ? (
                 <EmptyState
                   bare
-                  title="No files in this folder"
-                  description="Nothing is filed here yet. Upload a file or pick another folder."
+                  title={d.library.folderEmptyTitle}
+                  description={d.library.folderEmptyDescription}
                 />
               ) : (
                 <FileGrid

@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -25,6 +26,10 @@ import { isAuthzError } from "@/lib/supabase/admin";
  * are the authority — we only translate their errors into friendly toasts:
  *   • per-model pool_share sum ≤ 100 on every date  → `check_operator_pool` trigger
  *   • no overlapping (operator, model) windows       → EXCLUDE USING gist (23P01)
+ *
+ * Schemas are FACTORIES taking the caller's dictionary: a module-scope schema is
+ * built at import time, where no locale exists, so its messages could only ever be
+ * English. The language comes off the profile `requireRole()` already loaded.
  */
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -52,52 +57,68 @@ function isValidYmd(value: string): boolean {
 const emptyToNull = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? null : value;
 
-const optionalEmail = z
-  .preprocess(emptyToNull, z.string().trim().email("Enter a valid email address.").nullable())
-  .optional();
+const optionalEmail = (d: Dictionary) =>
+  z
+    .preprocess(
+      emptyToNull,
+      z.string().trim().email(d.studio.operators.errEmail).nullable(),
+    )
+    .optional();
 
-const optionalPhone = z
-  .preprocess(emptyToNull, z.string().trim().max(40, "Phone number is too long.").nullable())
-  .optional();
+const optionalPhone = (d: Dictionary) =>
+  z
+    .preprocess(
+      emptyToNull,
+      z.string().trim().max(40, d.studio.operators.errPhoneLong).nullable(),
+    )
+    .optional();
 
-const optionalCountry = z
-  .preprocess(
-    (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null),
-    z.string().regex(/^[A-Z]{2}$/, "Use a 2-letter ISO country code.").nullable(),
-  )
-  .optional();
+const optionalCountry = (d: Dictionary) =>
+  z
+    .preprocess(
+      (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null),
+      z.string().regex(/^[A-Z]{2}$/, d.studio.operators.errCountry).nullable(),
+    )
+    .optional();
 
-const optionalStartDate = z
-  .preprocess(
-    emptyToNull,
-    z.string().refine(isValidYmd, "Enter a valid date (YYYY-MM-DD).").nullable(),
-  )
-  .optional();
+const optionalStartDate = (d: Dictionary) =>
+  z
+    .preprocess(
+      emptyToNull,
+      z.string().refine(isValidYmd, d.studio.operators.errDateInvalid).nullable(),
+    )
+    .optional();
 
-const optionalNotes = z
-  .preprocess(emptyToNull, z.string().trim().max(4000, "Notes are too long.").nullable())
-  .optional();
+const optionalNotes = (d: Dictionary) =>
+  z
+    .preprocess(
+      emptyToNull,
+      z.string().trim().max(4000, d.studio.operators.errNotesLong).nullable(),
+    )
+    .optional();
 
 /** Shared operator profile fields (everything except lifecycle status). */
-const profileFields = {
-  display_name: z.string().trim().min(1, "Display name is required.").max(160),
-  legal_name: z.string().trim().min(1, "Legal name is required.").max(200),
-  email: optionalEmail,
-  phone: optionalPhone,
-  country: optionalCountry,
-  start_date: optionalStartDate,
-  notes: optionalNotes,
-};
-
-const createOperatorSchema = z.object({
-  ...profileFields,
-  status: z.enum(OPERATOR_STATUSES),
+const profileFields = (d: Dictionary) => ({
+  display_name: z.string().trim().min(1, d.studio.operators.errDisplayNameRequired).max(160),
+  legal_name: z.string().trim().min(1, d.studio.operators.errLegalNameRequired).max(200),
+  email: optionalEmail(d),
+  phone: optionalPhone(d),
+  country: optionalCountry(d),
+  start_date: optionalStartDate(d),
+  notes: optionalNotes(d),
 });
 
-const updateOperatorSchema = z.object({
-  id: z.string().uuid(),
-  ...profileFields,
-});
+const createOperatorSchema = (d: Dictionary) =>
+  z.object({
+    ...profileFields(d),
+    status: z.enum(OPERATOR_STATUSES),
+  });
+
+const updateOperatorSchema = (d: Dictionary) =>
+  z.object({
+    id: z.string().uuid(),
+    ...profileFields(d),
+  });
 
 const statusSchema = z.object({
   id: z.string().uuid(),
@@ -106,35 +127,41 @@ const statusSchema = z.object({
 
 /* ------------------------------------------------------------ assignment IO --- */
 
-const poolShare = z.coerce
-  .number({ invalid_type_error: "Enter a pool share." })
-  .min(0, "Pool share can't be negative.")
-  .max(100, "Pool share can't exceed 100%.");
+const poolShare = (d: Dictionary) =>
+  z.coerce
+    .number({ invalid_type_error: d.studio.operators.errPoolShareType })
+    .min(0, d.studio.operators.errPoolShareMin)
+    .max(100, d.studio.operators.errPoolShareMax);
 
-const assignmentBase = {
+const assignmentBase = (d: Dictionary) => ({
   operator_id: z.string().uuid(),
-  model_id: z.string().uuid("Choose a model."),
-  pool_share_percent: poolShare,
-  assigned_from: z.string().refine(isValidYmd, "Enter a valid start date (YYYY-MM-DD)."),
+  model_id: z.string().uuid(d.studio.operators.errModelRequired),
+  pool_share_percent: poolShare(d),
+  assigned_from: z.string().refine(isValidYmd, d.studio.operators.errStartDateInvalid),
   assigned_to: z
     .preprocess(
       emptyToNull,
-      z.string().refine(isValidYmd, "Enter a valid end date (YYYY-MM-DD).").nullable(),
+      z.string().refine(isValidYmd, d.studio.operators.errEndDateInvalid).nullable(),
     )
     .optional(),
-  notes: optionalNotes,
-};
+  notes: optionalNotes(d),
+});
 
 /** Mirrors the DB CHECK `assigned_to > assigned_from` with a friendly message. */
 const endAfterStart = (data: { assigned_from: string; assigned_to?: string | null }) =>
   !data.assigned_to || data.assigned_to > data.assigned_from;
-const endAfterStartMessage = { message: "End date must be after the start date.", path: ["assigned_to"] };
+const endAfterStartMessage = (d: Dictionary) => ({
+  message: d.studio.operators.errEndAfterStart,
+  path: ["assigned_to"],
+});
 
-const createAssignmentSchema = z.object(assignmentBase).refine(endAfterStart, endAfterStartMessage);
+const createAssignmentSchema = (d: Dictionary) =>
+  z.object(assignmentBase(d)).refine(endAfterStart, endAfterStartMessage(d));
 
-const updateAssignmentSchema = z
-  .object({ id: z.string().uuid(), ...assignmentBase })
-  .refine(endAfterStart, endAfterStartMessage);
+const updateAssignmentSchema = (d: Dictionary) =>
+  z
+    .object({ id: z.string().uuid(), ...assignmentBase(d) })
+    .refine(endAfterStart, endAfterStartMessage(d));
 
 const deleteAssignmentSchema = z.object({
   id: z.string().uuid(),
@@ -169,19 +196,19 @@ export type UpdateAssignmentInput = CreateAssignmentInput & { id: string };
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Please check the form and try again.";
+function firstIssue(error: z.ZodError, d: Dictionary): string {
+  return error.issues[0]?.message ?? d.studio.operators.errForm;
 }
 
 /** Maps a Postgres error on `operators` to a friendly message. */
-function describeOperatorError(code: string | undefined): string {
+function describeOperatorError(code: string | undefined, d: Dictionary): string {
   if (code === "23514") {
-    return "That doesn't satisfy a database rule — check the country code.";
+    return d.studio.operators.errDbCheck;
   }
   if (code === "23505") {
-    return "An operator with those details already exists.";
+    return d.studio.operators.errDuplicate;
   }
-  return "Could not save the operator. Please try again.";
+  return d.studio.operators.errSaveFailed;
 }
 
 /**
@@ -195,12 +222,15 @@ function describeOperatorError(code: string | undefined): string {
  *   • 23514 — CHECK (pool_share 0–100, assigned_to > assigned_from)
  *   • 23503 — FK: operator or model no longer exists
  */
-function describeAssignmentError(error: { code?: string; message?: string } | null): string {
+function describeAssignmentError(
+  error: { code?: string; message?: string } | null,
+  d: Dictionary,
+): string {
   const code = error?.code;
   const message = (error?.message ?? "").toLowerCase();
 
   if (code === "23P01" || message.includes("overlap")) {
-    return "This operator already has an overlapping assignment to that model. Adjust the dates so the periods don't overlap.";
+    return d.studio.operators.errOverlap;
   }
   if (
     code === "P0001" ||
@@ -208,25 +238,26 @@ function describeAssignmentError(error: { code?: string; message?: string } | nu
     (message.includes("100") && message.includes("exceed")) ||
     message.includes("exceeds 100")
   ) {
-    return "The model's operator pool would exceed 100% for these dates. Lower this share or shorten the period.";
+    return d.studio.operators.errPoolExceeded;
   }
   if (code === "23514") {
-    return "That doesn't satisfy a database rule — pool share must be 0–100% and the end date must follow the start date.";
+    return d.studio.operators.errAssignmentCheck;
   }
   if (code === "23503") {
-    return "The operator or model no longer exists. Refresh and try again.";
+    return d.studio.operators.errAssignmentFk;
   }
-  return "Could not save the assignment. Please try again.";
+  return d.studio.operators.errAssignmentSaveFailed;
 }
 
 /* -------------------------------------------------------- operator: create --- */
 
 export async function createOperator(input: CreateOperatorInput): Promise<ActionResult> {
-  const { supabase, user } = await requireRole("super_admin", "manager");
+  const { supabase, user, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = createOperatorSchema.safeParse(input);
+  const parsed = createOperatorSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -248,7 +279,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Action
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeOperatorError(error?.code) };
+      return { ok: false, error: describeOperatorError(error?.code, d) };
     }
 
     await writeAudit({
@@ -259,23 +290,24 @@ export async function createOperator(input: CreateOperatorInput): Promise<Action
     });
 
     revalidatePath("/operators");
-    return { ok: true, message: `${data.display_name} added.` };
+    return { ok: true, message: d.studio.operators.msgAdded(data.display_name) };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to add operators." };
+      return { ok: false, error: d.studio.operators.errNotAuthorizedAdd };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* -------------------------------------------------------- operator: update --- */
 
 export async function updateOperator(input: UpdateOperatorInput): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = updateOperatorSchema.safeParse(input);
+  const parsed = updateOperatorSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -296,10 +328,10 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Action
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeOperatorError(error.code) };
+      return { ok: false, error: describeOperatorError(error.code, d) };
     }
     if (!updated) {
-      return { ok: false, error: "That operator no longer exists." };
+      return { ok: false, error: d.studio.operators.errGone };
     }
 
     await writeAudit({
@@ -311,12 +343,12 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Action
 
     revalidatePath("/operators");
     revalidatePath(`/operators/${data.id}`);
-    return { ok: true, message: "Operator updated." };
+    return { ok: true, message: d.studio.operators.msgUpdated };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to edit operators." };
+      return { ok: false, error: d.studio.operators.errNotAuthorizedEdit };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -326,11 +358,12 @@ export async function setOperatorStatus(input: {
   id: string;
   status: string;
 }): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   const parsed = statusSchema.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid status change." };
+    return { ok: false, error: d.studio.operators.errInvalidStatus };
   }
   const { id, status } = parsed.data;
 
@@ -342,13 +375,16 @@ export async function setOperatorStatus(input: {
       .maybeSingle();
 
     if (readError) {
-      return { ok: false, error: "Could not load that operator." };
+      return { ok: false, error: d.studio.operators.errLoadFailed };
     }
     if (!current) {
-      return { ok: false, error: "That operator no longer exists." };
+      return { ok: false, error: d.studio.operators.errGone };
     }
     if (current.status === status) {
-      return { ok: false, error: `Operator is already ${status.replace("_", " ")}.` };
+      return {
+        ok: false,
+        error: d.studio.operators.msgAlreadyStatus(d.studio.lifecycleStatus[status]),
+      };
     }
 
     const { error: updateError } = await supabase
@@ -357,7 +393,7 @@ export async function setOperatorStatus(input: {
       .eq("id", id);
 
     if (updateError) {
-      return { ok: false, error: "Could not change the status. Please try again." };
+      return { ok: false, error: d.studio.operators.errStatusFailed };
     }
 
     await writeAudit({
@@ -369,23 +405,30 @@ export async function setOperatorStatus(input: {
 
     revalidatePath("/operators");
     revalidatePath(`/operators/${id}`);
-    return { ok: true, message: `${current.display_name} is now ${status.replace("_", " ")}.` };
+    return {
+      ok: true,
+      message: d.studio.operators.msgStatusChanged(
+        current.display_name,
+        d.studio.lifecycleStatus[status],
+      ),
+    };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to change operator status." };
+      return { ok: false, error: d.studio.operators.errNotAuthorizedStatus };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* ------------------------------------------------------ assignment: create --- */
 
 export async function createAssignment(input: CreateAssignmentInput): Promise<ActionResult> {
-  const { supabase, user } = await requireRole("super_admin", "manager");
+  const { supabase, user, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = createAssignmentSchema.safeParse(input);
+  const parsed = createAssignmentSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -405,7 +448,7 @@ export async function createAssignment(input: CreateAssignmentInput): Promise<Ac
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeAssignmentError(error) };
+      return { ok: false, error: describeAssignmentError(error, d) };
     }
 
     await writeAudit({
@@ -422,23 +465,24 @@ export async function createAssignment(input: CreateAssignmentInput): Promise<Ac
     });
 
     revalidatePath(`/operators/${data.operator_id}`);
-    return { ok: true, message: "Assignment created." };
+    return { ok: true, message: d.studio.operators.msgAssignmentCreated };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to assign operators." };
+      return { ok: false, error: d.studio.operators.errNotAuthorizedAssign };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* ------------------------------------------------------ assignment: update --- */
 
 export async function updateAssignment(input: UpdateAssignmentInput): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = updateAssignmentSchema.safeParse(input);
+  const parsed = updateAssignmentSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -458,10 +502,10 @@ export async function updateAssignment(input: UpdateAssignmentInput): Promise<Ac
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeAssignmentError(error) };
+      return { ok: false, error: describeAssignmentError(error, d) };
     }
     if (!updated) {
-      return { ok: false, error: "That assignment no longer exists." };
+      return { ok: false, error: d.studio.operators.errAssignmentGone };
     }
 
     await writeAudit({
@@ -478,12 +522,12 @@ export async function updateAssignment(input: UpdateAssignmentInput): Promise<Ac
     });
 
     revalidatePath(`/operators/${data.operator_id}`);
-    return { ok: true, message: "Assignment updated." };
+    return { ok: true, message: d.studio.operators.msgAssignmentUpdated };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to edit assignments." };
+      return { ok: false, error: d.studio.operators.errNotAuthorizedAssignEdit };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -493,11 +537,12 @@ export async function deleteAssignment(input: {
   id: string;
   operator_id: string;
 }): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   const parsed = deleteAssignmentSchema.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid assignment." };
+    return { ok: false, error: d.studio.operators.errAssignmentInvalid };
   }
   const { id, operator_id } = parsed.data;
 
@@ -511,10 +556,10 @@ export async function deleteAssignment(input: {
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: "Could not remove the assignment. Please try again." };
+      return { ok: false, error: d.studio.operators.errAssignmentRemoveFailed };
     }
     if (!deleted) {
-      return { ok: false, error: "That assignment no longer exists." };
+      return { ok: false, error: d.studio.operators.errAssignmentGone };
     }
 
     await writeAudit({
@@ -525,11 +570,11 @@ export async function deleteAssignment(input: {
     });
 
     revalidatePath(`/operators/${operator_id}`);
-    return { ok: true, message: "Assignment removed." };
+    return { ok: true, message: d.studio.operators.msgAssignmentRemoved };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to remove assignments." };
+      return { ok: false, error: d.studio.operators.errNotAuthorizedAssignRemove };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }

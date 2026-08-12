@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import type { ProviderId } from "@/lib/ai/types";
-import { number as fmtNumber } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 
 import {
@@ -40,6 +41,9 @@ type LimitKey =
   | "ai.limits.tokens_global_per_day";
 
 export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) {
+  const dict = useDict();
+  const d = dict.adminAi.settings;
+  const fm = fmt(useLocale());
   const { success, error } = useToast();
 
   /* --------------------------------------------------------- provider state --- */
@@ -87,11 +91,11 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
     startProvider(async () => {
       const res = await switchActiveProvider({ provider: selectedProvider });
       if (res.ok) {
-        success("Provider switched", res.message);
+        success(d.toastSwitched, res.message);
         setActiveProvider(selectedProvider);
         setConfirmOpen(false);
       } else {
-        error("Switch failed", res.error);
+        error(d.toastSwitchFailed, res.error);
       }
     });
   }
@@ -103,9 +107,9 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
         setConfigured(res.status.configured);
         setActiveProvider(res.status.active);
         setSelectedProvider(res.status.active);
-        success("Key status refreshed");
+        success(d.toastKeysRefreshed);
       } else {
-        error("Could not refresh", res.error);
+        error(d.toastRefreshFailed, res.error);
       }
     });
   }
@@ -119,11 +123,11 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
     startModels(async () => {
       const res = await saveAiModels({ values });
       if (res.ok) {
-        success("Saved", res.message);
+        success(d.toastSaved, res.message);
         setModels((prev) => ({ ...prev, ...values }));
         setModelsBaseline((prev) => ({ ...prev, ...values }));
       } else {
-        error("Could not save", res.error);
+        error(d.toastSaveFailed, res.error);
       }
     });
   }
@@ -137,11 +141,11 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
     startLimits(async () => {
       const res = await saveAiLimits({ values });
       if (res.ok) {
-        success("Saved", res.message);
+        success(d.toastSaved, res.message);
         setLimits((prev) => ({ ...prev, ...values }));
         setLimitsBaseline((prev) => ({ ...prev, ...values }));
       } else {
-        error("Could not save", res.error);
+        error(d.toastSaveFailed, res.error);
       }
     });
   }
@@ -165,8 +169,8 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
     const parsed = Number(limits[key]);
     const help =
       Number.isFinite(parsed) && parsed > 0
-        ? `${fmtNumber(parsed)} ${unit}`
-        : `Must be a positive whole number of ${unit}.`;
+        ? d.limitHelp(fm.number(parsed), unit)
+        : d.limitHelpInvalid(unit);
     return (
       <Field help={help}>
         <Label htmlFor={key}>{label}</Label>
@@ -189,21 +193,19 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
     <div className="flex flex-col gap-6">
       {!activeConfigured ? (
         <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
-          <span className="font-medium">The active provider has no API key. </span>
-          Set <code className="font-mono">{PROVIDER_KEY_ENV[activeProvider]}</code> in the server
-          environment. Until then the AI assistant, market reports and Library classification are
-          paused and degrade gracefully (docs/11 §1).
+          <span className="font-medium">{d.noKeyBanner} </span>
+          {d.noKeyBannerBody(PROVIDER_KEY_ENV[activeProvider])}
         </div>
       ) : null}
 
       {/* -------------------------------------------------- active provider --- */}
       <Card>
         <CardHeader
-          title="Active AI provider"
-          description="Switching routes every AI request to a different third-party data processor — a governance event, confirmed and audited as ai.model_switch. Effective globally within 60 seconds."
+          title={d.providerCardTitle}
+          description={d.providerCardDescription}
           action={
             <Button variant="ghost" size="sm" onClick={recheckKeys} disabled={providerPending}>
-              Recheck keys
+              {d.recheckKeys}
             </Button>
           }
         />
@@ -223,11 +225,13 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
                   <span className="text-sm font-medium text-foreground">
                     {PROVIDER_LABELS[id]}
                   </span>
-                  {id === activeProvider ? <Badge variant="primary">Active</Badge> : null}
+                  {id === activeProvider ? (
+                    <Badge variant="primary">{d.activeBadge}</Badge>
+                  ) : null}
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Badge variant={configured[id] ? "success" : "danger"} dot>
-                    {configured[id] ? "API key configured" : "No API key"}
+                    {configured[id] ? d.keyConfigured : d.keyMissing}
                   </Badge>
                   <span className="font-mono text-xs text-muted">{PROVIDER_KEY_ENV[id]}</span>
                 </div>
@@ -237,7 +241,7 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
 
           <div className="flex flex-wrap items-end gap-3">
             <Field className="w-full sm:w-64">
-              <Label htmlFor="active-provider">Route AI requests to</Label>
+              <Label htmlFor="active-provider">{d.routeTo}</Label>
               <Select
                 id="active-provider"
                 value={selectedProvider}
@@ -247,7 +251,7 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
                   value: id,
                   label: configured[id]
                     ? PROVIDER_LABELS[id]
-                    : `${PROVIDER_LABELS[id]} (no API key)`,
+                    : d.optionNoKey(PROVIDER_LABELS[id]),
                 }))}
               />
             </Field>
@@ -255,7 +259,7 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
               onClick={() => setConfirmOpen(true)}
               disabled={selectedProvider === activeProvider || providerPending}
             >
-              Switch provider
+              {d.switchCta}
             </Button>
           </div>
         </CardBody>
@@ -265,53 +269,42 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
       <Card>
         <form onSubmit={onSaveModels}>
           <CardHeader
-            title="Model IDs"
-            description="Model identifiers per provider. A version bump is a settings change here, never a deploy (docs/11 §2.1). Model IDs are configuration, never hardcoded."
+            title={d.modelsTitle}
+            description={d.modelsDescription}
           />
           <CardBody className="flex flex-col gap-5">
             <div className="grid gap-4 sm:grid-cols-2">
               {modelField(
                 "ai.chat_model.moonshot",
-                "Chat model — Moonshot",
-                "Kimi chat model, used when Moonshot is the active provider.",
+                d.chatModelMoonshot,
+                d.chatModelMoonshotHelp,
               )}
-              {modelField(
-                "ai.chat_model.zhipu",
-                "Chat model — Zhipu",
-                "GLM chat model, used when Zhipu is the active provider.",
-              )}
+              {modelField("ai.chat_model.zhipu", d.chatModelZhipu, d.chatModelZhipuHelp)}
               {modelField(
                 "ai.vision_model.moonshot",
-                "Vision model — Moonshot",
-                "Vision-capable model for Library image / scanned-PDF classification.",
+                d.visionModelMoonshot,
+                d.visionModelHelp,
               )}
-              {modelField(
-                "ai.vision_model.zhipu",
-                "Vision model — Zhipu",
-                "Vision-capable model for Library image / scanned-PDF classification.",
-              )}
+              {modelField("ai.vision_model.zhipu", d.visionModelZhipu, d.visionModelHelp)}
             </div>
 
             <div className="rounded-lg border border-border bg-surface-2 p-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 {modelField(
                   "ai.embedding.model",
-                  "Embedding model",
-                  "fn_semantic_search filters on this value. Changing it strands existing vectors — re-embed via runbook 5.10.",
+                  d.embeddingModelLabel,
+                  d.embeddingModelHelp,
                 )}
                 <div className="flex flex-col justify-center gap-2 text-xs text-muted">
                   <div className="flex items-center gap-2">
-                    <span className="text-muted">Embedding provider</span>
+                    <span className="text-muted">{d.embeddingProviderLabel}</span>
                     <Badge variant="muted">{PROVIDER_LABELS[snapshot.embeddingProvider]}</Badge>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-muted">Dimension</span>
-                    <Badge variant="muted">{fmtNumber(snapshot.embeddingDim)}</Badge>
+                    <span className="text-muted">{d.dimensionLabel}</span>
+                    <Badge variant="muted">{fm.number(snapshot.embeddingDim)}</Badge>
                   </div>
-                  <p className="mt-1">
-                    Provider and dimension are decoupled from the chat switch and change only via
-                    migration + re-embed (docs/11 §6.2).
-                  </p>
+                  <p className="mt-1">{d.embeddingNote}</p>
                 </div>
               </div>
             </div>
@@ -319,11 +312,11 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
           <CardFooter>
             {changedModels.length > 0 ? (
               <span className="mr-auto text-xs text-muted">
-                {changedModels.length} unsaved change{changedModels.length > 1 ? "s" : ""}
+                {d.unsavedChanges(changedModels.length)}
               </span>
             ) : null}
             <Button type="submit" loading={modelsPending} disabled={changedModels.length === 0}>
-              Save models
+              {d.saveModels}
             </Button>
           </CardFooter>
         </form>
@@ -333,36 +326,36 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
       <Card>
         <form onSubmit={onSaveLimits}>
           <CardHeader
-            title="Budgets"
-            description="The caps the gateway enforces against ai_usage before any provider call. Refusals are themselves metered, so abuse patterns stay visible (docs/11 §8)."
+            title={d.budgetsTitle}
+            description={d.budgetsDescription}
           />
           <CardBody>
             <div className="grid gap-4 sm:grid-cols-3">
               {limitField(
                 "ai.limits.requests_per_user_per_hour",
-                "Requests / user / hour",
-                "requests per hour",
+                d.limitRequestsLabel,
+                d.limitRequestsUnit,
               )}
               {limitField(
                 "ai.limits.tokens_per_user_per_day",
-                "Tokens / user / day",
-                "tokens per day",
+                d.limitTokensUserLabel,
+                d.limitTokensUnit,
               )}
               {limitField(
                 "ai.limits.tokens_global_per_day",
-                "Tokens / day (global)",
-                "tokens per day",
+                d.limitTokensGlobalLabel,
+                d.limitTokensUnit,
               )}
             </div>
           </CardBody>
           <CardFooter>
             {changedLimits.length > 0 ? (
               <span className="mr-auto text-xs text-muted">
-                {changedLimits.length} unsaved change{changedLimits.length > 1 ? "s" : ""}
+                {d.unsavedChanges(changedLimits.length)}
               </span>
             ) : null}
             <Button type="submit" loading={limitsPending} disabled={changedLimits.length === 0}>
-              Save budgets
+              {d.saveBudgets}
             </Button>
           </CardFooter>
         </form>
@@ -375,7 +368,7 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
           if (!providerPending) setConfirmOpen(false);
         }}
         dismissible={!providerPending}
-        title="Switch active AI provider?"
+        title={d.switchDialogTitle}
         size="md"
         footer={
           <>
@@ -384,30 +377,31 @@ export function AiSettingsPanel({ snapshot }: { snapshot: AiSettingsSnapshot }) 
               onClick={() => setConfirmOpen(false)}
               disabled={providerPending}
             >
-              Cancel
+              {dict.common.cancel}
             </Button>
             <Button variant="primary" onClick={confirmSwitch} loading={providerPending}>
-              Switch provider
+              {d.switchCta}
             </Button>
           </>
         }
       >
         <div className="text-sm text-foreground">
+          {/* Both provider names are arguments to one translated sentence: in
+              Russian they take different cases and a different order, which no
+              amount of splitting into <strong> fragments could express. */}
           <p>
-            All AI requests will be routed to{" "}
-            <strong className="text-foreground">{PROVIDER_LABELS[selectedProvider]}</strong> instead
-            of {PROVIDER_LABELS[activeProvider]}. This changes the third-party data processor and is
-            recorded in the audit log as <code className="font-mono">ai.model_switch</code>.
+            {d.switchDialogBody(
+              PROVIDER_LABELS[selectedProvider],
+              PROVIDER_LABELS[activeProvider],
+            )}
           </p>
-          <p className="mt-2 text-muted">
-            The switch is global and takes effect within 60 seconds. Stored embeddings are
-            unaffected — the embedding provider is a separate setting.
-          </p>
+          <p className="mt-2 text-muted">{d.switchDialogNote}</p>
           {!configured[selectedProvider] ? (
             <p className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">
-              {PROVIDER_LABELS[selectedProvider]} has no API key (
-              <span className="font-mono">{PROVIDER_KEY_ENV[selectedProvider]}</span>). After
-              switching, the AI surfaces will be paused until the key is set.
+              {d.switchDialogNoKey(
+                PROVIDER_LABELS[selectedProvider],
+                PROVIDER_KEY_ENV[selectedProvider],
+              )}
             </p>
           ) : null}
         </div>

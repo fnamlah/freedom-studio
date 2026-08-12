@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 
 /**
  * Hermes approvals — the human half of the agent's propose→approve→execute loop.
@@ -29,14 +30,20 @@ import { requireRole } from "@/lib/auth/guard";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
-const decideSchema = z.object({
-  id: z.string().uuid("Invalid approval."),
-  verdict: z.enum(["approve", "reject"]),
-  note: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    z.string().max(1000, "Keep the note under 1000 characters.").nullable().optional(),
-  ),
-});
+/**
+ * A factory rather than a module constant: a schema evaluated at import time
+ * has no request and therefore no reader, so its messages could only be one
+ * language. Called below, once `requireRole` has yielded the profile.
+ */
+const decideSchema = (d: Dictionary) =>
+  z.object({
+    id: z.string().uuid(d.adminAi.hermes.errInvalidApproval),
+    verdict: z.enum(["approve", "reject"]),
+    note: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().max(1000, d.adminAi.hermes.errNoteTooLong).nullable().optional(),
+    ),
+  });
 
 export type DecideInput = {
   id: string;
@@ -44,17 +51,29 @@ export type DecideInput = {
   note?: string | null;
 };
 
-/** Map the RPC's own error codes to something a human can act on. */
-function describeDecisionError(code: string | undefined, message: string): string {
+/**
+ * Map the RPC's own error codes to something a human can act on.
+ *
+ * The `default` branch deliberately still prefers the raw Postgres `message`:
+ * an unmapped code is an unexpected condition, and the database's own words are
+ * more useful to whoever has to diagnose it than a translated generic. The
+ * translated fallback covers the case where there is no message at all.
+ */
+function describeDecisionError(
+  code: string | undefined,
+  message: string,
+  d: Dictionary,
+): string {
+  const h = d.adminAi.hermes;
   switch (code) {
     case "42501":
-      return "You're not authorised to decide this proposal. It requires a different role.";
+      return h.errWrongRole;
     case "22023":
-      return "That proposal has already been decided. Refresh to see its current state.";
+      return h.errAlreadyDecided;
     case "P0002":
-      return "That proposal no longer exists.";
+      return h.errGone;
     default:
-      return message || "The decision could not be recorded.";
+      return message || h.errFailed;
   }
 }
 
@@ -62,11 +81,13 @@ export async function decideApproval(input: DecideInput): Promise<ActionResult> 
   // UX guard only. `decide_approval` re-verifies role in the database, and the
   // page itself is super-admin-only, but a proposal may require `finance` and
   // the RPC is what actually decides whether this caller satisfies it.
-  const { supabase } = await requireRole("super_admin");
+  const { supabase, profile } = await requireRole("super_admin");
+  const dictionary = dict(toLocale(profile.locale));
+  const d = dictionary.adminAi.hermes;
 
-  const parsed = decideSchema.safeParse(input);
+  const parsed = decideSchema(dictionary).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid decision." };
+    return { ok: false, error: parsed.error.issues[0]?.message ?? d.errInvalidDecision };
   }
 
   const { error } = await supabase.rpc("decide_approval", {
@@ -77,7 +98,7 @@ export async function decideApproval(input: DecideInput): Promise<ActionResult> 
   });
 
   if (error) {
-    return { ok: false, error: describeDecisionError(error.code, error.message) };
+    return { ok: false, error: describeDecisionError(error.code, error.message, dictionary) };
   }
 
   // The RPC writes the `hermes.approve` / `hermes.reject` audit row itself, as
@@ -87,9 +108,6 @@ export async function decideApproval(input: DecideInput): Promise<ActionResult> 
 
   return {
     ok: true,
-    message:
-      parsed.data.verdict === "approve"
-        ? "Approved. Hermes will carry it out within a few seconds."
-        : "Rejected. Nothing will be executed.",
+    message: parsed.data.verdict === "approve" ? d.okApproved : d.okRejected,
   };
 }

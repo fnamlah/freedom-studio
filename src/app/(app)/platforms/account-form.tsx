@@ -9,9 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Field, Label } from "@/components/ui/label";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { useDict } from "@/lib/i18n/client";
 
 import { createPlatformAccount, updatePlatformAccount } from "./actions";
-import { ACCOUNT_STATUS_OPTIONS, type AccountStatus } from "./status";
+import { accountStatusOptions, type AccountStatus } from "./status";
 
 export type ModelOption = { id: string; stage_name: string };
 export type PlatformOption = { id: string; name: string; is_active: boolean };
@@ -75,6 +76,7 @@ export function AccountForm({
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(() => initialState(account, lockedModel));
+  const d = useDict();
 
   const isCreate = mode === "create";
 
@@ -112,11 +114,21 @@ export function AccountForm({
           });
 
       if (result.ok) {
-        success(isCreate ? "Account added" : "Account updated", result.message);
+        success(
+          isCreate
+            ? d.studio.platforms.toastAccountCreated
+            : d.studio.platforms.toastAccountUpdated,
+          result.message,
+        );
         setOpen(false);
         router.refresh();
       } else {
-        error(isCreate ? "Could not add account" : "Could not update account", result.error);
+        error(
+          isCreate
+            ? d.studio.platforms.toastAccountCreateFailed
+            : d.studio.platforms.toastAccountUpdateFailed,
+          result.error,
+        );
       }
     });
   }
@@ -127,10 +139,10 @@ export function AccountForm({
   }));
   const platformOptions: SelectOption[] = platforms.map((p) => ({
     value: p.id,
-    label: p.is_active ? p.name : `${p.name} (inactive)`,
+    label: p.is_active ? p.name : d.studio.platforms.inactiveSuffix(p.name),
   }));
 
-  const defaultLabel = isCreate ? "New account" : "Edit";
+  const defaultLabel = isCreate ? d.studio.platforms.newAccount : d.common.edit;
 
   return (
     <>
@@ -146,20 +158,26 @@ export function AccountForm({
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title={isCreate ? "Add a platform account" : "Edit account"}
+        title={
+          isCreate
+            ? d.studio.platforms.accountCreateTitle
+            : d.studio.platforms.accountEditTitle
+        }
         description={
           isCreate
-            ? "Link a model to one of the studio's platforms."
-            : "Update this account's username and platform fee."
+            ? d.studio.platforms.accountCreateDescription
+            : d.studio.platforms.accountEditDescription
         }
         size="md"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="account-form" loading={isRunning}>
-              {isCreate ? "Add account" : "Save changes"}
+              {isCreate
+                ? d.studio.platforms.accountSubmitCreate
+                : d.studio.platforms.accountSubmitEdit}
             </Button>
           </>
         }
@@ -169,18 +187,18 @@ export function AccountForm({
             <>
               {lockedModel ? (
                 <Field>
-                  <Label>Model</Label>
+                  <Label>{d.studio.platforms.fieldModel}</Label>
                   <Input value={lockedModel.stage_name} readOnly disabled />
                 </Field>
               ) : (
                 <Field>
                   <Label htmlFor="account-model" required>
-                    Model
+                    {d.studio.platforms.fieldModel}
                   </Label>
                   <Select
                     id="account-model"
                     required
-                    placeholder="Select a model…"
+                    placeholder={d.studio.platforms.selectModel}
                     options={modelOptions}
                     value={form.model_id}
                     onChange={(e) => field("model_id")(e.target.value)}
@@ -188,14 +206,14 @@ export function AccountForm({
                 </Field>
               )}
 
-              <Field help="Platforms with accounts can't be deleted (docs/04 §4.5).">
+              <Field help={d.studio.platforms.helpPlatform}>
                 <Label htmlFor="account-platform" required>
-                  Platform
+                  {d.studio.platforms.fieldPlatform}
                 </Label>
                 <Select
                   id="account-platform"
                   required
-                  placeholder="Select a platform…"
+                  placeholder={d.studio.platforms.selectPlatform}
                   options={platformOptions}
                   value={form.platform_id}
                   onChange={(e) => field("platform_id")(e.target.value)}
@@ -207,7 +225,7 @@ export function AccountForm({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field>
               <Label htmlFor="account-username" required>
-                Username
+                {d.studio.platforms.fieldUsername}
               </Label>
               <Input
                 id="account-username"
@@ -215,13 +233,13 @@ export function AccountForm({
                 autoComplete="off"
                 value={form.username}
                 onChange={(e) => field("username")(e.target.value)}
-                placeholder="On-platform handle"
+                placeholder={d.studio.platforms.placeholderUsername}
               />
             </Field>
 
-            <Field help="The platform's revenue cut. Leave blank if unknown.">
-              <Label htmlFor="account-fee" hint="0–100%">
-                Platform fee %
+            <Field help={d.studio.platforms.helpFee}>
+              <Label htmlFor="account-fee" hint={d.studio.platforms.hintFee}>
+                {d.studio.platforms.fieldFee}
               </Label>
               <Input
                 id="account-fee"
@@ -232,19 +250,19 @@ export function AccountForm({
                 step="0.01"
                 value={form.platform_fee_percent}
                 onChange={(e) => field("platform_fee_percent")(e.target.value)}
-                placeholder="e.g. 20"
+                placeholder={d.studio.platforms.placeholderFee}
               />
             </Field>
           </div>
 
           {isCreate ? (
-            <Field help="Account lifecycle. Change it later from the accounts table.">
+            <Field help={d.studio.platforms.helpAccountStatus}>
               <Label htmlFor="account-status" required>
-                Status
+                {d.studio.platforms.fieldAccountStatus}
               </Label>
               <Select
                 id="account-status"
-                options={ACCOUNT_STATUS_OPTIONS}
+                options={accountStatusOptions(d)}
                 value={form.status}
                 onChange={(e) => field("status")(e.target.value as AccountStatus)}
               />

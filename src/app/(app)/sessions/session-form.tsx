@@ -10,7 +10,8 @@ import { Field, Label } from "@/components/ui/label";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { duration } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { createSession, updateSession } from "./actions";
 
@@ -104,6 +105,8 @@ export function SessionForm({
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(() => initialState(session));
+  const d = useDict();
+  const fm = fmt(useLocale());
 
   const isCreate = mode === "create";
   const noAccounts = accounts.length === 0;
@@ -158,11 +161,19 @@ export function SessionForm({
         : await updateSession({ id: session!.id, ...payload });
 
       if (result.ok) {
-        success(isCreate ? "Session logged" : "Session updated", result.message);
+        success(
+          isCreate ? d.studio.sessions.toastCreated : d.studio.sessions.toastUpdated,
+          result.message,
+        );
         setOpen(false);
         router.refresh();
       } else {
-        error(isCreate ? "Could not log session" : "Could not update session", result.error);
+        error(
+          isCreate
+            ? d.studio.sessions.toastCreateFailed
+            : d.studio.sessions.toastUpdateFailed,
+          result.error,
+        );
       }
     });
   }
@@ -170,10 +181,10 @@ export function SessionForm({
   return (
     <>
       {isCreate ? (
-        <Button onClick={openDialog}>Log session</Button>
+        <Button onClick={openDialog}>{d.studio.sessions.logSession}</Button>
       ) : (
         <Button variant="outline" size="sm" onClick={openDialog}>
-          Edit
+          {d.common.edit}
         </Button>
       )}
 
@@ -181,36 +192,33 @@ export function SessionForm({
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title={isCreate ? "Log a work session" : "Edit session"}
-        description="Sessions are the hours source of truth (docs/04 §4.6). Leave the end time blank to start an open session; duration is computed by the database."
+        title={isCreate ? d.studio.sessions.createTitle : d.studio.sessions.editTitle}
+        description={d.studio.sessions.dialogDescription}
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="session-form" loading={isRunning} disabled={noAccounts}>
-              {isCreate ? "Log session" : "Save changes"}
+              {isCreate ? d.studio.sessions.submitCreate : d.studio.sessions.submitEdit}
             </Button>
           </>
         }
       >
         {noAccounts ? (
-          <p className="text-sm text-muted">
-            No platform accounts exist yet. Add a model and a platform account first — sessions are
-            always tied to an account.
-          </p>
+          <p className="text-sm text-muted">{d.studio.sessions.noAccounts}</p>
         ) : (
           <form id="session-form" onSubmit={submit} className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field help="Scopes which accounts you can pick below.">
+              <Field help={d.studio.sessions.helpModel}>
                 <Label htmlFor="session-model" required>
-                  Model
+                  {d.studio.sessions.fieldModel}
                 </Label>
                 <Select
                   id="session-model"
                   required
-                  placeholder="Select a model…"
+                  placeholder={d.studio.sessions.selectModel}
                   options={modelOptions}
                   value={form.model_id}
                   onChange={(e) => selectModel(e.target.value)}
@@ -220,18 +228,22 @@ export function SessionForm({
               <Field
                 help={
                   form.model_id && accountOptions.length === 0
-                    ? "This model has no platform accounts yet."
+                    ? d.studio.sessions.helpNoAccounts
                     : undefined
                 }
               >
                 <Label htmlFor="session-account" required>
-                  Platform account
+                  {d.studio.sessions.fieldAccount}
                 </Label>
                 <Select
                   id="session-account"
                   required
                   disabled={!form.model_id || accountOptions.length === 0}
-                  placeholder={form.model_id ? "Select an account…" : "Choose a model first"}
+                  placeholder={
+                    form.model_id
+                      ? d.studio.sessions.selectAccount
+                      : d.studio.sessions.chooseModelFirst
+                  }
                   options={accountOptions}
                   value={form.platform_account_id}
                   onChange={(e) => set("platform_account_id", e.target.value)}
@@ -240,9 +252,9 @@ export function SessionForm({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field help="Interpreted as UTC, matching how times display across the app.">
+              <Field help={d.studio.sessions.helpStartedAt}>
                 <Label htmlFor="session-start" required>
-                  Started at
+                  {d.studio.sessions.fieldStartedAt}
                 </Label>
                 <Input
                   id="session-start"
@@ -256,11 +268,11 @@ export function SessionForm({
               <Field
                 help={
                   durationPreview !== null
-                    ? `Duration: ${duration(durationPreview)}`
-                    : "Blank = open session (still running)."
+                    ? d.studio.sessions.helpDuration(fm.duration(durationPreview))
+                    : d.studio.sessions.helpOpenSession
                 }
               >
-                <Label htmlFor="session-end">Ended at</Label>
+                <Label htmlFor="session-end">{d.studio.sessions.fieldEndedAt}</Label>
                 <Input
                   id="session-end"
                   type="datetime-local"
@@ -271,9 +283,9 @@ export function SessionForm({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field help="Per-session earnings when known. The money source of truth is Earnings.">
-                <Label htmlFor="session-gross" required hint="≥ 0">
-                  Gross earnings
+              <Field help={d.studio.sessions.helpGross}>
+                <Label htmlFor="session-gross" required hint={d.studio.sessions.hintGross}>
+                  {d.studio.sessions.fieldGross}
                 </Label>
                 <Input
                   id="session-gross"
@@ -287,9 +299,9 @@ export function SessionForm({
                 />
               </Field>
 
-              <Field help="3-letter code, e.g. USD.">
+              <Field help={d.studio.sessions.helpCurrency}>
                 <Label htmlFor="session-currency" required>
-                  Currency
+                  {d.studio.sessions.fieldCurrency}
                 </Label>
                 <Input
                   id="session-currency"
@@ -304,13 +316,13 @@ export function SessionForm({
               </Field>
             </div>
 
-            <Field help="Internal only — never shown in self-service views.">
-              <Label htmlFor="session-notes">Notes</Label>
+            <Field help={d.studio.sessions.helpNotes}>
+              <Label htmlFor="session-notes">{d.studio.sessions.fieldNotes}</Label>
               <Textarea
                 id="session-notes"
                 value={form.notes}
                 onChange={(e) => set("notes", e.target.value)}
-                placeholder="Anything worth recording about this session"
+                placeholder={d.studio.sessions.placeholderNotes}
               />
             </Field>
           </form>

@@ -8,6 +8,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Field, Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
+import { useDict } from "@/lib/i18n/client";
 
 import { closePeriod } from "./actions";
 
@@ -22,6 +23,7 @@ type Counts = { posted: number; skipped: number };
  */
 export function ClosePeriodForm() {
   const router = useRouter();
+  const d = useDict();
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
@@ -49,10 +51,10 @@ export function ClosePeriodForm() {
       const res = await closePeriod({ period_start: start, period_end: end });
       if (res.ok) {
         setResult({ posted: res.posted, skipped: res.skipped });
-        success("Period closed", res.message);
+        success(d.money.ledger.closeToastOk, res.message);
         router.refresh();
       } else {
-        error("Could not close period", res.error);
+        error(d.money.ledger.closeToastErr, res.error);
       }
     });
   }
@@ -60,23 +62,23 @@ export function ClosePeriodForm() {
   return (
     <>
       <Button variant="secondary" onClick={openDialog}>
-        Close period
+        {d.money.ledger.closeCta}
       </Button>
 
       <Dialog
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title="Close a statement period"
-        description="Generates earning-share credits for every earnings row in the window. Safe to re-run — already-posted shares are skipped (docs/09 §5.3)."
+        title={d.money.ledger.closeTitle}
+        description={d.money.ledger.closeDesc}
         size="md"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              {result ? "Done" : "Cancel"}
+              {result ? d.money.ledger.closeDone : d.common.cancel}
             </Button>
             <Button type="submit" form="close-period-form" loading={isRunning}>
-              Run share generation
+              {d.money.ledger.closeRun}
             </Button>
           </>
         }
@@ -85,7 +87,7 @@ export function ClosePeriodForm() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field>
               <Label htmlFor="close-start" required>
-                Period start
+                {d.money.ledger.closePeriodStart}
               </Label>
               <Input
                 id="close-start"
@@ -97,7 +99,7 @@ export function ClosePeriodForm() {
             </Field>
             <Field>
               <Label htmlFor="close-end" required>
-                Period end
+                {d.money.ledger.closePeriodEnd}
               </Label>
               <Input
                 id="close-end"
@@ -111,19 +113,16 @@ export function ClosePeriodForm() {
 
           {result ? (
             <div className="rounded-md border border-border bg-surface-2 p-3 text-sm">
-              <p className="font-medium text-foreground">Run complete</p>
+              <p className="font-medium text-foreground">{d.money.ledger.closeRunComplete}</p>
+              {/* One translated sentence rather than emphasised fragments: the
+                  counts inflect the noun in Russian (1 доля / 2 доли / 5 долей),
+                  which no amount of JSX interleaving can express. */}
               <p className="mt-1 text-muted">
-                <span className="font-medium text-success">{result.posted}</span> share
-                {result.posted === 1 ? "" : "s"} posted ·{" "}
-                <span className="font-medium text-foreground">{result.skipped}</span> skipped
-                (already posted). Adjust the window and run again if needed.
+                {d.money.ledger.closeResult(result.posted, result.skipped)}
               </p>
             </div>
           ) : (
-            <p className="text-xs text-muted">
-              The scheme in force at each row&apos;s period end governs its split; the studio share
-              is the residue, never posted (docs/09 §4–5).
-            </p>
+            <p className="text-xs text-muted">{d.money.ledger.closeHint}</p>
           )}
         </form>
       </Dialog>

@@ -4,12 +4,15 @@ import { PageHeader } from "@/components/ui/page-header";
 import { providerHasKey } from "@/lib/ai/provider";
 import type { ProviderId } from "@/lib/ai/types";
 import { requireRole } from "@/lib/auth/guard";
+import { getDict } from "@/lib/i18n/server";
 import { readAppSettings } from "@/lib/settings";
 
 import { AiSettingsPanel } from "./ai-settings-panel";
 import type { AiSettingsSnapshot } from "./settings-meta";
 
-export const metadata: Metadata = { title: "Settings" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).adminAi.settings.metaTitle };
+}
 
 function str(value: unknown, fallback: string): string {
   return typeof value === "string" && value.length > 0 ? value : fallback;
@@ -39,6 +42,8 @@ function prov(value: unknown, fallback: ProviderId): ProviderId {
  */
 export default async function AdminSettingsPage() {
   await requireRole("super_admin");
+  const dict = await getDict();
+  const d = dict.adminAi.settings;
 
   const settings = await readAppSettings();
 
@@ -73,9 +78,9 @@ export default async function AdminSettingsPage() {
   return (
     <>
       <PageHeader
-        title="AI settings"
-        description="Switch the active AI provider, tune the chat, vision and embedding model IDs, and set the budget caps the gateway enforces before any provider call. Every change here is validated and audited (docs/11)."
-        breadcrumbs={[{ label: "Admin" }, { label: "Settings" }]}
+        title={d.title}
+        description={d.description}
+        breadcrumbs={[{ label: dict.nav.sectionAdmin }, { label: dict.nav.settings }]}
       />
 
       <AiSettingsPanel snapshot={snapshot} />

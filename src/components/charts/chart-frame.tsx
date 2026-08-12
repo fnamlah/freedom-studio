@@ -3,6 +3,8 @@
 import type { ReactNode } from "react";
 
 import { CHART_GRID, CHART_SURFACE, CHART_TEXT, CHART_TEXT_MUTED } from "@/components/charts/theme";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 
 /** Series descriptor shared by the line and bar wrappers. */
@@ -62,16 +64,18 @@ export function ChartFrame({
 }
 
 /** Neutral in-chart empty state. Wording stays neutral — an empty set is often an RLS outcome. */
-export function ChartEmpty({ message = "No data for this period", height = 260 }: {
+export function ChartEmpty({ message, height = 260 }: {
   message?: string;
   height?: number;
 }) {
+  const d = useDict();
+  const text = message ?? d.money.charts.noData;
   return (
     <div
       style={{ height }}
       className="flex items-center justify-center px-5 text-center text-xs text-muted"
     >
-      {message}
+      {text}
     </div>
   );
 }
@@ -108,12 +112,17 @@ export function ChartTooltipContent({
   labelFormatter,
   showTotal = false,
 }: ChartTooltipContentProps) {
+  const d = useDict();
+  const fm = fmt(useLocale());
+
   if (!active || !payload || payload.length === 0) return null;
 
   const format = (value: unknown): string => {
     const parsed = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(parsed)) return "—";
-    return valueFormatter ? valueFormatter(parsed) : parsed.toLocaleString("en-US");
+    // The bare fallback used to be `toLocaleString("en-US")` — a hardcoded
+    // locale that would print "1,234.5" next to Russian axis labels.
+    return valueFormatter ? valueFormatter(parsed) : fm.number(parsed);
   };
 
   const total = payload.reduce((sum, entry) => {
@@ -152,7 +161,7 @@ export function ChartTooltipContent({
             className="mt-1 flex items-center gap-2 border-t pt-1"
             style={{ borderColor: CHART_GRID }}
           >
-            <span style={{ color: CHART_TEXT_MUTED }}>Total</span>
+            <span style={{ color: CHART_TEXT_MUTED }}>{d.common.total}</span>
             <span className="ml-auto font-medium tabular-nums" style={{ color: CHART_TEXT }}>
               {format(total)}
             </span>

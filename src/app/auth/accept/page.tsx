@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
 
+import { LocaleSwitcher } from "@/components/shell/locale-switcher";
+import { getDict } from "@/lib/i18n/server";
 import { AcceptForm } from "./accept-form";
 
-export const metadata: Metadata = { title: "Set your password" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).auth.setPasswordTitle };
+}
+
 export const dynamic = "force-dynamic";
 
 /**
@@ -13,7 +18,15 @@ export const dynamic = "force-dynamic";
  * The `handle_new_user` trigger has already created their `profiles` row
  * (status `invited`) from the pending invitation, so nothing is provisioned
  * here — this step only sets the password and hands off to `/auth/mfa-enroll`.
+ *
+ * Like the login screen this renders before a language preference exists, so it
+ * carries its own switcher; the choice is written to the `NEXT_LOCALE` cookie.
  */
 export default function AcceptPage() {
-  return <AcceptForm />;
+  return (
+    <>
+      <LocaleSwitcher className="fixed right-4 top-4 z-10" />
+      <AcceptForm />
+    </>
+  );
 }

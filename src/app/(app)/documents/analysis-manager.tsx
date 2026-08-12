@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { useDict } from "@/lib/i18n/client";
 
 import { setDocumentAnalysisOptIn } from "./actions";
-import { AI_STATUS_LABEL, type KeyFigure } from "./ai-meta";
+import { aiStatusLabel, type KeyFigure } from "./ai-meta";
 
 /**
  * AI analysis panel for one compliance document (migration 014).
@@ -39,6 +40,8 @@ export function AnalysisManager({
 }) {
   const router = useRouter();
   const { success, error } = useToast();
+  const d = useDict();
+  const a = d.documents.analysis;
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [analysing, setAnalysing] = useState(false);
@@ -47,10 +50,10 @@ export function AnalysisManager({
     startTransition(async () => {
       const res = await setDocumentAnalysisOptIn({ document_id: documentId, opt_in: next });
       if (res.ok) {
-        success(next ? "AI analysis enabled" : "AI analysis disabled", res.message);
+        success(next ? a.enabledTitle : a.disabledTitle, res.message);
         router.refresh();
       } else {
-        error("Could not update", res.error);
+        error(a.updateFailedTitle, res.error);
       }
     });
   }
@@ -70,17 +73,20 @@ export function AnalysisManager({
         error?: string;
       };
       if (body.configured === false) {
-        error("AI not configured", "Add a provider API key in AI settings.");
+        error(a.notConfiguredTitle, a.notConfiguredBody);
       } else if (!res.ok) {
-        error("Analysis failed", body.error ?? "Please try again.");
+        error(a.failedTitle, body.error ?? a.pleaseTryAgain);
       } else if (body.status === "analysed") {
-        success("Document analysed", "Summary and key figures are ready.");
+        success(a.analysedTitle, a.analysedBody);
         router.refresh();
       } else {
-        error("Not completed", `Analysis ${body.status ?? "did not complete"} (${body.reason ?? "unknown"}).`);
+        error(
+          a.notCompletedTitle,
+          a.notCompletedBody(body.status ?? a.statusUnknown, body.reason ?? a.reasonUnknown),
+        );
       }
     } catch {
-      error("Analysis failed", "Please try again.");
+      error(a.failedTitle, a.pleaseTryAgain);
     } finally {
       setAnalysing(false);
     }
@@ -91,14 +97,14 @@ export function AnalysisManager({
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        {optedIn ? (hasAnalysis ? "Analysis" : "Analyse") : "AI"}
+        {optedIn ? (hasAnalysis ? a.btnAnalysis : a.btnAnalyse) : a.btnAi}
       </Button>
 
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title="AI analysis"
-        description={`Summarise and extract key facts from “${truncate(documentTitle, 60)}”.`}
+        title={a.title}
+        description={a.description(truncate(documentTitle, 60))}
         size="lg"
       >
         <div className="flex flex-col gap-5">
@@ -106,14 +112,8 @@ export function AnalysisManager({
           <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">
-                  Send this document to the AI provider
-                </p>
-                <p className="mt-1 text-xs text-muted">
-                  Compliance documents hold identity data. Analysis sends this file&apos;s
-                  contents to the configured third-party AI provider. Off by default;
-                  each change is audited. Turning it off clears any prior analysis.
-                </p>
+                <p className="text-sm font-medium text-foreground">{a.consentTitle}</p>
+                <p className="mt-1 text-xs text-muted">{a.consentBody}</p>
               </div>
               <Button
                 variant={optedIn ? "secondary" : "primary"}
@@ -121,17 +121,16 @@ export function AnalysisManager({
                 loading={pending}
                 onClick={() => toggleOptIn(!optedIn)}
               >
-                {optedIn ? "Disable" : "Enable"}
+                {optedIn ? a.disable : a.enable}
               </Button>
             </div>
             {optedIn ? (
               <div className="mt-2 flex items-center gap-2">
                 <Badge variant="primary" dot>
-                  Opted in
+                  {a.optedIn}
                 </Badge>
                 <span className="text-xs text-muted">
-                  Status: {AI_STATUS_LABEL[aiStatus] ?? aiStatus}
-                  {analysedProvider ? ` · via ${analysedProvider}` : ""}
+                  {a.statusLine(aiStatusLabel(a.status, aiStatus), analysedProvider)}
                 </span>
               </div>
             ) : null}
@@ -142,13 +141,15 @@ export function AnalysisManager({
             <>
               <div className="flex justify-end">
                 <Button size="sm" loading={analysing} onClick={runAnalysis}>
-                  {hasAnalysis ? "Re-analyse" : "Analyse now"}
+                  {hasAnalysis ? a.reanalyse : a.analyseNow}
                 </Button>
               </div>
 
               {summary ? (
                 <div>
-                  <p className="text-xs font-medium tracking-wide text-muted uppercase">Summary</p>
+                  <p className="text-xs font-medium tracking-wide text-muted uppercase">
+                    {a.summaryHeading}
+                  </p>
                   <p className="mt-1 text-sm whitespace-pre-wrap text-foreground">{summary}</p>
                 </div>
               ) : null}
@@ -156,7 +157,7 @@ export function AnalysisManager({
               {keyFigures.length > 0 ? (
                 <div>
                   <p className="text-xs font-medium tracking-wide text-muted uppercase">
-                    Key figures
+                    {a.keyFiguresHeading}
                   </p>
                   <dl className="mt-2 divide-y divide-border rounded-md border border-border">
                     {keyFigures.map((f, i) => (
@@ -171,11 +172,7 @@ export function AnalysisManager({
                 </div>
               ) : null}
 
-              {!hasAnalysis ? (
-                <p className="text-sm text-muted">
-                  No analysis yet. Click “Analyse now” to generate a summary and key figures.
-                </p>
-              ) : null}
+              {!hasAnalysis ? <p className="text-sm text-muted">{a.noAnalysis}</p> : null}
             </>
           ) : null}
         </div>

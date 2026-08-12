@@ -9,9 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Field, Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { useDict } from "@/lib/i18n/client";
 
 import { createPlatform, updatePlatform } from "./actions";
-import { PLATFORM_ACTIVE_OPTIONS } from "./status";
+import { platformActiveOptions } from "./status";
 
 /** The columns the platform form reads/writes. */
 export type EditablePlatform = {
@@ -54,6 +55,7 @@ export function PlatformForm({
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(() => initialState(platform));
+  const d = useDict();
 
   const isCreate = mode === "create";
 
@@ -89,11 +91,21 @@ export function PlatformForm({
           });
 
       if (result.ok) {
-        success(isCreate ? "Platform added" : "Platform updated", result.message);
+        success(
+          isCreate
+            ? d.studio.platforms.toastPlatformCreated
+            : d.studio.platforms.toastPlatformUpdated,
+          result.message,
+        );
         setOpen(false);
         router.refresh();
       } else {
-        error(isCreate ? "Could not add platform" : "Could not update platform", result.error);
+        error(
+          isCreate
+            ? d.studio.platforms.toastPlatformCreateFailed
+            : d.studio.platforms.toastPlatformUpdateFailed,
+          result.error,
+        );
       }
     });
   }
@@ -101,10 +113,10 @@ export function PlatformForm({
   return (
     <>
       {isCreate ? (
-        <Button onClick={openDialog}>New platform</Button>
+        <Button onClick={openDialog}>{d.studio.platforms.newPlatform}</Button>
       ) : (
         <Button variant="outline" size="sm" onClick={openDialog}>
-          Edit
+          {d.common.edit}
         </Button>
       )}
 
@@ -112,20 +124,26 @@ export function PlatformForm({
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title={isCreate ? "Add a platform" : "Edit platform"}
+        title={
+          isCreate
+            ? d.studio.platforms.platformCreateTitle
+            : d.studio.platforms.platformEditTitle
+        }
         description={
           isCreate
-            ? "Reference record for a webcam platform the studio works with."
-            : "Update this platform. Activation is toggled from the table."
+            ? d.studio.platforms.platformCreateDescription
+            : d.studio.platforms.platformEditDescription
         }
         size="md"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="platform-form" loading={isRunning}>
-              {isCreate ? "Add platform" : "Save changes"}
+              {isCreate
+                ? d.studio.platforms.platformSubmitCreate
+                : d.studio.platforms.platformSubmitEdit}
             </Button>
           </>
         }
@@ -133,7 +151,7 @@ export function PlatformForm({
         <form id="platform-form" onSubmit={submit} className="flex flex-col gap-4">
           <Field>
             <Label htmlFor="platform-name" required>
-              Name
+              {d.studio.platforms.fieldName}
             </Label>
             <Input
               id="platform-name"
@@ -141,12 +159,12 @@ export function PlatformForm({
               autoComplete="off"
               value={form.name}
               onChange={(e) => field("name")(e.target.value)}
-              placeholder="e.g. Chaturbate"
+              placeholder={d.studio.platforms.placeholderName}
             />
           </Field>
 
-          <Field help="Optional. A scheme (https://) is added automatically if omitted.">
-            <Label htmlFor="platform-url">Website</Label>
+          <Field help={d.studio.platforms.helpWebsite}>
+            <Label htmlFor="platform-url">{d.studio.platforms.fieldWebsite}</Label>
             <Input
               id="platform-url"
               type="url"
@@ -154,18 +172,18 @@ export function PlatformForm({
               autoComplete="off"
               value={form.website_url}
               onChange={(e) => field("website_url")(e.target.value)}
-              placeholder="platform.com"
+              placeholder={d.studio.platforms.placeholderWebsite}
             />
           </Field>
 
           {isCreate ? (
-            <Field help="Inactive platforms stay on record but are flagged when picking accounts.">
+            <Field help={d.studio.platforms.helpPlatformStatus}>
               <Label htmlFor="platform-active" required>
-                Status
+                {d.studio.platforms.fieldPlatformStatus}
               </Label>
               <Select
                 id="platform-active"
-                options={PLATFORM_ACTIVE_OPTIONS}
+                options={platformActiveOptions(d)}
                 value={form.is_active ? "active" : "inactive"}
                 onChange={(e) => field("is_active")(e.target.value === "active")}
               />

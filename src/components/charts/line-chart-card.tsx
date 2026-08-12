@@ -29,6 +29,7 @@ import {
 import {
   activeDotSpec,
   AXIS_PROPS,
+  axisLabelWidth,
   CHART_GRID,
   colorForIndex,
   compactAxisNumber,
@@ -37,6 +38,7 @@ import {
   LEGEND_PROPS,
   LINE_WIDTH,
 } from "@/components/charts/theme";
+import { useLocale } from "@/lib/i18n/client";
 
 export type LineChartCardProps = Omit<ChartFrameProps, "children"> & {
   data: readonly ChartDatum[];
@@ -83,8 +85,9 @@ export function LineChartCard({
   connectNulls = false,
   ...frame
 }: LineChartCardProps) {
-  const valueFormatter = resolveValueFormat(valueFormat);
-  const xFormatter = resolveAxisFormat(xFormat);
+  const locale = useLocale();
+  const valueFormatter = resolveValueFormat(valueFormat, locale);
+  const xFormatter = resolveAxisFormat(xFormat, locale);
   const hasData = data.length > 0 && series.length > 0;
 
   return (
@@ -103,9 +106,11 @@ export function LineChartCard({
             />
             <YAxis
               {...AXIS_PROPS}
-              width={64}
+              width={axisLabelWidth(locale)}
               tickFormatter={(value) =>
-                valueFormatter ? valueFormatter(Number(value)) : compactAxisNumber(Number(value))
+                valueFormatter
+                  ? valueFormatter(Number(value))
+                  : compactAxisNumber(Number(value), locale)
               }
             />
             <Tooltip

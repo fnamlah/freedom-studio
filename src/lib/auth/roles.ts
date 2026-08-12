@@ -1,4 +1,5 @@
 import type { Database } from "@/lib/database.types";
+import { dict, type Locale } from "@/lib/i18n";
 
 /**
  * Role vocabulary — CLIENT-SAFE.
@@ -20,22 +21,33 @@ export const ROLES: readonly Role[] = [
   "operator",
 ] as const;
 
-export const ROLE_LABELS: Record<Role, string> = {
-  super_admin: "Super Admin",
-  manager: "Studio Manager",
-  model: "Model",
-  finance: "Finance",
-  operator: "Operator",
-};
+/**
+ * The display name of a role, in the reader's language.
+ *
+ * A role is a DB enum value (`super_admin`), which is never translated; only its
+ * label is. Callers that already know the locale — server components via
+ * `getLocale()`, client components via `useLocale()` — should use these two
+ * helpers rather than the English maps below.
+ */
+export function roleLabel(locale: Locale, role: Role): string {
+  return dict(locale).roles[role];
+}
+
+/** Short description of what a role may do, in the reader's language. */
+export function roleDescription(locale: Locale, role: Role): string {
+  return dict(locale).authFlow.roleDescriptions[role];
+}
+
+/**
+ * English-only compatibility views over the dictionary, kept because several
+ * surfaces still index them directly. Derived rather than duplicated, so the
+ * dictionary stays the single source of truth; prefer `roleLabel()` /
+ * `roleDescription()` in anything user-facing.
+ */
+export const ROLE_LABELS: Record<Role, string> = dict("en").roles;
 
 /** Short descriptions, for admin surfaces that assign roles. */
-export const ROLE_DESCRIPTIONS: Record<Role, string> = {
-  super_admin: "Studio owner. Full control; sole payout approver and audit-log reader.",
-  manager: "Day-to-day operations. No user administration, no financial authorization.",
-  model: "Self-service access to their own records, earnings and documents.",
-  finance: "Money only. No access to identity or compliance documents.",
-  operator: "Self-service support staff. Sees their own ledger share and payouts only.",
-};
+export const ROLE_DESCRIPTIONS: Record<Role, string> = dict("en").authFlow.roleDescriptions;
 
 /** Runtime narrowing for values arriving from query strings or forms. */
 export function isRole(value: unknown): value is Role {

@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -30,6 +31,9 @@ import { isAuthzError } from "@/lib/supabase/admin";
  * redirects an unauthorized caller before any work runs, then writes through the
  * caller's own RLS-scoped client (RLS is the final authority) and appends a
  * `ledger.post` audit row (docs/04 §4.16).
+ *
+ * Every message the client can surface is resolved from the CALLER's dictionary
+ * — `requireRole` already loaded their profile, so the locale is free.
  */
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -55,42 +59,52 @@ function isValidYmd(value: string): boolean {
   );
 }
 
-const dateOnly = z.string().refine(isValidYmd, "Enter a valid date (YYYY-MM-DD).");
+/**
+ * The schemas are FACTORIES, not module constants. A module-scope `z.object`
+ * is evaluated at import time, long before any request exists, so its messages
+ * could only ever be in one language; building it inside the action lets every
+ * message come from the caller's own dictionary.
+ */
+const dateOnly = (d: Dictionary) => z.string().refine(isValidYmd, d.money.ledger.errInvalidDate);
 
-const currency = z.preprocess(
-  (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : "USD"),
-  z.string().regex(/^[A-Z]{3}$/, "Use a 3-letter currency code, e.g. USD."),
-);
+const currencyField = (d: Dictionary) =>
+  z.preprocess(
+    (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : "USD"),
+    z.string().regex(/^[A-Z]{3}$/, d.money.ledger.errCurrency),
+  );
 
 /** Signed money magnitude, non-zero (the ledger CHECK forbids `amount = 0`). */
-const signedAmount = z.coerce
-  .number({ invalid_type_error: "Enter an amount." })
-  .refine((n) => Number.isFinite(n), "Enter an amount.")
-  .refine((n) => Math.abs(n) >= 0.01, "Amount can't be zero.")
-  .refine((n) => Math.abs(n) <= 9_999_999_999.99, "That amount is too large.");
+const signedAmount = (d: Dictionary) =>
+  z.coerce
+    .number({ invalid_type_error: d.money.ledger.errEnterAmount })
+    .refine((n) => Number.isFinite(n), d.money.ledger.errEnterAmount)
+    .refine((n) => Math.abs(n) >= 0.01, d.money.ledger.errAmountZero)
+    .refine((n) => Math.abs(n) <= 9_999_999_999.99, d.money.ledger.errAmountTooLarge);
 
-const postEntrySchema = z.object({
-  payee_type: z.enum(["model", "operator"], {
-    errorMap: () => ({ message: "Choose a payee." }),
-  }),
-  payee_id: z.string().uuid("Choose a payee."),
-  entry_type: z.enum(["adjustment", "deduction"], {
-    errorMap: () => ({ message: "Choose an entry type." }),
-  }),
-  amount: signedAmount,
-  currency,
-  description: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    z.string().max(500, "Keep the note under 500 characters.").nullable().optional(),
-  ),
-});
-
-const closePeriodSchema = z
-  .object({ period_start: dateOnly, period_end: dateOnly })
-  .refine((d) => d.period_end >= d.period_start, {
-    message: "The period end must be on or after the period start.",
-    path: ["period_end"],
+const postEntrySchema = (d: Dictionary) =>
+  z.object({
+    payee_type: z.enum(["model", "operator"], {
+      errorMap: () => ({ message: d.money.ledger.errChoosePayee }),
+    }),
+    payee_id: z.string().uuid(d.money.ledger.errChoosePayee),
+    entry_type: z.enum(["adjustment", "deduction"], {
+      errorMap: () => ({ message: d.money.ledger.errChooseEntryType }),
+    }),
+    amount: signedAmount(d),
+    currency: currencyField(d),
+    description: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().max(500, d.money.ledger.errNoteTooLong).nullable().optional(),
+    ),
   });
+
+const closePeriodSchema = (d: Dictionary) =>
+  z
+    .object({ period_start: dateOnly(d), period_end: dateOnly(d) })
+    .refine((v) => v.period_end >= v.period_start, {
+      message: d.money.ledger.errPeriodOrder,
+      path: ["period_end"],
+    });
 
 /* ------------------------------------------------------------------ types --- */
 
@@ -107,34 +121,35 @@ export type ClosePeriodInput = { period_start: string; period_end: string };
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Please check the form and try again.";
+function firstIssue(d: Dictionary, error: z.ZodError): string {
+  return error.issues[0]?.message ?? d.money.ledger.errCheckForm;
 }
 
-function describeDbError(code: string | undefined): string {
+function describeDbError(d: Dictionary, code: string | undefined): string {
   if (code === "23514") {
-    return "That posting breaks a database rule — a ledger amount can never be zero.";
+    return d.money.ledger.errDbZero;
   }
   if (code === "23503") {
-    return "A referenced record no longer exists. Refresh and try again.";
+    return d.money.ledger.errDbMissingRef;
   }
   if (code === "P0001" || code === "23P01") {
-    return "That payee could not be validated. Refresh the payee list and try again.";
+    return d.money.ledger.errDbPayee;
   }
   if (code === "42501") {
-    return "You are not authorized to post to the ledger.";
+    return d.money.ledger.errNotAuthorizedPost;
   }
-  return "Could not post the ledger entry. Please try again.";
+  return d.money.ledger.errPostFailed;
 }
 
 /* -------------------------------------------------------------- post entry --- */
 
 export async function postLedgerEntry(input: PostLedgerEntryInput): Promise<ActionResult> {
-  const { supabase, user } = await requireRole("super_admin", "finance");
+  const { supabase, user, profile } = await requireRole("super_admin", "finance");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = postEntrySchema.safeParse(input);
+  const parsed = postEntrySchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(d, parsed.error) };
   }
   const data = parsed.data;
 
@@ -159,7 +174,7 @@ export async function postLedgerEntry(input: PostLedgerEntryInput): Promise<Acti
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(error?.code) };
+      return { ok: false, error: describeDbError(d, error?.code) };
     }
 
     await writeAudit({
@@ -180,24 +195,27 @@ export async function postLedgerEntry(input: PostLedgerEntryInput): Promise<Acti
     return {
       ok: true,
       message:
-        data.entry_type === "deduction" ? "Deduction posted." : "Adjustment posted.",
+        data.entry_type === "deduction"
+          ? d.money.ledger.okDeductionPosted
+          : d.money.ledger.okAdjustmentPosted,
     };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to post to the ledger." };
+      return { ok: false, error: d.money.ledger.errNotAuthorizedPost };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* ------------------------------------------------------------- close period --- */
 
 export async function closePeriod(input: ClosePeriodInput): Promise<ClosePeriodResult> {
-  const { supabase } = await requireRole("super_admin", "finance");
+  const { supabase, profile } = await requireRole("super_admin", "finance");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = closePeriodSchema.safeParse(input);
+  const parsed = closePeriodSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(d, parsed.error) };
   }
   const { period_start, period_end } = parsed.data;
 
@@ -209,9 +227,9 @@ export async function closePeriod(input: ClosePeriodInput): Promise<ClosePeriodR
 
     if (error) {
       if (error.code === "42501") {
-        return { ok: false, error: "You are not authorized to close periods." };
+        return { ok: false, error: d.money.ledger.errNotAuthorizedClose };
       }
-      return { ok: false, error: "Could not close the period. Please try again." };
+      return { ok: false, error: d.money.ledger.errCloseFailed };
     }
 
     const summary = Array.isArray(data) ? data[0] : data;
@@ -231,12 +249,12 @@ export async function closePeriod(input: ClosePeriodInput): Promise<ClosePeriodR
       ok: true,
       posted,
       skipped,
-      message: `${posted} share${posted === 1 ? "" : "s"} posted, ${skipped} skipped.`,
+      message: d.money.ledger.okCloseSummary(posted, skipped),
     };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to close periods." };
+      return { ok: false, error: d.money.ledger.errNotAuthorizedClose };
     }
-    return { ok: false, error: "Something went wrong running share generation." };
+    return { ok: false, error: d.money.ledger.errShareGeneration };
   }
 }

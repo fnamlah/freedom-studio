@@ -7,6 +7,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/lib/database.types";
+import { dict, DEFAULT_LOCALE, type Locale } from "@/lib/i18n";
 
 /** A Supabase client typed against our schema — caller-context or service-role. */
 export type AiSupabaseClient = SupabaseClient<Database, "public">;
@@ -135,18 +136,28 @@ export interface ProviderAdapter {
  * Thrown when the provider needed for an operation has no API key configured.
  * Carries the provider it was reaching for and renders a clean HTTP body so
  * every surface can degrade gracefully (docs/11 §1 non-negotiable 4).
+ *
+ * The default message follows `locale`, defaulting to the studio's Russian. In
+ * practice every UI surface intercepts the CONDITION rather than this text —
+ * the chat gateway streams a `not_configured` event and the page renders its own
+ * banner; the classify/analyse routes answer `{configured:false}`; the report
+ * action substitutes its own sentence — so this string is mostly what lands in a
+ * log. It is translated anyway because "mostly" is not "never", and a caller
+ * that does surface it should not have to special-case the language.
  */
 export class NotConfiguredError extends Error {
   readonly code = "ai_not_configured" as const;
   readonly status = 503;
   readonly provider: ProviderId | null;
 
-  constructor(provider: ProviderId | null, message?: string) {
+  constructor(
+    provider: ProviderId | null,
+    message?: string,
+    locale: Locale = DEFAULT_LOCALE,
+  ) {
+    const d = dict(locale).adminAi.assistant;
     super(
-      message ??
-        (provider
-          ? `AI provider "${provider}" is not configured (missing API key).`
-          : "AI is not configured."),
+      message ?? (provider ? d.notConfiguredProvider(provider) : d.notConfigured),
     );
     this.name = "NotConfiguredError";
     this.provider = provider;

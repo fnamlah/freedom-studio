@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
 
 import { sanitizeNext } from "@/components/auth/safe-next";
+import { getDict } from "@/lib/i18n/server";
 import { EnrollForm } from "./enroll-form";
 
-export const metadata: Metadata = { title: "Set up two-factor authentication" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).auth.mfaEnrollTitle };
+}
+
 export const dynamic = "force-dynamic";
 
 /**

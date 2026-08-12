@@ -20,6 +20,8 @@
 
 import { z } from "zod";
 
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/locales";
+
 import { embedQuery } from "./embeddings";
 import type { AiSupabaseClient, EmbeddingSource, Tool } from "./types";
 
@@ -42,11 +44,27 @@ type ToolRow = Record<string, unknown>;
 
 export interface AiToolDef {
   name: ToolName;
+  /**
+   * MODEL-FACING and deliberately English in both locales. This text is the
+   * vocabulary a Russian question gets mapped onto — "выплаты" → `payout_*`,
+   * "часы" → `hours_summary` — and translating it would replace a stable
+   * domain glossary with a paraphrase. The user never reads it; the chip they
+   * DO read is the localized label in `d.adminAi.tools`.
+   */
   description: string;
   /** JSON Schema for the OpenAI `tools` parameters object. */
   jsonSchema: Record<string, unknown>;
-  /** Validate + run. Returns name-resolved rows for the redactor to project. */
-  execute(rawArgs: unknown, supabase: AiSupabaseClient): Promise<ToolRow[]>;
+  /**
+   * Validate + run. Returns name-resolved rows for the redactor to project.
+   * `locale` selects the language of any human-readable label in the OUTPUT
+   * (currently the Library's category names); it never affects filtering, and
+   * slugs and enum values stay in their stable English form.
+   */
+  execute(
+    rawArgs: unknown,
+    supabase: AiSupabaseClient,
+    locale: Locale,
+  ): Promise<ToolRow[]>;
 }
 
 /* --------------------------------------------------------------- helpers */
@@ -561,17 +579,28 @@ export const TOOLS: Record<ToolName, AiToolDef> = {
       },
       additionalProperties: false,
     },
-    execute: async (raw, sb) => {
+    execute: async (raw, sb, locale) => {
       const a = librarySearchSchema.parse(raw);
 
       // Category vocabulary, resolved both ways so the model neither sees nor
-      // supplies a UUID (registry invariant).
-      const { data: cats } = await sb.from("doc_categories").select("id, slug, name");
-      const catName = new Map((cats ?? []).map((c) => [c.id, c.name] as const));
+      // supplies a UUID (registry invariant). Migration 019 added `name_ru`
+      // alongside `name`, so a Russian reader gets Russian category labels in
+      // the answer — while `slug` stays the stable key on both sides.
+      const { data: cats } = await sb
+        .from("doc_categories")
+        .select("id, slug, name, name_ru");
+      const displayName = (c: { name: string; name_ru: string | null }) =>
+        locale === "ru" ? (c.name_ru ?? c.name) : c.name;
+      const catName = new Map((cats ?? []).map((c) => [c.id, displayName(c)] as const));
       const wanted = a.category?.trim().toLowerCase();
+      // Match on the slug and on BOTH names: the model may echo back either the
+      // Russian label it was shown or the English one from a stored summary.
       const categoryId = wanted
         ? ((cats ?? []).find(
-            (c) => c.slug.toLowerCase() === wanted || c.name.toLowerCase() === wanted,
+            (c) =>
+              c.slug.toLowerCase() === wanted ||
+              c.name.toLowerCase() === wanted ||
+              (c.name_ru?.toLowerCase() ?? null) === wanted,
           )?.id ?? null)
         : null;
       if (wanted && !categoryId) return [];
@@ -659,9 +688,10 @@ export async function executeTool(
   name: string,
   rawArgs: unknown,
   supabase: AiSupabaseClient,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<ToolRow[]> {
   if (!isToolName(name)) {
     throw new Error(`Unknown tool: ${name}`);
   }
-  return TOOLS[name].execute(rawArgs, supabase);
+  return TOOLS[name].execute(rawArgs, supabase, locale);
 }

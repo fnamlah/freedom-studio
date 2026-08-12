@@ -2,6 +2,7 @@
 
 import { Input } from "@/components/ui";
 import { normalizeOtp, OTP_LENGTH } from "@/components/auth/otp";
+import { useDict } from "@/lib/i18n/client";
 
 /**
  * Controlled 6-digit TOTP input. Digits-only, wired for browser/one-time-code
@@ -27,6 +28,8 @@ export function OtpInput({
   invalid,
   onComplete,
 }: OtpInputProps) {
+  const d = useDict();
+
   return (
     <Input
       id={id}
@@ -45,7 +48,7 @@ export function OtpInput({
       autoFocus={autoFocus}
       invalid={invalid}
       placeholder="000000"
-      aria-label="6-digit authentication code"
+      aria-label={d.authFlow.otpAriaLabel}
       className="text-center text-lg tracking-[0.5em] font-mono"
     />
   );

@@ -13,6 +13,8 @@
  * patterns stay visible.
  */
 
+import { dict } from "@/lib/i18n";
+import { DEFAULT_LOCALE, INTL_LOCALE, type Locale } from "@/lib/i18n/locales";
 import { getSetting } from "@/lib/settings";
 
 import type { AiSupabaseClient, ProviderId } from "./types";
@@ -35,11 +37,18 @@ const DAY_MS = 24 * HOUR_MS;
  * declines the request when `ok` is false.
  *
  * @param client a SERVICE-CAPABLE client (global window needs cross-user read).
+ * @param locale the CALLER's language — `reason` is read by a person, and on the
+ *               chat surface it is streamed straight into the transcript.
  */
 export async function checkBudget(
   userId: string,
   client: AiSupabaseClient,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<BudgetCheck> {
+  const d = dict(locale).adminAi.assistant;
+  // The caps are read as digits by a human, so group them in their own locale.
+  const num = (value: number) => new Intl.NumberFormat(INTL_LOCALE[locale]).format(value);
+
   const [reqPerHour, tokPerUserDay, tokGlobalDay] = await Promise.all([
     getSetting("ai.limits.requests_per_user_per_hour", 30),
     getSetting("ai.limits.tokens_per_user_per_day", 200_000),
@@ -60,7 +69,7 @@ export async function checkBudget(
     return {
       ok: false,
       status: "rate_limited",
-      reason: `Hourly request limit reached (${reqPerHour}/hour). Try again later.`,
+      reason: d.refusalHourly(num(reqPerHour)),
     };
   }
 
@@ -70,7 +79,7 @@ export async function checkBudget(
     return {
       ok: false,
       status: "budget_exceeded",
-      reason: `Daily token budget reached (${tokPerUserDay.toLocaleString()} tokens).`,
+      reason: d.refusalDailyTokens(num(tokPerUserDay)),
     };
   }
 
@@ -80,7 +89,7 @@ export async function checkBudget(
     return {
       ok: false,
       status: "budget_exceeded",
-      reason: "The studio's daily AI token budget has been reached. Try again tomorrow.",
+      reason: d.refusalGlobalTokens,
     };
   }
 

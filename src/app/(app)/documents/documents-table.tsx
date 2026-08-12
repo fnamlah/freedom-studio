@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { date, fileSize } from "@/lib/format";
+import { EM_DASH } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { getDownloadUrl } from "./actions";
 import { AnalysisManager } from "./analysis-manager";
@@ -46,11 +48,14 @@ export type DocumentRow = {
  * The compliance badge is derived from `expires_at` (docs/06 §4) — never stored.
  */
 export function DocumentsTable({ rows }: { rows: DocumentRow[] }) {
+  const d = useDict();
+  const fm = fmt(useLocale());
+
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No documents to show"
-        description="No compliance documents match this view. Upload one, or clear the model filter to see the full list."
+        title={d.documents.emptyTitle}
+        description={d.documents.emptyDescription}
       />
     );
   }
@@ -59,14 +64,14 @@ export function DocumentsTable({ rows }: { rows: DocumentRow[] }) {
     <Table containerClassName="rounded-lg border border-border">
       <THead>
         <TR>
-          <TH>Model</TH>
-          <TH>Document</TH>
-          <TH>Type</TH>
-          <TH>Issued</TH>
-          <TH>Expires</TH>
-          <TH>Compliance</TH>
-          <TH align="right">Size</TH>
-          <TH align="right">Actions</TH>
+          <TH>{d.documents.colModel}</TH>
+          <TH>{d.documents.colDocument}</TH>
+          <TH>{d.documents.colType}</TH>
+          <TH>{d.documents.colIssued}</TH>
+          <TH>{d.documents.colExpires}</TH>
+          <TH>{d.documents.colCompliance}</TH>
+          <TH align="right">{d.documents.colSize}</TH>
+          <TH align="right">{d.common.actions}</TH>
         </TR>
       </THead>
       <TBody>
@@ -79,19 +84,25 @@ export function DocumentsTable({ rows }: { rows: DocumentRow[] }) {
                 <span className="font-medium text-foreground">{row.title}</span>
                 <span className="block text-xs text-muted">{row.file_name}</span>
               </TD>
-              <TD className="text-muted">{documentTypeLabel(row.doc_type)}</TD>
-              <TD className="text-muted">{row.issued_date ? date(row.issued_date) : "—"}</TD>
-              <TD className="text-muted">{row.expires_at ? date(row.expires_at) : "—"}</TD>
+              <TD className="text-muted">{documentTypeLabel(d, row.doc_type)}</TD>
+              <TD className="text-muted">
+                {row.issued_date ? fm.date(row.issued_date) : EM_DASH}
+              </TD>
+              <TD className="text-muted">
+                {row.expires_at ? fm.date(row.expires_at) : EM_DASH}
+              </TD>
               <TD>
                 <div className="flex items-center gap-2">
                   <Badge variant={meta.variant} dot>
-                    {meta.label}
+                    {d.documents.compliance[row.status]}
                   </Badge>
-                  {row.is_archived ? <Badge variant="muted">Archived</Badge> : null}
+                  {row.is_archived ? (
+                    <Badge variant="muted">{d.documents.archived}</Badge>
+                  ) : null}
                 </div>
               </TD>
               <TD numeric className="text-muted">
-                {fileSize(row.file_size_bytes)}
+                {fm.fileSize(row.file_size_bytes)}
               </TD>
               <TD align="right">
                 <div className="flex items-center justify-end gap-2">
@@ -123,6 +134,7 @@ export function DocumentsTable({ rows }: { rows: DocumentRow[] }) {
  */
 function DownloadButton({ id }: { id: string }) {
   const { error } = useToast();
+  const d = useDict();
   const [busy, setBusy] = useState(false);
 
   async function download() {
@@ -144,13 +156,13 @@ function DownloadButton({ id }: { id: string }) {
       }
     } else {
       pre?.close();
-      error("Could not download", res.error);
+      error(d.documents.downloadFailedTitle, res.error);
     }
   }
 
   return (
     <Button variant="outline" size="sm" loading={busy} onClick={download}>
-      Download
+      {d.common.download}
     </Button>
   );
 }

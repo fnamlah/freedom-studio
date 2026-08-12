@@ -9,13 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Field, Label } from "@/components/ui/label";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { fileSize } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 
 import { uploadLibraryFile } from "@/app/(app)/library/actions";
 
 import {
-  EXEMPT_NOTICE,
+  categoryName,
   MAX_UPLOAD_MB,
   normalizeFolderPath,
   type CategoryLite,
@@ -51,6 +52,9 @@ export function UploadDialog({
 }) {
   const router = useRouter();
   const { success, error } = useToast();
+  const d = useDict();
+  const locale = useLocale();
+  const fm = fmt(locale);
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
   const [file, setFile] = useState<File | null>(null);
@@ -64,11 +68,11 @@ export function UploadDialog({
 
   const categoryOptions: SelectOption[] = useMemo(
     () =>
-      categories.map((c) => ({
-        value: c.id,
-        label: c.ai_enabled ? c.name : `${c.name} (AI off)`,
-      })),
-    [categories],
+      categories.map((c) => {
+        const name = categoryName(c, locale);
+        return { value: c.id, label: c.ai_enabled ? name : d.library.aiOff(name) };
+      }),
+    [categories, locale, d],
   );
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -91,11 +95,11 @@ export function UploadDialog({
     event.preventDefault();
 
     if (!file) {
-      error("No file chosen", "Pick a file to upload.");
+      error(d.library.noFileTitle, d.library.noFileBody);
       return;
     }
     if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
-      error("File too large", `The limit is ${MAX_UPLOAD_MB} MB.`);
+      error(d.library.tooLargeTitle, d.library.tooLargeBody(MAX_UPLOAD_MB));
       return;
     }
 
@@ -109,41 +113,41 @@ export function UploadDialog({
     startTransition(async () => {
       const result = await uploadLibraryFile(fd);
       if (result.ok) {
-        success("File uploaded", result.message);
+        success(d.library.uploadedTitle, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not upload file", result.error);
+        error(d.library.uploadFailedTitle, result.error);
       }
     });
   }
 
   return (
     <>
-      <Button onClick={openDialog}>Upload file</Button>
+      <Button onClick={openDialog}>{d.library.uploadCta}</Button>
 
       <Dialog
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title="Upload a file to the Library"
-        description="Stored in a private bucket. There is no share-link path into the Library; retrieval is only ever a 60-second signed URL (docs/12)."
+        title={d.library.uploadTitle}
+        description={d.library.uploadDescription}
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="library-upload-form" loading={isRunning}>
-              Upload file
+              {d.library.uploadCta}
             </Button>
           </>
         }
       >
         <form id="library-upload-form" onSubmit={submit} className="flex flex-col gap-4">
-          <Field help="A virtual folder such as /tax or /contracts/2026. It organizes filing only; the file's bytes are stored flat.">
+          <Field help={d.library.folderHelp}>
             <Label htmlFor="lib-folder" required>
-              Folder
+              {d.library.folderLabel}
             </Label>
             <Input
               id="lib-folder"
@@ -160,31 +164,31 @@ export function UploadDialog({
             </datalist>
           </Field>
 
-          <Field help="Optional. Defaults to the uploaded file's name.">
-            <Label htmlFor="lib-name">Display name</Label>
+          <Field help={d.library.displayNameHelp}>
+            <Label htmlFor="lib-name">{d.library.displayNameLabel}</Label>
             <Input
               id="lib-name"
               maxLength={200}
               value={form.name}
               onChange={(e) => set("name", e.target.value)}
-              placeholder="e.g. Q1 platform payout statement"
+              placeholder={d.library.displayNamePlaceholder}
             />
           </Field>
 
-          <Field help="Optional. File it by hand now, or leave blank and let the AI suggest one for review.">
-            <Label htmlFor="lib-category">Category</Label>
+          <Field help={d.library.categoryHelp}>
+            <Label htmlFor="lib-category">{d.library.categoryLabel}</Label>
             <Select
               id="lib-category"
-              placeholder="Let the AI suggest…"
+              placeholder={d.library.categoryPlaceholder}
               options={categoryOptions}
               value={form.category_id}
               onChange={(e) => set("category_id", e.target.value)}
             />
           </Field>
 
-          <Field help={`Max ${MAX_UPLOAD_MB} MB. Files over ${aiMaxFileMb} MB are stored but skipped by the classifier.`}>
+          <Field help={d.library.fileHelp(MAX_UPLOAD_MB, aiMaxFileMb)}>
             <Label htmlFor="lib-file" required>
-              File
+              {d.library.fileLabel}
             </Label>
             <Input
               id="lib-file"
@@ -195,7 +199,7 @@ export function UploadDialog({
             />
             {file ? (
               <p className="mt-1 text-xs text-muted">
-                {file.name} · {fileSize(file.size)}
+                {d.library.filePicked(file.name, fm.fileSize(file.size))}
               </p>
             ) : null}
           </Field>
@@ -217,12 +221,14 @@ export function UploadDialog({
               />
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-foreground">
-                  Exempt this file from AI classification
+                  {d.library.exemptToggle}
                 </span>
-                <span className="mt-1 block text-xs text-muted">{EXEMPT_NOTICE}</span>
+                <span className="mt-1 block text-xs text-muted">
+                  {d.library.exemptNotice}
+                </span>
                 {form.ai_exempt ? (
                   <span className="mt-1 block text-xs text-foreground">
-                    Marked exempt — this file will never leave the system for classification.
+                    {d.library.exemptConfirmed}
                   </span>
                 ) : null}
               </span>

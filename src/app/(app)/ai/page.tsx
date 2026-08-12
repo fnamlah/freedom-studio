@@ -3,11 +3,14 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireRole } from "@/lib/auth/guard";
 import { getActiveProviderId, isAiConfigured } from "@/lib/ai/provider";
+import { getDict } from "@/lib/i18n/server";
 
 import { AiWorkspace } from "./ai-workspace";
 import { PROVIDER_LABELS, type ConversationLite } from "./ai-meta";
 
-export const metadata: Metadata = { title: "AI Assistant" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).adminAi.assistant.metaTitle };
+}
 
 /**
  * AI Assistant (docs/11 §2). Super Admin, Manager and Finance only — the only
@@ -21,6 +24,7 @@ export const metadata: Metadata = { title: "AI Assistant" };
  */
 export default async function AiPage() {
   const { supabase } = await requireRole("super_admin", "manager", "finance");
+  const d = (await getDict()).adminAi.assistant;
 
   const [{ data: conversations }, aiConfigured, providerId] = await Promise.all([
     supabase
@@ -34,9 +38,9 @@ export default async function AiPage() {
   return (
     <>
       <PageHeader
-        title="AI Assistant"
-        description="Ask operational and financial questions in plain language. The assistant reads only what your role can — through whitelisted, read-only tools, in aggregate — and never sees legal names, contact or payment details (docs/11)."
-        breadcrumbs={[{ label: "AI Assistant" }]}
+        title={d.title}
+        description={d.description}
+        breadcrumbs={[{ label: d.title }]}
       />
 
       <AiWorkspace

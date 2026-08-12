@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, Label } from "@/components/ui/label";
 import { Select, type SelectOption } from "@/components/ui/select";
+import { useDict } from "@/lib/i18n/client";
 
 export type PayeeOption = { value: string; label: string };
 
@@ -24,13 +25,14 @@ export function StatementControls({
   current: { payee: string; from: string; to: string };
 }) {
   const router = useRouter();
+  const d = useDict();
   const [isPending, startTransition] = useTransition();
   const [payee, setPayee] = useState(current.payee);
   const [from, setFrom] = useState(current.from);
   const [to, setTo] = useState(current.to);
 
   const payeeOptions: SelectOption[] = [
-    { value: "", label: "Select a payee…" },
+    { value: "", label: d.money.statements.selectPayee },
     ...payees,
   ];
 
@@ -58,7 +60,7 @@ export function StatementControls({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field>
           <Label htmlFor="stmt-payee" required>
-            Payee
+            {d.money.statements.payee}
           </Label>
           <Select
             id="stmt-payee"
@@ -69,7 +71,7 @@ export function StatementControls({
         </Field>
         <Field>
           <Label htmlFor="stmt-from" required>
-            From
+            {d.money.statements.from}
           </Label>
           <Input
             id="stmt-from"
@@ -80,16 +82,16 @@ export function StatementControls({
         </Field>
         <Field>
           <Label htmlFor="stmt-to" required>
-            To
+            {d.money.statements.to}
           </Label>
           <Input id="stmt-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </Field>
         <div className="flex items-center gap-2">
           <Button onClick={generate} loading={isPending} disabled={!canGenerate} fullWidth>
-            Generate
+            {d.money.statements.generate}
           </Button>
           <Button variant="ghost" onClick={clear} disabled={isPending}>
-            Clear
+            {d.common.clear}
           </Button>
         </div>
       </div>

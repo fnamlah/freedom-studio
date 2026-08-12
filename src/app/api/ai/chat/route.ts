@@ -26,6 +26,7 @@ import { runAgentTurn } from "@/lib/ai/agent";
 import type { ChatMessage } from "@/lib/ai/types";
 import { guardedAdminClient } from "@/lib/supabase/admin";
 import { isAuthzError } from "@/lib/auth/errors";
+import { dict, toLocale, type Locale } from "@/lib/i18n";
 import { createRouteSupabase } from "@/lib/supabase/server";
 
 import { deriveTitle, type SseEvent } from "../../../(app)/ai/ai-meta";
@@ -43,16 +44,25 @@ export async function POST(req: Request): Promise<Response> {
   // 1. Role + AAL2 gate. `guardedAdminClient` enforces the same super_admin /
   //    manager / finance membership AND yields the service-role client the agent
   //    needs; `requireApiRole` is redundant with it, so one guard covers both.
+  //
+  //    The guard also hands back the caller's `profile`, whose `locale`
+  //    (migration 019) decides BOTH the language of the error bodies below and —
+  //    the point of the whole surface — the language the assistant answers in.
+  //    Taken from the profile already loaded rather than from `getLocale()`,
+  //    which would re-query for a value we are holding.
   let service;
   let userId: string;
+  let locale: Locale;
   try {
     const ctx = await guardedAdminClient([...AI_ROLES]);
     service = ctx.admin;
     userId = ctx.user.id;
+    locale = toLocale(ctx.profile.locale);
   } catch (e) {
     if (isAuthzError(e)) return jsonError(e.toResponseBody(), e.status);
     throw e;
   }
+  const d = dict(locale).adminAi.assistant;
 
   // The caller's RLS-scoped client — tools + own-only conversation/message reads.
   const supabase = await createRouteSupabase();
@@ -63,7 +73,7 @@ export async function POST(req: Request): Promise<Response> {
     payload = await req.json();
   } catch {
     return jsonError(
-      { error: { code: "bad_request", message: "Body must be JSON." } },
+      { error: { code: "bad_request", message: d.errBodyNotJson } },
       400,
     );
   }
@@ -71,7 +81,7 @@ export async function POST(req: Request): Promise<Response> {
   const message = typeof body.message === "string" ? body.message.trim() : "";
   if (message.length === 0) {
     return jsonError(
-      { error: { code: "bad_request", message: "`message` is required." } },
+      { error: { code: "bad_request", message: d.errMessageRequired } },
       400,
     );
   }
@@ -92,20 +102,20 @@ export async function POST(req: Request): Promise<Response> {
       .maybeSingle();
     if (error) {
       return jsonError(
-        { error: { code: "server_error", message: "Failed to load conversation." } },
+        { error: { code: "server_error", message: d.errLoadConversation } },
         500,
       );
     }
     if (!convo) {
       return jsonError(
-        { error: { code: "not_found", message: "Conversation not found." } },
+        { error: { code: "not_found", message: d.errConversationNotFound } },
         404,
       );
     }
     conversationId = convo.id;
     conversationTitle = convo.title;
   } else {
-    conversationTitle = deriveTitle(message);
+    conversationTitle = deriveTitle(message, d.newChat);
     const { data: created, error } = await supabase
       .from("ai_conversations")
       .insert({ user_id: userId, title: conversationTitle })
@@ -113,7 +123,7 @@ export async function POST(req: Request): Promise<Response> {
       .single();
     if (error || !created) {
       return jsonError(
-        { error: { code: "server_error", message: "Failed to create conversation." } },
+        { error: { code: "server_error", message: d.errCreateConversation } },
         500,
       );
     }
@@ -170,6 +180,7 @@ export async function POST(req: Request): Promise<Response> {
           service,
           conversationId,
           onDelta: (text) => send({ type: "delta", text }),
+          locale,
           signal: req.signal,
         });
 
@@ -203,7 +214,7 @@ export async function POST(req: Request): Promise<Response> {
         send({
           type: "error",
           status: "error",
-          reason: e instanceof Error ? e.message : "AI request failed.",
+          reason: e instanceof Error ? e.message : d.errRequestFailed,
         });
         send({ type: "done", status: "error", toolCalls: 0 });
       } finally {

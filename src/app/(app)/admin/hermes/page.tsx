@@ -7,16 +7,49 @@ import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/guard";
-import { dateTime, EM_DASH } from "@/lib/format";
+import type { Dictionary, Locale } from "@/lib/i18n";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
+import { EM_DASH } from "@/lib/format";
 
 import { ApprovalsTable, type ApprovalRowView, type ApprovalState } from "./approvals-table";
 
-export const metadata: Metadata = { title: "Hermes" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).adminAi.hermes.metaTitle };
+}
 
 /** Heartbeats older than this mean a loop is wedged, not merely idle. */
 const STALE_MS = 15 * 60_000;
 
 type PreviewShape = { summary?: unknown; [key: string]: unknown };
+
+/**
+ * The narrative keys the worker writes into `preview`, in both languages
+ * (`summary_en`/`summary_ru`, `risk_en`/`risk_ru`) plus the pre-i18n
+ * English-only `summary`. They are read explicitly below, so they must NOT also
+ * fall through the generic key→label flattening — `summary en` is not a field a
+ * person approving money should see.
+ */
+const NARRATIVE_KEY_RE = /^(summary|risk)(_|$)/;
+
+/** Read `<base>_<locale>` from a preview, falling back to the other language. */
+function localizedPreviewText(
+  obj: PreviewShape,
+  base: "summary" | "risk",
+  locale: Locale,
+): string | null {
+  const candidates = [
+    obj[`${base}_${locale}`],
+    obj[`${base}_${locale === "ru" ? "en" : "ru"}`],
+    // Rows written before the worker started emitting both languages carry only
+    // the bare, English `summary`; the chain has to reach them.
+    obj[base],
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
 
 /**
  * Turn a proposal's stored preview into something readable without trusting it.
@@ -26,16 +59,21 @@ type PreviewShape = { summary?: unknown; [key: string]: unknown };
  * gets flattened to scalar label/value pairs; nested objects are dropped rather
  * than stringified into noise.
  */
-function describePreview(preview: unknown): { summary: string; details: ApprovalRowView["details"] } {
+function describePreview(
+  preview: unknown,
+  locale: Locale,
+  fallback: string,
+): { summary: string; risk: string | null; details: ApprovalRowView["details"] } {
   if (!preview || typeof preview !== "object" || Array.isArray(preview)) {
-    return { summary: "Proposal", details: [] };
+    return { summary: fallback, risk: null, details: [] };
   }
   const obj = preview as PreviewShape;
-  const summary = typeof obj.summary === "string" && obj.summary.trim() ? obj.summary : "Proposal";
+  const summary = localizedPreviewText(obj, "summary", locale) ?? fallback;
+  const risk = localizedPreviewText(obj, "risk", locale);
 
   const details: ApprovalRowView["details"] = [];
   for (const [key, value] of Object.entries(obj)) {
-    if (key === "summary") continue;
+    if (NARRATIVE_KEY_RE.test(key)) continue;
     if (value === null || value === undefined) continue;
     if (typeof value === "object") continue;
     details.push({
@@ -44,13 +82,29 @@ function describePreview(preview: unknown): { summary: string; details: Approval
     });
     if (details.length >= 6) break;
   }
-  return { summary, details };
+  return { summary, risk, details };
+}
+
+/**
+ * `hermes_job_runs.status` is a DB value, so it is never translated — only its
+ * label is. An unrecognised status falls through as its raw value rather than
+ * rendering blank: a new worker status must still be legible here.
+ */
+function jobStatusLabel(status: string, d: Dictionary["adminAi"]["hermes"]): string {
+  if (status === "success") return d.jobSuccess;
+  if (status === "running") return d.jobRunning;
+  if (status === "failed" || status === "error") return d.jobFailed;
+  return status;
 }
 
 export default async function HermesPage() {
   // Super Admin only. RLS on every hermes_* table already restricts SELECT to
   // super_admin, so a lower role reaching this route reads nothing regardless.
   const { supabase } = await requireRole("super_admin");
+  const locale = await getLocale();
+  const dict = await getDict();
+  const d = dict.adminAi.hermes;
+  const fm = fmt(locale);
 
   const [approvalsRes, jobsRes, heartbeatRes] = await Promise.all([
     supabase
@@ -82,7 +136,7 @@ export default async function HermesPage() {
   const nameOf = new Map((deciders ?? []).map((p) => [p.id, p.full_name]));
 
   const rows: ApprovalRowView[] = approvals.map((a) => {
-    const { summary, details } = describePreview(a.preview);
+    const { summary, risk, details } = describePreview(a.preview, locale, d.proposalFallback);
     return {
       id: a.id,
       action_type: a.action_type,
@@ -90,7 +144,9 @@ export default async function HermesPage() {
       required_role: a.required_role,
       summary,
       details,
-      risk_reason: a.risk_reason,
+      // `risk_reason` on the row is English; the preview's `risk_<locale>` is
+      // the translated version of the same text, so prefer it when present.
+      risk_reason: risk ?? a.risk_reason,
       job_name: a.job_name,
       created_at: a.created_at,
       expires_at: a.expires_at,
@@ -115,45 +171,45 @@ export default async function HermesPage() {
 
   return (
     <>
-      <PageHeader
-        title="Hermes"
-        description="The studio's agent proposes actions here and waits. It can raise work and it can carry out what you authorise, but it can never approve its own proposal — the database refuses that, not just the interface."
-      />
+      <PageHeader title={d.title} description={d.description} />
 
       <StatTileRow>
-        <StatTile label="Awaiting your decision" value={String(pending.length)} />
-        <StatTile label="Failed" value={String(failed.length)} />
+        <StatTile label={d.statAwaiting} value={String(pending.length)} />
+        <StatTile label={d.statFailed} value={String(failed.length)} />
         <StatTile
-          label="Agent"
-          value={agentLive ? "Running" : heartbeats.length === 0 ? "Never started" : "Stalled"}
+          label={d.statAgent}
+          value={
+            agentLive
+              ? d.agentRunning
+              : heartbeats.length === 0
+                ? d.agentNeverStarted
+                : d.agentStalled
+          }
         />
       </StatTileRow>
 
       <Card className="mt-6">
-        <CardHeader title="Awaiting decision" />
+        <CardHeader title={d.awaitingCardTitle} />
         <CardBody>
           <ApprovalsTable rows={pending} />
         </CardBody>
       </Card>
 
       <Card className="mt-6">
-        <CardHeader
-          title="Worker health"
-          description="Each loop writes a heartbeat. A stalled loop means proposals may not be raised or carried out."
-        />
+        <CardHeader title={d.healthTitle} description={d.healthDescription} />
         <CardBody>
           {heartbeats.length === 0 ? (
             <EmptyState
-              title="No heartbeats recorded"
-              description="Hermes has not run yet. Once the worker is deployed it reports here within a minute."
+              title={d.noHeartbeatsTitle}
+              description={d.noHeartbeatsDescription}
             />
           ) : (
             <Table>
               <THead>
                 <TR>
-                  <TH>Loop</TH>
-                  <TH>Last heartbeat</TH>
-                  <TH>State</TH>
+                  <TH>{d.colLoop}</TH>
+                  <TH>{d.colLastHeartbeat}</TH>
+                  <TH>{d.colState}</TH>
                 </TR>
               </THead>
               <TBody>
@@ -163,10 +219,10 @@ export default async function HermesPage() {
                   return (
                     <TR key={h.key}>
                       <TD className="font-medium">{h.key.replace("heartbeat:", "")}</TD>
-                      <TD className="text-muted">{last ? dateTime(last) : EM_DASH}</TD>
+                      <TD className="text-muted">{last ? fm.dateTime(last) : EM_DASH}</TD>
                       <TD>
                         <Badge variant={stale ? "danger" : "success"}>
-                          {stale ? "Stalled" : "Healthy"}
+                          {stale ? d.loopStalled : d.loopHealthy}
                         </Badge>
                       </TD>
                     </TR>
@@ -179,25 +235,25 @@ export default async function HermesPage() {
       </Card>
 
       <Card className="mt-6">
-        <CardHeader title="Recent job runs" />
+        <CardHeader title={d.jobsTitle} />
         <CardBody>
           {jobs.length === 0 ? (
-            <EmptyState title="No job runs yet" description="Scheduled jobs report here once they run." />
+            <EmptyState title={d.noJobsTitle} description={d.noJobsDescription} />
           ) : (
             <Table>
               <THead>
                 <TR>
-                  <TH>Job</TH>
-                  <TH>Started</TH>
-                  <TH>Result</TH>
-                  <TH>Status</TH>
+                  <TH>{d.colJob}</TH>
+                  <TH>{d.colStarted}</TH>
+                  <TH>{d.colResult}</TH>
+                  <TH>{dict.common.status}</TH>
                 </TR>
               </THead>
               <TBody>
                 {jobs.map((j) => (
                   <TR key={j.id}>
                     <TD className="font-medium">{j.job_name}</TD>
-                    <TD className="whitespace-nowrap text-muted">{dateTime(j.started_at)}</TD>
+                    <TD className="whitespace-nowrap text-muted">{fm.dateTime(j.started_at)}</TD>
                     <TD className="text-sm">{j.outcome ?? j.error ?? EM_DASH}</TD>
                     <TD>
                       <Badge
@@ -209,7 +265,7 @@ export default async function HermesPage() {
                               : "danger"
                         }
                       >
-                        {j.status}
+                        {jobStatusLabel(j.status, d)}
                       </Badge>
                     </TD>
                   </TR>
@@ -221,7 +277,7 @@ export default async function HermesPage() {
       </Card>
 
       <Card className="mt-6">
-        <CardHeader title="Decision history" description="Every proposal Hermes has raised." />
+        <CardHeader title={d.historyTitle} description={d.historyDescription} />
         <CardBody>
           <ApprovalsTable rows={history} />
         </CardBody>

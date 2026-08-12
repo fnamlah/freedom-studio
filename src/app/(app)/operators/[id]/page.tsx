@@ -6,7 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireRole } from "@/lib/auth/guard";
-import { date, EM_DASH } from "@/lib/format";
+import { EM_DASH } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import {
   AssignmentEditor,
@@ -17,12 +19,14 @@ import { OperatorForm, type EditableOperator } from "../operator-form";
 import { OperatorStatusControl } from "../operator-status-control";
 import {
   assignmentActivity,
-  OPERATOR_STATUS_META,
+  operatorStatusMeta,
   type AssignmentActivity,
   type OperatorStatus,
 } from "../status";
 
-export const metadata: Metadata = { title: "Operator" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).studio.operators.detailMetaTitle };
+}
 
 type OperatorDetail = EditableOperator & {
   status: OperatorStatus;
@@ -62,6 +66,8 @@ export default async function OperatorDetailPage({
 }) {
   const { id } = await params;
   const { supabase } = await requireRole("super_admin", "manager");
+  const d = await getDict();
+  const fm = fmt(await getLocale());
 
   const [operatorResult, assignmentsResult, modelsResult] = await Promise.all([
     supabase
@@ -93,7 +99,7 @@ export default async function OperatorDetailPage({
     .map((row) => ({
       id: row.id,
       model_id: row.model_id,
-      model_name: modelNames.get(row.model_id) ?? "Unknown model",
+      model_name: modelNames.get(row.model_id) ?? d.studio.operators.unknownModel,
       pool_share_percent: row.pool_share_percent,
       assigned_from: row.assigned_from,
       assigned_to: row.assigned_to,
@@ -105,7 +111,7 @@ export default async function OperatorDetailPage({
       return rank !== 0 ? rank : b.assigned_from.localeCompare(a.assigned_from);
     });
 
-  const statusMeta = OPERATOR_STATUS_META[operator.status];
+  const statusMeta = operatorStatusMeta(d, operator.status);
 
   const editable: EditableOperator = {
     id: operator.id,
@@ -122,8 +128,11 @@ export default async function OperatorDetailPage({
     <>
       <PageHeader
         title={operator.display_name}
-        description="Operator business record, model assignments, and pool shares."
-        breadcrumbs={[{ label: "Operators", href: "/operators" }, { label: operator.display_name }]}
+        description={d.studio.operators.detailDescription}
+        breadcrumbs={[
+          { label: d.studio.operators.title, href: "/operators" },
+          { label: operator.display_name },
+        ]}
         actions={
           <>
             <Badge variant={statusMeta.variant} dot>
@@ -137,25 +146,32 @@ export default async function OperatorDetailPage({
 
       <div className="mb-6">
         <Card>
-          <CardHeader title="Profile" description="Sensitive fields are visible to Super Admin and Managers only." />
+          <CardHeader
+            title={d.studio.operators.profileTitle}
+            description={d.studio.operators.profileDescription}
+          />
           <CardBody>
             <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-              <Detail label="Legal name">{operator.legal_name}</Detail>
-              <Detail label="Email">{operator.email ?? EM_DASH}</Detail>
-              <Detail label="Phone">{operator.phone ?? EM_DASH}</Detail>
-              <Detail label="Country">{operator.country ?? EM_DASH}</Detail>
-              <Detail label="Start date">
-                {operator.start_date ? date(operator.start_date) : EM_DASH}
+              <Detail label={d.studio.operators.rowLegalName}>{operator.legal_name}</Detail>
+              <Detail label={d.studio.operators.rowEmail}>{operator.email ?? EM_DASH}</Detail>
+              <Detail label={d.studio.operators.rowPhone}>{operator.phone ?? EM_DASH}</Detail>
+              <Detail label={d.studio.operators.rowCountry}>
+                {operator.country ?? EM_DASH}
               </Detail>
-              <Detail label="Self-service login">
+              <Detail label={d.studio.operators.rowStartDate}>
+                {operator.start_date ? fm.date(operator.start_date) : EM_DASH}
+              </Detail>
+              <Detail label={d.studio.operators.rowSelfService}>
                 {operator.profile_id ? (
-                  <Badge variant="primary">Linked</Badge>
+                  <Badge variant="primary">{d.studio.operators.linked}</Badge>
                 ) : (
-                  <span className="text-muted">Not linked</span>
+                  <span className="text-muted">{d.studio.operators.notLinked}</span>
                 )}
               </Detail>
-              <Detail label="Created">{date(operator.created_at)}</Detail>
-              <Detail label="Notes" full>
+              <Detail label={d.studio.operators.rowCreated}>
+                {fm.date(operator.created_at)}
+              </Detail>
+              <Detail label={d.studio.operators.rowNotes} full>
                 {operator.notes ? (
                   <span className="whitespace-pre-wrap">{operator.notes}</span>
                 ) : (

@@ -18,11 +18,14 @@ export function normaliseKeyFigures(raw: unknown): KeyFigure[] {
   return out;
 }
 
-export const AI_STATUS_LABEL: Record<string, string> = {
-  pending: "Not analysed",
-  suggested: "Suggested",
-  confirmed: "Analysed",
-  overridden: "Analysed",
-  skipped: "Skipped",
-  failed: "Failed",
-};
+/**
+ * The `ai_status` labels live in `d.documents.analysis.status` — keyed by the
+ * same enum values. A status the dictionary has no entry for (a value added to
+ * the enum ahead of the UI) falls back to the raw key rather than a blank.
+ */
+export function aiStatusLabel(
+  labels: Record<string, string>,
+  status: string,
+): string {
+  return labels[status] ?? status;
+}

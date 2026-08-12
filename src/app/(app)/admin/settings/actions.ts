@@ -6,6 +6,8 @@ import { z } from "zod";
 import { getActiveProviderId, providerHasKey } from "@/lib/ai/provider";
 import type { ProviderId } from "@/lib/ai/types";
 import type { Json } from "@/lib/database.types";
+import type { Dictionary } from "@/lib/i18n";
+import { getDict } from "@/lib/i18n/server";
 import { invalidateSettingsCache } from "@/lib/settings";
 import { guardedAdminClient, isAuthzError } from "@/lib/supabase/admin";
 import { createRouteSupabase, type ServerSupabaseClient } from "@/lib/supabase/server";
@@ -50,51 +52,50 @@ const LIMIT_KEYS = [
 ] as const;
 type LimitKey = (typeof LIMIT_KEYS)[number];
 
-const MODEL_LABELS: Record<ModelKey, string> = {
-  "ai.chat_model.moonshot": "Moonshot chat model",
-  "ai.chat_model.zhipu": "Zhipu chat model",
-  "ai.vision_model.moonshot": "Moonshot vision model",
-  "ai.vision_model.zhipu": "Zhipu vision model",
-  "ai.embedding.model": "Embedding model",
-};
-
-const LIMIT_LABELS: Record<LimitKey, string> = {
-  "ai.limits.requests_per_user_per_hour": "Requests per user per hour",
-  "ai.limits.tokens_per_user_per_day": "Tokens per user per day",
-  "ai.limits.tokens_global_per_day": "Tokens per day (global)",
-};
-
 const providerSchema = z.enum(["moonshot", "zhipu"]);
 
-const modelValueSchema = z
-  .string()
-  .trim()
-  .min(1, "cannot be empty.")
-  .max(120, "is too long.");
+/**
+ * Both value schemas are FACTORIES rather than module constants.
+ *
+ * A schema built at import time is built before any request exists, so its
+ * messages could only ever be in one language. Calling the factory inside the
+ * action — after `getDict()` — is what lets the validation text follow the
+ * reader. The messages are sentence FRAGMENTS on purpose: the dictionary's
+ * `fieldIssue(label, issue)` decides how a label and a fragment join, which
+ * differs between "Moonshot chat model cannot be empty." and «Поле «…»: не
+ * может быть пустым.»
+ */
+const modelValueSchema = (d: Dictionary) =>
+  z
+    .string()
+    .trim()
+    .min(1, d.adminAi.settings.issueEmpty)
+    .max(120, d.adminAi.settings.issueTooLong);
 
-const limitValueSchema = z.coerce
-  .number()
-  .int("must be a whole number.")
-  .positive("must be greater than zero.")
-  .max(1_000_000_000, "is too large.");
+const limitValueSchema = (d: Dictionary) =>
+  z.coerce
+    .number()
+    .int(d.adminAi.settings.issueNotInteger)
+    .positive(d.adminAi.settings.issueNotPositive)
+    .max(1_000_000_000, d.adminAi.settings.issueTooLarge);
 
 /* ------------------------------------------------------------------ helpers --- */
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "is invalid.";
+function firstIssue(error: z.ZodError, d: Dictionary): string {
+  return error.issues[0]?.message ?? d.adminAi.settings.issueInvalid;
 }
 
-function authzOrGeneric(error: unknown): string {
-  if (isAuthzError(error)) return "You are not authorized to change AI settings.";
-  return "Something went wrong. Please try again.";
+function authzOrGeneric(error: unknown, d: Dictionary): string {
+  if (isAuthzError(error)) return d.adminAi.settings.errNotAuthorized;
+  return d.common.unknownError;
 }
 
-function dbError(error: { code?: string; message?: string }): string {
+function dbError(error: { code?: string; message?: string }, d: Dictionary): string {
   // 22023 is what validate_app_setting raises for a value that fails its rule.
   if (error.code === "22023") {
-    return "That value was rejected by the database validation rule.";
+    return d.adminAi.settings.errDbRejected;
   }
-  return "Could not save the setting. Please try again.";
+  return d.adminAi.settings.errSaveFailed;
 }
 
 /**
@@ -107,6 +108,7 @@ async function applyWrites(
   supabase: ServerSupabaseClient,
   userId: string,
   entries: Array<{ key: string; value: Json }>,
+  d: Dictionary,
 ): Promise<SettingsActionResult> {
   for (const { key, value } of entries) {
     const { data, error } = await supabase
@@ -116,8 +118,8 @@ async function applyWrites(
       .select("key")
       .maybeSingle();
 
-    if (error) return { ok: false, error: dbError(error) };
-    if (!data) return { ok: false, error: `Unknown setting: ${key}.` };
+    if (error) return { ok: false, error: dbError(error, d) };
+    if (!data) return { ok: false, error: d.adminAi.settings.errUnknownSetting(key) };
   }
   return { ok: true };
 }
@@ -133,27 +135,30 @@ async function applyWrites(
 export async function switchActiveProvider(input: {
   provider: string;
 }): Promise<SettingsActionResult> {
+  const dictionary = await getDict();
+  const d = dictionary.adminAi.settings;
+
   const parsed = providerSchema.safeParse(input.provider);
-  if (!parsed.success) return { ok: false, error: "Choose Moonshot or Zhipu." };
+  if (!parsed.success) return { ok: false, error: d.errChooseProvider };
   const provider = parsed.data;
 
   try {
     const { user } = await guardedAdminClient(["super_admin"]);
     const supabase = await createRouteSupabase();
 
-    const res = await applyWrites(supabase, user.id, [
-      { key: "ai.active_provider", value: provider },
-    ]);
+    const res = await applyWrites(
+      supabase,
+      user.id,
+      [{ key: "ai.active_provider", value: provider }],
+      dictionary,
+    );
     if (!res.ok) return res;
 
     invalidateSettingsCache();
     revalidatePath("/admin/settings");
-    return {
-      ok: true,
-      message: `Active provider switched to ${PROVIDER_LABELS[provider]}. Effective within 60 seconds.`,
-    };
+    return { ok: true, message: d.okSwitched(PROVIDER_LABELS[provider]) };
   } catch (error) {
-    return { ok: false, error: authzOrGeneric(error) };
+    return { ok: false, error: authzOrGeneric(error, dictionary) };
   }
 }
 
@@ -168,32 +173,41 @@ export async function switchActiveProvider(input: {
 export async function saveAiModels(input: {
   values: Partial<Record<ModelKey, string>>;
 }): Promise<SettingsActionResult> {
+  const dictionary = await getDict();
+  const d = dictionary.adminAi.settings;
+  const schema = modelValueSchema(dictionary);
   const entries: Array<{ key: string; value: Json }> = [];
 
   for (const key of MODEL_KEYS) {
     const raw = input.values?.[key];
     if (raw === undefined) continue;
-    const parsed = modelValueSchema.safeParse(raw);
+    const parsed = schema.safeParse(raw);
     if (!parsed.success) {
-      return { ok: false, error: `${MODEL_LABELS[key]} ${firstIssue(parsed.error)}` };
+      return {
+        ok: false,
+        error: d.fieldIssue(d.modelLabels[key], firstIssue(parsed.error, dictionary)),
+      };
     }
     entries.push({ key, value: parsed.data });
   }
 
-  if (entries.length === 0) return { ok: true, message: "No changes to save." };
+  if (entries.length === 0) return { ok: true, message: d.okNoChanges };
 
   try {
     const { user } = await guardedAdminClient(["super_admin"]);
     const supabase = await createRouteSupabase();
 
-    const res = await applyWrites(supabase, user.id, entries);
+    const res = await applyWrites(supabase, user.id, entries, dictionary);
     if (!res.ok) return res;
 
     invalidateSettingsCache();
     revalidatePath("/admin/settings");
-    return { ok: true, message: entries.length === 1 ? "Model updated." : "Models updated." };
+    return {
+      ok: true,
+      message: entries.length === 1 ? d.okModelUpdated : d.okModelsUpdated,
+    };
   } catch (error) {
-    return { ok: false, error: authzOrGeneric(error) };
+    return { ok: false, error: authzOrGeneric(error, dictionary) };
   }
 }
 
@@ -207,32 +221,41 @@ export async function saveAiModels(input: {
 export async function saveAiLimits(input: {
   values: Partial<Record<LimitKey, number | string>>;
 }): Promise<SettingsActionResult> {
+  const dictionary = await getDict();
+  const d = dictionary.adminAi.settings;
+  const schema = limitValueSchema(dictionary);
   const entries: Array<{ key: string; value: Json }> = [];
 
   for (const key of LIMIT_KEYS) {
     const raw = input.values?.[key];
     if (raw === undefined) continue;
-    const parsed = limitValueSchema.safeParse(raw);
+    const parsed = schema.safeParse(raw);
     if (!parsed.success) {
-      return { ok: false, error: `${LIMIT_LABELS[key]} ${firstIssue(parsed.error)}` };
+      return {
+        ok: false,
+        error: d.fieldIssue(d.limitLabels[key], firstIssue(parsed.error, dictionary)),
+      };
     }
     entries.push({ key, value: parsed.data });
   }
 
-  if (entries.length === 0) return { ok: true, message: "No changes to save." };
+  if (entries.length === 0) return { ok: true, message: d.okNoChanges };
 
   try {
     const { user } = await guardedAdminClient(["super_admin"]);
     const supabase = await createRouteSupabase();
 
-    const res = await applyWrites(supabase, user.id, entries);
+    const res = await applyWrites(supabase, user.id, entries, dictionary);
     if (!res.ok) return res;
 
     invalidateSettingsCache();
     revalidatePath("/admin/settings");
-    return { ok: true, message: entries.length === 1 ? "Budget updated." : "Budgets updated." };
+    return {
+      ok: true,
+      message: entries.length === 1 ? d.okBudgetUpdated : d.okBudgetsUpdated,
+    };
   } catch (error) {
-    return { ok: false, error: authzOrGeneric(error) };
+    return { ok: false, error: authzOrGeneric(error, dictionary) };
   }
 }
 
@@ -261,6 +284,6 @@ export async function refreshKeyStatus(): Promise<
     };
     return { ok: true, status: { active, configured, activeConfigured: configured[active] } };
   } catch (error) {
-    return { ok: false, error: authzOrGeneric(error) };
+    return { ok: false, error: authzOrGeneric(error, await getDict()) };
   }
 }

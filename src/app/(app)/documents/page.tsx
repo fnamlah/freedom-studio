@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { requireRole } from "@/lib/auth/guard";
+import { getDict } from "@/lib/i18n/server";
 
 import { deriveComplianceStatus, type ComplianceStatus } from "./doc-meta";
 import { DocumentUpload, type ModelOption } from "./document-upload";
@@ -11,7 +12,9 @@ import { normaliseKeyFigures } from "./ai-meta";
 import { DocumentsTable, type DocumentRow } from "./documents-table";
 import { ModelFilter } from "./model-filter";
 
-export const metadata: Metadata = { title: "Documents" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).documents.metaTitle };
+}
 
 type DocumentQueryRow = {
   id: string;
@@ -54,6 +57,7 @@ export default async function DocumentsPage({
 }) {
   const { supabase } = await requireRole("super_admin", "manager");
   const { model } = await searchParams;
+  const d = await getDict();
 
   const { data: modelsData } = await supabase
     .from("models")
@@ -84,25 +88,26 @@ export default async function DocumentsPage({
     stage_name: m.stage_name,
   }));
 
-  const rows: DocumentRow[] = documents.map((d) => ({
-    id: d.id,
-    model_id: d.model_id,
-    model_name: modelName.get(d.model_id) ?? "Unknown model",
-    doc_type: d.doc_type,
-    title: d.title,
-    file_name: d.file_name,
-    mime_type: d.mime_type,
-    file_size_bytes: d.file_size_bytes,
-    issued_date: d.issued_date,
-    expires_at: d.expires_at,
-    is_archived: d.is_archived,
-    status: deriveComplianceStatus(d.expires_at),
-    ai_analysis_opt_in: d.ai_analysis_opt_in,
-    ai_status: d.ai_status,
-    ai_summary: d.ai_summary,
-    ai_key_figures: normaliseKeyFigures(d.ai_key_figures),
-    analysed_at: d.analysed_at,
-    analysed_provider: d.analysed_provider,
+  // `doc`, not `d` — `d` is the dictionary in this scope.
+  const rows: DocumentRow[] = documents.map((doc) => ({
+    id: doc.id,
+    model_id: doc.model_id,
+    model_name: modelName.get(doc.model_id) ?? d.documents.unknownModel,
+    doc_type: doc.doc_type,
+    title: doc.title,
+    file_name: doc.file_name,
+    mime_type: doc.mime_type,
+    file_size_bytes: doc.file_size_bytes,
+    issued_date: doc.issued_date,
+    expires_at: doc.expires_at,
+    is_archived: doc.is_archived,
+    status: deriveComplianceStatus(doc.expires_at),
+    ai_analysis_opt_in: doc.ai_analysis_opt_in,
+    ai_status: doc.ai_status,
+    ai_summary: doc.ai_summary,
+    ai_key_figures: normaliseKeyFigures(doc.ai_key_figures),
+    analysed_at: doc.analysed_at,
+    analysed_provider: doc.analysed_provider,
   }));
 
   const counts = rows.reduce(
@@ -113,34 +118,51 @@ export default async function DocumentsPage({
     { valid: 0, expiring: 0, expired: 0 } as Record<ComplianceStatus, number>,
   );
 
-  const scopeHint = activeModelFilter === "all" ? "All models" : "Filtered model";
+  const scopeHint =
+    activeModelFilter === "all" ? d.documents.scopeAll : d.documents.scopeFiltered;
 
   return (
     <>
       <PageHeader
-        title="Documents"
-        description="Compliance & identity documents. Stored in a private bucket; retrieval is only ever a 60-second signed URL or a revocable, audited share link (docs/06)."
-        breadcrumbs={[{ label: "Documents" }]}
+        title={d.documents.title}
+        description={d.documents.description}
+        breadcrumbs={[{ label: d.documents.title }]}
         actions={<DocumentUpload models={modelOptions} />}
       />
 
       {models.length === 0 ? (
         <EmptyState
-          title="No models yet"
-          description="Compliance documents are filed against a model. Add a model first, then come back to upload identity and compliance documents."
+          title={d.documents.noModelsTitle}
+          description={d.documents.noModelsDescription}
         />
       ) : (
         <>
           <StatTileRow className="mb-6" columns={4}>
-            <StatTile label="Documents" value={rows.length} hint={scopeHint} />
-            <StatTile label="Valid" value={counts.valid} hint="More than 30 days out" />
-            <StatTile label="Expiring soon" value={counts.expiring} hint="Within 30 days" />
-            <StatTile label="Expired" value={counts.expired} hint="Renewal required" />
+            <StatTile
+              label={d.documents.statDocuments}
+              value={rows.length}
+              hint={scopeHint}
+            />
+            <StatTile
+              label={d.documents.statValid}
+              value={counts.valid}
+              hint={d.documents.statValidHint}
+            />
+            <StatTile
+              label={d.documents.statExpiring}
+              value={counts.expiring}
+              hint={d.documents.statExpiringHint}
+            />
+            <StatTile
+              label={d.documents.statExpired}
+              value={counts.expired}
+              hint={d.documents.statExpiredHint}
+            />
           </StatTileRow>
 
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <ModelFilter current={activeModelFilter} models={modelOptions} />
-            <span className="text-xs text-muted">{rows.length} shown</span>
+            <span className="text-xs text-muted">{d.documents.shown(rows.length)}</span>
           </div>
 
           <DocumentsTable rows={rows} />

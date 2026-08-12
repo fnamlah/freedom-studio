@@ -6,8 +6,12 @@ import type { BadgeVariant } from "@/components/ui/badge";
  * A scheme applies at exactly one of three scopes; resolution walks them from most
  * to least specific — **account > model > default** — matching on the earning
  * row's `period_end` (docs/09 §4.1). This module holds the pure derivations and
- * display metadata so both the server page and the client table agree on labels,
- * badge colours, and effective-status classification.
+ * the LANGUAGE-INDEPENDENT display metadata — badge colours and resolution order
+ * — so the server page and the client table agree on them.
+ *
+ * The words themselves (`label`, `short`, `description`) live in
+ * `d.money.schemes.scope` / `d.money.schemes.status`: a module constant is
+ * evaluated once at import and can only ever hold one language.
  */
 
 export type SchemeScope = "account" | "model" | "default";
@@ -35,37 +39,16 @@ export type SchemeRowView = {
   platform_account_id: string | null;
 };
 
-export const SCOPE_META: Record<
-  SchemeScope,
-  { label: string; short: string; description: string; badge: BadgeVariant; order: number }
-> = {
-  account: {
-    label: "Account-specific",
-    short: "Account",
-    description: "Overrides the model and default split for a single platform account.",
-    badge: "primary",
-    order: 0,
-  },
-  model: {
-    label: "Model-specific",
-    short: "Model",
-    description: "Applies to every one of a model's accounts, unless an account scheme overrides it.",
-    badge: "neutral",
-    order: 1,
-  },
-  default: {
-    label: "Studio default",
-    short: "Default",
-    description: "The base split. Exactly one always exists and it cannot be deleted.",
-    badge: "muted",
-    order: 2,
-  },
+export const SCOPE_META: Record<SchemeScope, { badge: BadgeVariant; order: number }> = {
+  account: { badge: "primary", order: 0 },
+  model: { badge: "neutral", order: 1 },
+  default: { badge: "muted", order: 2 },
 };
 
-export const STATUS_META: Record<SchemeStatus, { label: string; variant: BadgeVariant }> = {
-  active: { label: "Active", variant: "success" },
-  scheduled: { label: "Scheduled", variant: "warning" },
-  ended: { label: "Ended", variant: "muted" },
+export const STATUS_VARIANT: Record<SchemeStatus, BadgeVariant> = {
+  active: "success",
+  scheduled: "warning",
+  ended: "muted",
 };
 
 /** Resolution order for the scope sections: most specific first. */

@@ -8,6 +8,14 @@ import type { ReactNode } from "react";
  * Crucially it renders text as React *nodes* (never `dangerouslySetInnerHTML`),
  * so model-authored content cannot inject markup: every string is escaped by
  * React. Anything it does not recognize falls through as a plain paragraph.
+ *
+ * LANGUAGE-INDEPENDENT BY CONSTRUCTION. The report prompt
+ * (`./actions.ts` → `systemPromptFor`) asks for its five section headings in the
+ * reader's language, so the heading TEXT differs per locale and changes again
+ * whenever that prompt is reworded. Nothing here may therefore match on heading
+ * text: `parseBlocks` keys on the `#` markers and the `-`/`*` bullets alone,
+ * which are identical in every language. Introducing a heading-text check would
+ * silently blank every report written in the other language — do not add one.
  */
 export function ReportMarkdown({ content }: { content: string }) {
   const blocks = parseBlocks(content);

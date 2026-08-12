@@ -8,6 +8,7 @@ import { OtpInput } from "@/components/auth/otp-input";
 import { isCompleteOtp } from "@/components/auth/otp";
 import { Button, Field, Label, Spinner } from "@/components/ui";
 import { challengeAndVerifyTotp, enrollTotp, type TotpEnrollment } from "@/lib/auth/mfa";
+import { useDict } from "@/lib/i18n/client";
 import { createBrowserSupabase } from "@/lib/supabase/browser";
 import { activateProfileAfterEnrollment } from "./actions";
 
@@ -30,6 +31,7 @@ type Phase = "loading" | "ready" | "activating";
  */
 export function EnrollForm({ next }: { next: string }) {
   const router = useRouter();
+  const d = useDict();
   const [phase, setPhase] = useState<Phase>("loading");
   const [enrollment, setEnrollment] = useState<TotpEnrollment | null>(null);
   const [code, setCode] = useState("");
@@ -56,7 +58,7 @@ export function EnrollForm({ next }: { next: string }) {
       setEnrollment(result);
       setPhase("ready");
     } catch (err) {
-      setStartError(err instanceof Error ? err.message : "Could not start enrollment.");
+      setStartError(err instanceof Error ? err.message : d.authFlow.enrollStartFailed);
       setPhase("ready");
     }
   }
@@ -71,7 +73,7 @@ export function EnrollForm({ next }: { next: string }) {
       router.replace(next); // Keep the button busy through the navigation.
       return;
     }
-    setError(`Almost there — activating your account failed: ${result.error}`);
+    setError(d.authFlow.activationFailed(result.error));
     setPending(false);
     setPhase("ready");
   }
@@ -81,11 +83,11 @@ export function EnrollForm({ next }: { next: string }) {
     setError(null);
 
     if (!enrollment) {
-      setError("Enrollment has not started yet. Reload the page and try again.");
+      setError(d.authFlow.enrollNotStarted);
       return;
     }
     if (!isCompleteOtp(code)) {
-      setError("Enter the 6-digit code from your authenticator app.");
+      setError(d.auth.mfaChallengeIntro);
       return;
     }
 
@@ -94,7 +96,7 @@ export function EnrollForm({ next }: { next: string }) {
       const supabase = createBrowserSupabase();
       await challengeAndVerifyTotp(supabase, enrollment.factorId, code);
     } catch {
-      setError("That code didn't match. Check your authenticator app and try again.");
+      setError(d.auth.invalidOtp);
       setPending(false);
       return;
     }
@@ -106,35 +108,30 @@ export function EnrollForm({ next }: { next: string }) {
   }
 
   return (
-    <AuthCard
-      title="Set up two-factor authentication"
-      description="Two-factor authentication is required. Scan the QR code with an authenticator app (Google Authenticator, 1Password, Authy…), then enter the 6-digit code."
-    >
+    <AuthCard title={d.auth.mfaEnrollTitle} description={d.auth.mfaEnrollIntro}>
       {startError ? (
         <>
           <AuthError>{startError}</AuthError>
           <Button variant="secondary" fullWidth onClick={() => void beginEnrollment()}>
-            Try again
+            {d.common.tryAgain}
           </Button>
         </>
       ) : phase === "loading" || !enrollment ? (
         <div className="flex items-center justify-center gap-3 py-8 text-sm text-muted">
-          <Spinner /> Preparing your authenticator…
+          <Spinner /> {d.authFlow.preparingAuthenticator}
         </div>
       ) : verified ? (
         // Code already verified (AAL2 reached) but activation didn't complete.
         // Never ask for the now-consumed code again — retry activation only.
         <>
           {error ? <AuthError>{error}</AuthError> : null}
-          <AuthNotice>
-            Your authenticator is verified. Finish setting up your account to continue.
-          </AuthNotice>
+          <AuthNotice>{d.authFlow.authenticatorVerified}</AuthNotice>
           <Button
             fullWidth
             loading={pending}
             onClick={() => void finishActivation()}
           >
-            Finish and continue
+            {d.auth.finishAndContinue}
           </Button>
         </>
       ) : (
@@ -145,15 +142,13 @@ export function EnrollForm({ next }: { next: string }) {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={qrImageSrc(enrollment.qrCode)}
-              alt="QR code for two-factor authentication setup"
+              alt={d.authFlow.qrAlt}
               width={180}
               height={180}
               className="rounded-md border border-border bg-white p-2"
             />
             <div className="w-full">
-              <p className="mb-1 text-center text-xs text-muted">
-                Can&apos;t scan it? Enter this key manually:
-              </p>
+              <p className="mb-1 text-center text-xs text-muted">{d.auth.mfaSecretLabel}</p>
               <code className="block w-full break-all rounded-md border border-border bg-surface-2 px-3 py-2 text-center font-mono text-xs text-foreground">
                 {enrollment.secret}
               </code>
@@ -163,7 +158,7 @@ export function EnrollForm({ next }: { next: string }) {
           <form onSubmit={onSubmit} noValidate className="space-y-4">
             <Field>
               <Label htmlFor="otp" required>
-                Verification code
+                {d.auth.otpLabel}
               </Label>
               <OtpInput
                 id="otp"
@@ -176,7 +171,7 @@ export function EnrollForm({ next }: { next: string }) {
             </Field>
 
             <Button type="submit" fullWidth loading={pending} disabled={!isCompleteOtp(code)}>
-              Verify and continue
+              {d.auth.verifyAndContinue}
             </Button>
           </form>
         </>

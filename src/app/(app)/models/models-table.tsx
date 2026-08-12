@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { date, EM_DASH, percent } from "@/lib/format";
+import { EM_DASH } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
-import { MODEL_STATUS_META, type ModelStatus } from "./status";
+import { modelStatusMeta, type ModelStatus } from "./status";
 
 export type ModelListRow = {
   id: string;
@@ -22,12 +24,14 @@ export type ModelListRow = {
 /** Roster table. Rows navigate to the model's detail page. */
 export function ModelsTable({ rows }: { rows: ModelListRow[] }) {
   const router = useRouter();
+  const d = useDict();
+  const fm = fmt(useLocale());
 
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No models to show"
-        description="No models match this filter. Add one, or clear the status filter to see the full roster."
+        title={d.studio.models.emptyTitle}
+        description={d.studio.models.emptyDescription}
       />
     );
   }
@@ -36,16 +40,16 @@ export function ModelsTable({ rows }: { rows: ModelListRow[] }) {
     <Table containerClassName="rounded-lg border border-border">
       <THead>
         <TR>
-          <TH>Model</TH>
-          <TH>Country</TH>
-          <TH>Start date</TH>
-          <TH align="right">Commission</TH>
-          <TH>Status</TH>
+          <TH>{d.studio.models.colModel}</TH>
+          <TH>{d.studio.models.colCountry}</TH>
+          <TH>{d.studio.models.colStartDate}</TH>
+          <TH align="right">{d.studio.models.colCommission}</TH>
+          <TH>{d.studio.models.colStatus}</TH>
         </TR>
       </THead>
       <TBody>
         {rows.map((model) => {
-          const meta = MODEL_STATUS_META[model.status];
+          const meta = modelStatusMeta(d, model.status);
           return (
             <TR
               key={model.id}
@@ -57,8 +61,10 @@ export function ModelsTable({ rows }: { rows: ModelListRow[] }) {
                 <div className="text-xs text-muted">{model.legal_name}</div>
               </TD>
               <TD className="text-muted">{model.country ?? EM_DASH}</TD>
-              <TD className="text-muted">{model.start_date ? date(model.start_date) : EM_DASH}</TD>
-              <TD numeric>{percent(model.commission_percent)}</TD>
+              <TD className="text-muted">
+                {model.start_date ? fm.date(model.start_date) : EM_DASH}
+              </TD>
+              <TD numeric>{fm.percent(model.commission_percent)}</TD>
               <TD>
                 <Badge variant={meta.variant} dot>
                   {meta.label}

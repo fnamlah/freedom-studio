@@ -1,5 +1,8 @@
+"use client";
+
 import { Badge } from "@/components/ui/badge";
-import { ratioPercent } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { AI_STATUS_META, type AiReviewStatus } from "./library-meta";
 
@@ -15,6 +18,8 @@ export function AiStatusBadge({
   status: AiReviewStatus;
   confidence?: number | null;
 }) {
+  const d = useDict();
+  const fm = fmt(useLocale());
   const meta = AI_STATUS_META[status];
   const showConfidence =
     confidence !== null &&
@@ -24,11 +29,11 @@ export function AiStatusBadge({
   return (
     <span className="inline-flex items-center gap-1.5">
       <Badge variant={meta.variant} dot={meta.dot}>
-        {meta.label}
+        {d.library.aiStatus[status]}
       </Badge>
       {showConfidence ? (
         <span className="text-xs tabular-nums text-muted">
-          {ratioPercent(confidence, { decimals: 0 })}
+          {fm.percent(confidence * 100, { decimals: 0 })}
         </span>
       ) : null}
     </span>

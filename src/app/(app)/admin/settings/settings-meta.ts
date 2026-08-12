@@ -8,7 +8,17 @@ import type { ProviderId } from "@/lib/ai/types";
  * imports (erased at compile time) live here.
  */
 
-/** Human labels for the two switchable chat providers (docs/11 §2.1, §3). */
+/**
+ * Human labels for the two switchable chat providers (docs/11 §2.1, §3).
+ *
+ * NOT localized, and deliberately so: "Kimi K3" and "GLM 5.2" are model names
+ * and "Moonshot"/"Zhipu" are vendor names — proper nouns, which the translation
+ * rules keep as they are in every language. A Russian reader looking for the key
+ * to set is looking for exactly this string. The surrounding sentences that
+ * MENTION a provider are translated and take the label as an argument
+ * (`d.adminAi.settings.switchDialogBody(next, current)`), so the label never has
+ * to carry grammar with it.
+ */
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   moonshot: "Kimi K3 · Moonshot",
   zhipu: "GLM 5.2 · Zhipu",

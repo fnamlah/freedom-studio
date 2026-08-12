@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 import {
@@ -41,37 +42,46 @@ const LIBRARY_BUCKET = "library";
 
 const uuid = z.string().uuid();
 
-const uploadMetaSchema = z.object({
-  folder_path: z.string().max(400, "That folder path is too long."),
-  name: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    z.string().trim().max(200, "That name is too long.").nullable(),
-  ),
-  category_id: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    uuid.nullable(),
-  ),
-  ai_exempt: z.preprocess(
-    (v) => v === true || v === "true" || v === "on" || v === "1",
-    z.boolean(),
-  ),
-});
+/**
+ * The schemas are FACTORIES rather than module constants: a `z.object(...)`
+ * evaluated at import time is built long before any request exists, so it cannot
+ * know the caller's language. Building it inside the action — once the auth
+ * context has handed us `profile.locale` — is what lets a validation message
+ * come back in Russian.
+ */
+const uploadMetaSchema = (d: Dictionary) =>
+  z.object({
+    folder_path: z.string().max(400, d.library.actions.folderTooLong),
+    name: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().max(200, d.library.actions.nameTooLong).nullable(),
+    ),
+    category_id: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      uuid.nullable(),
+    ),
+    ai_exempt: z.preprocess(
+      (v) => v === true || v === "true" || v === "on" || v === "1",
+      z.boolean(),
+    ),
+  });
 
-const categorizeSchema = z.object({
-  file_id: uuid,
-  decision: z.enum(["confirm", "override"]),
-  // Absent (confirm sends no category) and blank both normalize to null —
-  // `nullable()` alone rejected `undefined`, which broke every confirm.
-  category_id: z.preprocess(
-    (v) => (v === undefined || (typeof v === "string" && v.trim() === "") ? null : v),
-    uuid.nullable(),
-  ),
-});
+const categorizeSchema = () =>
+  z.object({
+    file_id: uuid,
+    decision: z.enum(["confirm", "override"]),
+    // Absent (confirm sends no category) and blank both normalize to null —
+    // `nullable()` alone rejected `undefined`, which broke every confirm.
+    category_id: z.preprocess(
+      (v) => (v === undefined || (typeof v === "string" && v.trim() === "") ? null : v),
+      uuid.nullable(),
+    ),
+  });
 
 /* ------------------------------------------------------------------ helpers --- */
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Please check the form and try again.";
+function firstIssue(error: z.ZodError, d: Dictionary): string {
+  return error.issues[0]?.message ?? d.library.actions.checkForm;
 }
 
 /** Reduces a filename to a safe single path segment; preserves a readable name. */
@@ -87,17 +97,17 @@ function sanitizeFilename(name: string): string {
   return cleaned.length > 0 ? cleaned : "file";
 }
 
-function describeDbError(code: string | undefined): string {
+function describeDbError(code: string | undefined, d: Dictionary): string {
   if (code === "23503") {
-    return "That category no longer exists. Refresh and try again.";
+    return d.library.actions.categoryGone;
   }
   if (code === "23505") {
-    return "That file already exists. Refresh and try again.";
+    return d.library.actions.fileExists;
   }
   if (code === "23514") {
-    return "That doesn't satisfy a database rule. Check the folder and try again.";
+    return d.library.actions.dbRule;
   }
-  return "Could not save the file. Please try again.";
+  return d.library.actions.saveFailed;
 }
 
 /* ------------------------------------------------------------------ upload --- */
@@ -116,26 +126,27 @@ function describeDbError(code: string | undefined): string {
  * limitation of docs/12 §6, surfaced to the uploader by the exemption notice.
  */
 export async function uploadLibraryFile(formData: FormData): Promise<ActionResult> {
-  const { supabase, user } = await requireRole("super_admin", "manager");
+  const { supabase, user, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = uploadMetaSchema.safeParse({
+  const parsed = uploadMetaSchema(d).safeParse({
     folder_path: formData.get("folder_path"),
     name: formData.get("name"),
     category_id: formData.get("category_id"),
     ai_exempt: formData.get("ai_exempt"),
   });
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const meta = parsed.data;
   const folderPath = normalizeFolderPath(meta.folder_path);
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
-    return { ok: false, error: "Choose a file to upload." };
+    return { ok: false, error: d.library.actions.chooseFile };
   }
   if (file.size > MAX_UPLOAD_BYTES) {
-    return { ok: false, error: `That file is too large. The limit is ${MAX_UPLOAD_MB} MB.` };
+    return { ok: false, error: d.library.actions.tooLarge(MAX_UPLOAD_MB) };
   }
 
   const mime = file.type || "application/octet-stream";
@@ -167,7 +178,7 @@ export async function uploadLibraryFile(formData: FormData): Promise<ActionResul
       .upload(storagePath, bytes, { contentType: mime, upsert: false });
 
     if (uploadError) {
-      return { ok: false, error: "Could not store the file. Please try again." };
+      return { ok: false, error: d.library.actions.storeFailed };
     }
 
     const displayName = meta.name ?? file.name;
@@ -193,7 +204,7 @@ export async function uploadLibraryFile(formData: FormData): Promise<ActionResul
     if (insertError || !created) {
       // Roll back the orphaned object — metadata is the system of record.
       await supabase.storage.from(LIBRARY_BUCKET).remove([storagePath]);
-      return { ok: false, error: describeDbError(insertError?.code) };
+      return { ok: false, error: describeDbError(insertError?.code, d) };
     }
 
     // docs/12 §3: record the exemption status AT UPLOAD, provably after the fact.
@@ -215,16 +226,16 @@ export async function uploadLibraryFile(formData: FormData): Promise<ActionResul
     return {
       ok: true,
       message: meta.ai_exempt
-        ? "File uploaded. It is exempt and will never be sent to the AI provider."
+        ? d.library.actions.uploadedExempt
         : aiStatus === "skipped"
-          ? "File uploaded and filed. It will not be classified by the AI."
-          : "File uploaded. It is pending classification.",
+          ? d.library.actions.uploadedFiled
+          : d.library.actions.uploadedPending,
     };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to upload Library files." };
+      return { ok: false, error: d.library.actions.forbiddenUpload };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -242,11 +253,12 @@ export async function categorizeLibraryFile(input: {
   decision: "confirm" | "override";
   category_id?: string | null;
 }): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = categorizeSchema.safeParse(input);
+  const parsed = categorizeSchema().safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const { file_id, decision, category_id } = parsed.data;
 
@@ -258,7 +270,7 @@ export async function categorizeLibraryFile(input: {
       .maybeSingle();
 
     if (loadError || !file) {
-      return { ok: false, error: "That file no longer exists." };
+      return { ok: false, error: d.library.actions.fileGone };
     }
 
     let newCategoryId: string;
@@ -266,13 +278,13 @@ export async function categorizeLibraryFile(input: {
 
     if (decision === "confirm") {
       if (!file.ai_suggested_category_id) {
-        return { ok: false, error: "There is no AI suggestion to confirm for this file." };
+        return { ok: false, error: d.library.actions.noSuggestion };
       }
       newCategoryId = file.ai_suggested_category_id;
       newStatus = "confirmed";
     } else {
       if (!category_id) {
-        return { ok: false, error: "Choose a category to file this file under." };
+        return { ok: false, error: d.library.actions.chooseCategory };
       }
       const { data: category } = await supabase
         .from("doc_categories")
@@ -280,7 +292,7 @@ export async function categorizeLibraryFile(input: {
         .eq("id", category_id)
         .maybeSingle();
       if (!category) {
-        return { ok: false, error: "That category no longer exists." };
+        return { ok: false, error: d.library.actions.categoryGoneShort };
       }
       newCategoryId = category_id;
       newStatus = "overridden";
@@ -294,7 +306,7 @@ export async function categorizeLibraryFile(input: {
       .maybeSingle();
 
     if (updateError || !updated) {
-      return { ok: false, error: "Could not file the document. Please try again." };
+      return { ok: false, error: d.library.actions.fileFailed };
     }
 
     await writeAudit({
@@ -312,13 +324,16 @@ export async function categorizeLibraryFile(input: {
     revalidatePath("/library");
     return {
       ok: true,
-      message: decision === "confirm" ? "Suggestion confirmed and filed." : "Filed under the chosen category.",
+      message:
+        decision === "confirm"
+          ? d.library.actions.confirmed
+          : d.library.actions.overridden,
     };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to file Library files." };
+      return { ok: false, error: d.library.actions.forbiddenFile };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -334,10 +349,11 @@ export type DownloadResult =
  * browser — downloads go through this action by file id.
  */
 export async function getLibraryDownloadUrl(fileId: string): Promise<DownloadResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   if (!uuid.safeParse(fileId).success) {
-    return { ok: false, error: "Invalid file." };
+    return { ok: false, error: d.library.actions.invalidFile };
   }
 
   try {
@@ -348,7 +364,7 @@ export async function getLibraryDownloadUrl(fileId: string): Promise<DownloadRes
       .maybeSingle();
 
     if (error || !file) {
-      return { ok: false, error: "That file no longer exists." };
+      return { ok: false, error: d.library.actions.fileGone };
     }
 
     const { data: signed, error: signError } = await supabase.storage
@@ -356,7 +372,7 @@ export async function getLibraryDownloadUrl(fileId: string): Promise<DownloadRes
       .createSignedUrl(file.storage_path, 60, { download: file.name });
 
     if (signError || !signed?.signedUrl) {
-      return { ok: false, error: "Could not prepare the download. Please try again." };
+      return { ok: false, error: d.library.actions.downloadFailed };
     }
 
     await writeAudit({
@@ -369,9 +385,9 @@ export async function getLibraryDownloadUrl(fileId: string): Promise<DownloadRes
     return { ok: true, url: signed.signedUrl, fileName: file.name };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to download Library files." };
+      return { ok: false, error: d.library.actions.forbiddenDownload };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -384,10 +400,11 @@ export async function getLibraryDownloadUrl(fileId: string): Promise<DownloadRes
  * Audited `library.delete`.
  */
 export async function deleteLibraryFile(fileId: string): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   if (!uuid.safeParse(fileId).success) {
-    return { ok: false, error: "Invalid file." };
+    return { ok: false, error: d.library.actions.invalidFile };
   }
 
   try {
@@ -398,7 +415,7 @@ export async function deleteLibraryFile(fileId: string): Promise<ActionResult> {
       .maybeSingle();
 
     if (loadError || !file) {
-      return { ok: false, error: "That file no longer exists." };
+      return { ok: false, error: d.library.actions.fileGone };
     }
 
     const { error: deleteError } = await supabase
@@ -407,7 +424,7 @@ export async function deleteLibraryFile(fileId: string): Promise<ActionResult> {
       .eq("id", fileId);
 
     if (deleteError) {
-      return { ok: false, error: "Could not delete the file. Please try again." };
+      return { ok: false, error: d.library.actions.deleteFailed };
     }
 
     await supabase.storage.from(LIBRARY_BUCKET).remove([file.storage_path]);
@@ -420,11 +437,11 @@ export async function deleteLibraryFile(fileId: string): Promise<ActionResult> {
     });
 
     revalidatePath("/library");
-    return { ok: true, message: "File deleted." };
+    return { ok: true, message: d.library.actions.deleted };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to delete Library files." };
+      return { ok: false, error: d.library.actions.forbiddenDelete };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }

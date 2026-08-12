@@ -8,9 +8,10 @@ import { Dialog } from "@/components/ui/dialog";
 import { Field, Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { useDict } from "@/lib/i18n/client";
 
 import { setOperatorStatus } from "./actions";
-import { OPERATOR_STATUS_OPTIONS, type OperatorStatus } from "./status";
+import { operatorStatusOptions, type OperatorStatus } from "./status";
 
 /**
  * Lifecycle-status control for a single operator, rendered in the detail header.
@@ -29,6 +30,7 @@ export function OperatorStatusControl({
   const [open, setOpen] = useState(false);
   const [next, setNext] = useState<OperatorStatus>(status);
   const [isRunning, startTransition] = useTransition();
+  const d = useDict();
 
   function openDialog() {
     setNext(status);
@@ -44,11 +46,11 @@ export function OperatorStatusControl({
     startTransition(async () => {
       const result = await setOperatorStatus({ id: operatorId, status: next });
       if (result.ok) {
-        success("Status updated", result.message);
+        success(d.studio.operators.toastStatusChanged, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not change status", result.error);
+        error(d.studio.operators.toastStatusFailed, result.error);
       }
     });
   }
@@ -56,34 +58,34 @@ export function OperatorStatusControl({
   return (
     <>
       <Button variant="outline" size="sm" onClick={openDialog}>
-        Change status
+        {d.studio.operators.changeStatus}
       </Button>
 
       <Dialog
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title="Change status"
-        description="Lifecycle changes are recorded in the audit log."
+        title={d.studio.operators.statusDialogTitle}
+        description={d.studio.operators.statusDialogDescription}
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button onClick={save} loading={isRunning} disabled={next === status}>
-              Save
+              {d.common.save}
             </Button>
           </>
         }
       >
-        <Field help="Terminated operators keep their assignment history — it can never be deleted.">
+        <Field help={d.studio.operators.helpStatusDialog}>
           <Label htmlFor="operator-status-select" required>
-            Status
+            {d.studio.operators.fieldStatus}
           </Label>
           <Select
             id="operator-status-select"
-            options={OPERATOR_STATUS_OPTIONS}
+            options={operatorStatusOptions(d)}
             value={next}
             onChange={(e) => setNext(e.target.value as OperatorStatus)}
           />

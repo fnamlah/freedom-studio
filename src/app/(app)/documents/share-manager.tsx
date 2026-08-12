@@ -12,7 +12,9 @@ import { Field, Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { date, dateTime, truncate } from "@/lib/format";
+import { EM_DASH, truncate } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import {
   createShare,
@@ -51,6 +53,9 @@ export function ShareManager({
 }) {
   const router = useRouter();
   const { success, error } = useToast();
+  const d = useDict();
+  const fm = fmt(useLocale());
+  const s = d.documents.shares;
 
   const [open, setOpen] = useState(false);
   const [shares, setShares] = useState<ShareListItem[] | null>(null);
@@ -88,7 +93,7 @@ export function ShareManager({
       setShares(res.shares);
     } else {
       setShares([]);
-      error("Could not load share links", res.error);
+      error(s.loadFailedTitle, res.error);
     }
   }
 
@@ -106,11 +111,11 @@ export function ShareManager({
       setCreatedUrl(res.url);
       setCopied(false);
       setCreateForm(EMPTY_CREATE);
-      success("Share link created", res.message);
+      success(s.createdTitle, res.message);
       void refreshShares();
       router.refresh();
     } else {
-      error("Could not create share link", res.error);
+      error(s.createFailedTitle, res.error);
     }
   }
 
@@ -119,11 +124,11 @@ export function ShareManager({
     const res = await revokeShare({ id });
     setRevokingId(null);
     if (res.ok) {
-      success("Share link revoked", res.message);
+      success(s.revokedTitle, res.message);
       void refreshShares();
       router.refresh();
     } else {
-      error("Could not revoke share link", res.error);
+      error(s.revokeFailedTitle, res.error);
     }
   }
 
@@ -142,7 +147,7 @@ export function ShareManager({
       setAuditViews(res.views);
     } else {
       setAuditViews([]);
-      error("Could not load view audit", res.error);
+      error(s.loadAuditFailedTitle, res.error);
     }
   }
 
@@ -153,33 +158,30 @@ export function ShareManager({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      error("Copy failed", "Select the link text and copy it manually.");
+      error(s.copyFailedTitle, s.copyFailedBody);
     }
   }
 
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        Share links
+        {s.cta}
       </Button>
 
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title="Share links"
-        description={`Single-document, time-boxed, revocable, fully-audited access to “${truncate(
-          documentTitle,
-          60,
-        )}”. Anyone with the link can view the document until it expires, hits its view limit, or is revoked.`}
+        title={s.title}
+        description={s.description(truncate(documentTitle, 60))}
         size="lg"
       >
         <div className="flex flex-col gap-6">
           {/* --------------------------------------------------------- create --- */}
           <form onSubmit={create} className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field help="Required. Link stops working at end of day.">
+              <Field help={s.expiresHelp}>
                 <Label htmlFor="share-expires" required>
-                  Expires
+                  {s.expiresLabel}
                 </Label>
                 <Input
                   id="share-expires"
@@ -193,15 +195,15 @@ export function ShareManager({
                 />
               </Field>
 
-              <Field help="Optional. Blank = unlimited views.">
-                <Label htmlFor="share-max-views">Max views</Label>
+              <Field help={s.maxViewsHelp}>
+                <Label htmlFor="share-max-views">{s.maxViewsLabel}</Label>
                 <Input
                   id="share-max-views"
                   type="number"
                   min={1}
                   step={1}
                   inputMode="numeric"
-                  placeholder="Unlimited"
+                  placeholder={s.maxViewsPlaceholder}
                   value={createForm.max_views}
                   onChange={(e) =>
                     setCreateForm((p) => ({ ...p, max_views: e.target.value }))
@@ -209,12 +211,12 @@ export function ShareManager({
                 />
               </Field>
 
-              <Field help="Optional. Who is this link for?">
-                <Label htmlFor="share-recipient">Recipient</Label>
+              <Field help={s.recipientHelp}>
+                <Label htmlFor="share-recipient">{s.recipientLabel}</Label>
                 <Input
                   id="share-recipient"
                   maxLength={120}
-                  placeholder="e.g. Accountant"
+                  placeholder={s.recipientPlaceholder}
                   value={createForm.recipient_label}
                   onChange={(e) =>
                     setCreateForm((p) => ({ ...p, recipient_label: e.target.value }))
@@ -224,7 +226,7 @@ export function ShareManager({
             </div>
             <div className="flex justify-end">
               <Button type="submit" size="sm" loading={creating}>
-                Create link
+                {s.createCta}
               </Button>
             </div>
           </form>
@@ -232,9 +234,7 @@ export function ShareManager({
           {/* -------------------------------------------- one-time raw token --- */}
           {createdUrl ? (
             <div className="rounded-lg border border-warning/30 bg-warning/10 p-3">
-              <p className="text-xs font-medium text-warning">
-                Copy this link now — it is shown only once and cannot be recovered.
-              </p>
+              <p className="text-xs font-medium text-warning">{s.onceWarning}</p>
               <div className="mt-2 flex items-center gap-2">
                 <Input
                   readOnly
@@ -243,7 +243,7 @@ export function ShareManager({
                   className="font-mono text-xs"
                 />
                 <Button size="sm" variant="secondary" onClick={copyUrl}>
-                  {copied ? "Copied" : "Copy"}
+                  {copied ? s.copied : s.copy}
                 </Button>
               </div>
             </div>
@@ -252,26 +252,22 @@ export function ShareManager({
           {/* ------------------------------------------------------- list --- */}
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-medium text-foreground">Existing links</h3>
+              <h3 className="text-sm font-medium text-foreground">{s.existing}</h3>
               {loadingShares ? <Spinner size="sm" /> : null}
             </div>
 
             {shares && shares.length === 0 && !loadingShares ? (
-              <EmptyState
-                bare
-                title="No share links yet"
-                description="Create one above to give an outside party time-boxed access to this document."
-              />
+              <EmptyState bare title={s.emptyTitle} description={s.emptyDescription} />
             ) : shares && shares.length > 0 ? (
               <Table containerClassName="rounded-lg border border-border">
                 <THead>
                   <TR>
-                    <TH>Link</TH>
-                    <TH>Recipient</TH>
-                    <TH>Expires</TH>
-                    <TH align="right">Views</TH>
-                    <TH>Status</TH>
-                    <TH align="right">Actions</TH>
+                    <TH>{s.colLink}</TH>
+                    <TH>{s.colRecipient}</TH>
+                    <TH>{s.colExpires}</TH>
+                    <TH align="right">{s.colViews}</TH>
+                    <TH>{d.common.status}</TH>
+                    <TH align="right">{d.common.actions}</TH>
                   </TR>
                 </THead>
                 <TBody>
@@ -282,15 +278,17 @@ export function ShareManager({
                     return (
                       <TR key={share.id}>
                         <TD className="font-mono text-xs text-muted">{share.token_prefix}…</TD>
-                        <TD className="text-muted">{share.recipient_label ?? "—"}</TD>
-                        <TD className="text-muted">{date(share.expires_at)}</TD>
+                        <TD className="text-muted">{share.recipient_label ?? EM_DASH}</TD>
+                        <TD className="text-muted">{fm.date(share.expires_at)}</TD>
                         <TD numeric>
-                          {share.view_count}
-                          {share.max_views !== null ? ` / ${share.max_views}` : ""}
+                          {s.views(
+                            fm.number(share.view_count),
+                            share.max_views !== null ? fm.number(share.max_views) : null,
+                          )}
                         </TD>
                         <TD>
                           <Badge variant={meta.variant} dot>
-                            {meta.label}
+                            {d.documents.shareStatus[status]}
                           </Badge>
                         </TD>
                         <TD align="right">
@@ -300,7 +298,7 @@ export function ShareManager({
                               size="sm"
                               onClick={() => toggleAudit(share.id)}
                             >
-                              {auditOpen ? "Hide audit" : "Audit"}
+                              {auditOpen ? s.hideAudit : s.audit}
                             </Button>
                             {status === "active" ? (
                               <Button
@@ -309,7 +307,7 @@ export function ShareManager({
                                 loading={revokingId === share.id}
                                 onClick={() => revoke(share.id)}
                               >
-                                Revoke
+                                {s.revoke}
                               </Button>
                             ) : null}
                           </div>
@@ -325,7 +323,7 @@ export function ShareManager({
           {/* ------------------------------------------------------ audit --- */}
           {auditShareId ? (
             <div className="rounded-lg border border-border bg-surface-2/40 p-3">
-              <h4 className="mb-2 text-xs font-medium text-foreground">View audit</h4>
+              <h4 className="mb-2 text-xs font-medium text-foreground">{s.auditHeading}</h4>
               {loadingAudit ? (
                 <div className="flex justify-center py-3">
                   <Spinner size="sm" />
@@ -334,29 +332,29 @@ export function ShareManager({
                 <Table>
                   <THead>
                     <TR>
-                      <TH>Viewed</TH>
-                      <TH>User agent</TH>
-                      <TH>IP (hashed)</TH>
+                      <TH>{s.colViewed}</TH>
+                      <TH>{s.colUserAgent}</TH>
+                      <TH>{s.colIpHash}</TH>
                     </TR>
                   </THead>
                   <TBody>
                     {auditViews.map((view) => (
                       <TR key={view.id}>
                         <TD className="whitespace-nowrap text-muted">
-                          {dateTime(view.viewed_at)}
+                          {fm.dateTime(view.viewed_at)}
                         </TD>
-                        <TD className="text-muted">{truncate(view.user_agent ?? "—", 60)}</TD>
+                        <TD className="text-muted">
+                          {truncate(view.user_agent ?? EM_DASH, 60)}
+                        </TD>
                         <TD className="font-mono text-xs text-muted">
-                          {view.ip_hash ? `${view.ip_hash.slice(0, 12)}…` : "—"}
+                          {view.ip_hash ? `${view.ip_hash.slice(0, 12)}…` : EM_DASH}
                         </TD>
                       </TR>
                     ))}
                   </TBody>
                 </Table>
               ) : (
-                <p className="py-2 text-xs text-muted">
-                  No views recorded for this link yet.
-                </p>
+                <p className="py-2 text-xs text-muted">{s.noViews}</p>
               )}
             </div>
           ) : null}

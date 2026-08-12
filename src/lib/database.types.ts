@@ -374,8 +374,10 @@ export type Database = {
           ai_enabled: boolean
           created_at: string
           description: string | null
+          description_ru: string | null
           id: string
           name: string
+          name_ru: string | null
           slug: string
           sort: number
         }
@@ -383,8 +385,10 @@ export type Database = {
           ai_enabled?: boolean
           created_at?: string
           description?: string | null
+          description_ru?: string | null
           id?: string
           name: string
+          name_ru?: string | null
           slug: string
           sort?: number
         }
@@ -392,8 +396,10 @@ export type Database = {
           ai_enabled?: boolean
           created_at?: string
           description?: string | null
+          description_ru?: string | null
           id?: string
           name?: string
+          name_ru?: string | null
           slug?: string
           sort?: number
         }
@@ -1926,6 +1932,7 @@ export type Database = {
           email: string
           full_name: string
           id: string
+          locale: string
           phone: string | null
           role: Database["public"]["Enums"]["user_role"]
           status: Database["public"]["Enums"]["user_status"]
@@ -1937,6 +1944,7 @@ export type Database = {
           email: string
           full_name: string
           id: string
+          locale?: string
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           status?: Database["public"]["Enums"]["user_status"]
@@ -1948,6 +1956,7 @@ export type Database = {
           email?: string
           full_name?: string
           id?: string
+          locale?: string
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           status?: Database["public"]["Enums"]["user_status"]

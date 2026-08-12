@@ -9,7 +9,8 @@ import { Field, Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { ROLE_DESCRIPTIONS, ROLE_LABELS, type Role } from "@/lib/auth/roles";
+import { roleDescription, roleLabel, type Role } from "@/lib/auth/roles";
+import { useDict, useLocale } from "@/lib/i18n/client";
 
 import { inviteUser } from "./actions";
 
@@ -19,11 +20,6 @@ export type OperatorOption = { id: string; display_name: string };
 /** Super Admin is singular and DB-enforced — never an invitable role (docs/03 §2.2). */
 const INVITABLE_ROLES: Role[] = ["manager", "model", "finance", "operator"];
 
-const ROLE_OPTIONS: SelectOption[] = INVITABLE_ROLES.map((role) => ({
-  value: role,
-  label: ROLE_LABELS[role],
-}));
-
 export function InviteForm({
   models,
   operators,
@@ -32,6 +28,14 @@ export function InviteForm({
   operators: OperatorOption[];
 }) {
   const router = useRouter();
+  const locale = useLocale();
+  const dict = useDict();
+  const d = dict.adminAi.invitations;
+  // Built per render rather than at module scope: the labels are locale-bound.
+  const roleOptions: SelectOption[] = INVITABLE_ROLES.map((role) => ({
+    value: role,
+    label: roleLabel(locale, role),
+  }));
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
@@ -57,7 +61,7 @@ export function InviteForm({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!role) {
-      error("Role required", "Choose the role this person will have.");
+      error(d.roleRequiredTitle, d.roleRequiredBody);
       return;
     }
 
@@ -70,12 +74,12 @@ export function InviteForm({
       });
 
       if (result.ok) {
-        success("Invitation sent", result.message);
+        success(d.toastSent, result.message);
         setOpen(false);
         reset();
         router.refresh();
       } else {
-        error("Could not invite", result.error);
+        error(d.toastFailed, result.error);
       }
     });
   }
@@ -88,30 +92,30 @@ export function InviteForm({
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>Invite user</Button>
+      <Button onClick={() => setOpen(true)}>{d.openCta}</Button>
 
       <Dialog
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title="Invite a user"
-        description="Sends a one-time invite email. The account is created only after they set a password and enroll TOTP."
+        title={d.dialogTitle}
+        description={d.dialogDescription}
         size="md"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {dict.common.cancel}
             </Button>
             <Button type="submit" form="invite-form" loading={isRunning}>
-              Send invite
+              {d.submitCta}
             </Button>
           </>
         }
       >
         <form id="invite-form" onSubmit={submit} className="flex flex-col gap-4">
-          <Field help="The invite link is sent here. One live invite per address.">
+          <Field help={d.emailHelp}>
             <Label htmlFor="invite-email" required>
-              Email
+              {d.emailLabel}
             </Label>
             <Input
               id="invite-email"
@@ -121,20 +125,20 @@ export function InviteForm({
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="person@example.com"
+              placeholder={d.emailPlaceholder}
             />
           </Field>
 
-          <Field help={role ? ROLE_DESCRIPTIONS[role] : "Determines what the user can access."}>
+          <Field help={role ? roleDescription(locale, role) : d.roleHelp}>
             <Label htmlFor="invite-role" required>
-              Role
+              {d.roleLabel}
             </Label>
             <Select
               id="invite-role"
               name="role"
               required
-              placeholder="Select a role…"
-              options={ROLE_OPTIONS}
+              placeholder={d.rolePlaceholder}
+              options={roleOptions}
               value={role}
               onChange={(e) => {
                 setRole(e.target.value as Role | "");
@@ -145,12 +149,12 @@ export function InviteForm({
           </Field>
 
           {role === "model" ? (
-            <Field help="Links this login to an existing model record on signup.">
-              <Label htmlFor="invite-model">Pre-link model</Label>
+            <Field help={d.preLinkModelHelp}>
+              <Label htmlFor="invite-model">{d.preLinkModelLabel}</Label>
               <Select
                 id="invite-model"
                 name="modelId"
-                placeholder="No pre-link"
+                placeholder={d.preLinkNone}
                 options={modelOptions}
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
@@ -159,12 +163,12 @@ export function InviteForm({
           ) : null}
 
           {role === "operator" ? (
-            <Field help="Links this login to an existing operator record on signup.">
-              <Label htmlFor="invite-operator">Pre-link operator</Label>
+            <Field help={d.preLinkOperatorHelp}>
+              <Label htmlFor="invite-operator">{d.preLinkOperatorLabel}</Label>
               <Select
                 id="invite-operator"
                 name="operatorId"
-                placeholder="No pre-link"
+                placeholder={d.preLinkNone}
                 options={operatorOptions}
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}

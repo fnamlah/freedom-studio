@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 
 import { ForbiddenView } from "@/components/ui/forbidden";
-import { isRole, ROLE_LABELS } from "@/lib/auth/roles";
+import { isRole, roleLabel } from "@/lib/auth/roles";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Not available" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).authFlow.forbiddenMetaTitle };
+}
 
 /**
  * Destination of `requireRole()` when the caller's role is not permitted.
@@ -17,12 +20,13 @@ export default async function ForbiddenPage({
   searchParams: Promise<{ required?: string }>;
 }) {
   const { required } = await searchParams;
+  const locale = await getLocale();
 
   const labels = (required ?? "")
     .split(",")
     .map((value) => value.trim())
     .filter(isRole)
-    .map((role) => ROLE_LABELS[role]);
+    .map((role) => roleLabel(locale, role));
 
   return <ForbiddenView requiredRoles={labels.length > 0 ? labels : undefined} />;
 }

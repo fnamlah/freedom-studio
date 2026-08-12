@@ -8,6 +8,7 @@ import { z } from "zod";
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { appBaseUrl, optionalEnv } from "@/lib/env";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 import {
@@ -60,47 +61,62 @@ function isValidYmd(value: string): boolean {
   );
 }
 
-const dateOnly = z.string().refine(isValidYmd, "Enter a valid date (YYYY-MM-DD).");
-const optionalDate = z.preprocess(
-  (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-  dateOnly.nullable(),
-);
+/**
+ * The schemas are FACTORIES rather than module constants: a `z.object(...)`
+ * evaluated at import time is built long before any request exists, so it cannot
+ * know the caller's language. Each action builds its schema once it holds the
+ * auth context — that is what lets a validation message come back in Russian.
+ */
+const dateOnly = (d: Dictionary) =>
+  z.string().refine(isValidYmd, d.documents.actions.invalidDate);
 
-const uploadMetaSchema = z.object({
-  model_id: z.string().uuid("Choose a model."),
-  doc_type: z.enum(DOCUMENT_TYPES),
-  title: z.string().trim().min(1, "Give the document a title.").max(200, "Title is too long."),
-  issued_date: optionalDate,
-  expires_at: optionalDate,
-  notes: z.preprocess(
+const optionalDate = (d: Dictionary) =>
+  z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    z.string().max(2000, "Notes are too long.").nullable(),
-  ),
-});
+    dateOnly(d).nullable(),
+  );
 
-const createShareSchema = z.object({
-  document_id: z.string().uuid("Choose a document."),
-  // A calendar day; the link expires at the end of that day (UTC).
-  expires_date: dateOnly,
-  max_views: z.preprocess(
-    (v) => (v === "" || v === null || v === undefined ? null : v),
-    z.coerce
-      .number()
-      .int("Whole number of views.")
-      .positive("Must be at least 1.")
-      .max(100_000, "That view cap is too large.")
-      .nullable(),
-  ),
-  recipient_label: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    z.string().max(120, "Label is too long.").nullable(),
-  ),
-});
+const uploadMetaSchema = (d: Dictionary) =>
+  z.object({
+    model_id: z.string().uuid(d.documents.actions.chooseModel),
+    doc_type: z.enum(DOCUMENT_TYPES),
+    title: z
+      .string()
+      .trim()
+      .min(1, d.documents.actions.titleRequired)
+      .max(200, d.documents.actions.titleTooLong),
+    issued_date: optionalDate(d),
+    expires_at: optionalDate(d),
+    notes: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().max(2000, d.documents.actions.notesTooLong).nullable(),
+    ),
+  });
+
+const createShareSchema = (d: Dictionary) =>
+  z.object({
+    document_id: z.string().uuid(d.documents.actions.chooseDocument),
+    // A calendar day; the link expires at the end of that day (UTC).
+    expires_date: dateOnly(d),
+    max_views: z.preprocess(
+      (v) => (v === "" || v === null || v === undefined ? null : v),
+      z.coerce
+        .number()
+        .int(d.documents.actions.viewsInteger)
+        .positive(d.documents.actions.viewsPositive)
+        .max(100_000, d.documents.actions.viewsTooLarge)
+        .nullable(),
+    ),
+    recipient_label: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().max(120, d.documents.actions.labelTooLong).nullable(),
+    ),
+  });
 
 /* ------------------------------------------------------------------ helpers --- */
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Please check the form and try again.";
+function firstIssue(error: z.ZodError, d: Dictionary): string {
+  return error.issues[0]?.message ?? d.documents.actions.checkForm;
 }
 
 /**
@@ -133,17 +149,17 @@ function hashToken(token: string): string {
   return createHash("sha256").update(`${SHARE_TOKEN_PEPPER}${token}`).digest("hex");
 }
 
-function describeDbError(code: string | undefined): string {
+function describeDbError(code: string | undefined, d: Dictionary): string {
   if (code === "23503") {
-    return "That model no longer exists. Refresh and try again.";
+    return d.documents.actions.modelGone;
   }
   if (code === "23505") {
-    return "That document already exists. Refresh and try again.";
+    return d.documents.actions.documentExists;
   }
   if (code === "23514") {
-    return "That doesn't satisfy a database rule. Check the file and try again.";
+    return d.documents.actions.dbRule;
   }
-  return "Could not save the document. Please try again.";
+  return d.documents.actions.saveFailed;
 }
 
 /* ------------------------------------------------------------------ upload --- */
@@ -158,9 +174,10 @@ function describeDbError(code: string | undefined): string {
  * is the authority.
  */
 export async function uploadDocument(formData: FormData): Promise<ActionResult> {
-  const { supabase, user } = await requireRole("super_admin", "manager");
+  const { supabase, user, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = uploadMetaSchema.safeParse({
+  const parsed = uploadMetaSchema(d).safeParse({
     model_id: formData.get("model_id"),
     doc_type: formData.get("doc_type"),
     title: formData.get("title"),
@@ -169,23 +186,20 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
     notes: formData.get("notes"),
   });
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const meta = parsed.data;
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
-    return { ok: false, error: "Choose a file to upload." };
+    return { ok: false, error: d.documents.actions.chooseFile };
   }
   if (file.size > MAX_FILE_BYTES) {
-    return { ok: false, error: `That file is too large. The limit is ${MAX_FILE_MB} MB.` };
+    return { ok: false, error: d.documents.actions.tooLarge(MAX_FILE_MB) };
   }
   const mime = file.type || "application/octet-stream";
   if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(mime)) {
-    return {
-      ok: false,
-      error: "That file type isn't allowed. Upload a PDF, JPEG, PNG, WebP, HEIC or TIFF.",
-    };
+    return { ok: false, error: d.documents.actions.badType };
   }
 
   try {
@@ -202,7 +216,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
       .upload(key, bytes, { contentType: mime, upsert: false });
 
     if (uploadError) {
-      return { ok: false, error: "Could not store the file. Please try again." };
+      return { ok: false, error: d.documents.actions.storeFailed };
     }
 
     const { data: created, error: insertError } = await supabase
@@ -228,7 +242,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
     if (insertError || !created) {
       // Roll back the orphaned object — metadata is the system of record.
       await supabase.storage.from(DOCUMENTS_BUCKET).remove([key]);
-      return { ok: false, error: describeDbError(insertError?.code) };
+      return { ok: false, error: describeDbError(insertError?.code, d) };
     }
 
     await writeAudit({
@@ -247,12 +261,12 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
 
     revalidatePath("/documents");
     revalidatePath(`/models/${meta.model_id}`);
-    return { ok: true, message: "Document uploaded." };
+    return { ok: true, message: d.documents.actions.uploaded };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to upload documents." };
+      return { ok: false, error: d.documents.actions.forbiddenUpload };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -268,10 +282,11 @@ export type DownloadResult =
  * the browser must fetch the object before it expires.
  */
 export async function getDownloadUrl(documentId: string): Promise<DownloadResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   if (!z.string().uuid().safeParse(documentId).success) {
-    return { ok: false, error: "Invalid document." };
+    return { ok: false, error: d.documents.actions.invalidDocument };
   }
 
   try {
@@ -282,7 +297,7 @@ export async function getDownloadUrl(documentId: string): Promise<DownloadResult
       .maybeSingle();
 
     if (error || !document) {
-      return { ok: false, error: "That document no longer exists." };
+      return { ok: false, error: d.documents.actions.documentGone };
     }
 
     const { data: signed, error: signError } = await supabase.storage
@@ -292,7 +307,7 @@ export async function getDownloadUrl(documentId: string): Promise<DownloadResult
       });
 
     if (signError || !signed?.signedUrl) {
-      return { ok: false, error: "Could not prepare the download. Please try again." };
+      return { ok: false, error: d.documents.actions.downloadFailed };
     }
 
     await writeAudit({
@@ -305,9 +320,9 @@ export async function getDownloadUrl(documentId: string): Promise<DownloadResult
     return { ok: true, url: signed.signedUrl, fileName: document.file_name };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to download documents." };
+      return { ok: false, error: d.documents.actions.forbiddenDownload };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -330,18 +345,19 @@ export type CreateShareResult =
  * and an 8-char prefix are stored, so a database dump yields no usable links.
  */
 export async function createShare(input: CreateShareInput): Promise<CreateShareResult> {
-  const { supabase, user } = await requireRole("super_admin", "manager");
+  const { supabase, user, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = createShareSchema.safeParse(input);
+  const parsed = createShareSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
   // End-of-day (UTC) on the chosen calendar date; must be in the future.
   const expiresAt = `${data.expires_date}T23:59:59.999Z`;
   if (Date.parse(expiresAt) <= Date.now()) {
-    return { ok: false, error: "Pick an expiry date in the future." };
+    return { ok: false, error: d.documents.actions.expiryInPast };
   }
 
   try {
@@ -352,7 +368,7 @@ export async function createShare(input: CreateShareInput): Promise<CreateShareR
       .eq("id", data.document_id)
       .maybeSingle();
     if (docError || !document) {
-      return { ok: false, error: "That document no longer exists." };
+      return { ok: false, error: d.documents.actions.documentGone };
     }
 
     // 32 bytes CSPRNG → base64url (~43 chars, URL-safe, no padding). §5.1
@@ -375,7 +391,7 @@ export async function createShare(input: CreateShareInput): Promise<CreateShareR
       .single();
 
     if (error || !created) {
-      return { ok: false, error: "Could not create the share link. Please try again." };
+      return { ok: false, error: d.documents.actions.shareCreateFailed };
     }
 
     await writeAudit({
@@ -396,13 +412,13 @@ export async function createShare(input: CreateShareInput): Promise<CreateShareR
       ok: true,
       url,
       prefix: tokenPrefix,
-      message: "Copy this link now — it is shown only once.",
+      message: d.documents.actions.shareShownOnce,
     };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to create share links." };
+      return { ok: false, error: d.documents.actions.forbiddenShareCreate };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -414,10 +430,11 @@ export async function createShare(input: CreateShareInput): Promise<CreateShareR
  * dies with its TTL.
  */
 export async function revokeShare(input: { id: string }): Promise<ActionResult> {
-  const { supabase, user } = await requireRole("super_admin", "manager");
+  const { supabase, user, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   if (!z.string().uuid().safeParse(input.id).success) {
-    return { ok: false, error: "Invalid share link." };
+    return { ok: false, error: d.documents.actions.invalidShare };
   }
 
   try {
@@ -430,10 +447,10 @@ export async function revokeShare(input: { id: string }): Promise<ActionResult> 
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: "Could not revoke the share link. Please try again." };
+      return { ok: false, error: d.documents.actions.shareRevokeFailed };
     }
     if (!revoked) {
-      return { ok: false, error: "That link is already revoked or no longer exists." };
+      return { ok: false, error: d.documents.actions.shareAlreadyRevoked };
     }
 
     await writeAudit({
@@ -444,12 +461,12 @@ export async function revokeShare(input: { id: string }): Promise<ActionResult> 
     });
 
     revalidatePath("/documents");
-    return { ok: true, message: "Share link revoked. Access ends within one minute." };
+    return { ok: true, message: d.documents.actions.shareRevoked };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to revoke share links." };
+      return { ok: false, error: d.documents.actions.forbiddenShareRevoke };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -468,11 +485,12 @@ export async function setDocumentAnalysisOptIn(input: {
   document_id: string;
   opt_in: boolean;
 }): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
   const parsed = z
     .object({ document_id: z.string().uuid(), opt_in: z.boolean() })
     .safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Invalid request." };
+  if (!parsed.success) return { ok: false, error: d.documents.actions.invalidRequest };
 
   try {
     const patch = parsed.data.opt_in
@@ -493,7 +511,7 @@ export async function setDocumentAnalysisOptIn(input: {
       .select("id, model_id")
       .maybeSingle();
     if (error || !updated) {
-      return { ok: false, error: "Could not update this document. Please try again." };
+      return { ok: false, error: d.documents.actions.optInUpdateFailed };
     }
 
     await writeAudit({
@@ -510,14 +528,14 @@ export async function setDocumentAnalysisOptIn(input: {
     return {
       ok: true,
       message: parsed.data.opt_in
-        ? "AI analysis enabled for this document."
-        : "AI analysis disabled and prior analysis cleared.",
+        ? d.documents.actions.optInOn
+        : d.documents.actions.optInOff,
     };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to change this setting." };
+      return { ok: false, error: d.documents.actions.forbiddenOptIn };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -545,10 +563,11 @@ export type ListSharesResult =
  * (docs/04 §7.11). The token hash is never selected.
  */
 export async function listShares(documentId: string): Promise<ListSharesResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   if (!z.string().uuid().safeParse(documentId).success) {
-    return { ok: false, error: "Invalid document." };
+    return { ok: false, error: d.documents.actions.invalidDocument };
   }
 
   try {
@@ -561,14 +580,14 @@ export async function listShares(documentId: string): Promise<ListSharesResult> 
       .order("created_at", { ascending: false });
 
     if (error) {
-      return { ok: false, error: "Could not load share links. Please try again." };
+      return { ok: false, error: d.documents.actions.sharesLoadFailed };
     }
     return { ok: true, shares: (data ?? []) as ShareListItem[] };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to view share links." };
+      return { ok: false, error: d.documents.actions.forbiddenSharesList };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -591,10 +610,11 @@ export type ListShareViewsResult =
  * the raw address (docs/06 §5.6). RLS mirrors the share visibility above.
  */
 export async function listShareViews(shareId: string): Promise<ListShareViewsResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   if (!z.string().uuid().safeParse(shareId).success) {
-    return { ok: false, error: "Invalid share link." };
+    return { ok: false, error: d.documents.actions.invalidShare };
   }
 
   try {
@@ -606,13 +626,13 @@ export async function listShareViews(shareId: string): Promise<ListShareViewsRes
       .limit(200);
 
     if (error) {
-      return { ok: false, error: "Could not load the view audit. Please try again." };
+      return { ok: false, error: d.documents.actions.viewsLoadFailed };
     }
     return { ok: true, views: (data ?? []) as ShareViewItem[] };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to view the share audit." };
+      return { ok: false, error: d.documents.actions.forbiddenViewsList };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }

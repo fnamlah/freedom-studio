@@ -12,6 +12,8 @@ import { Field, Label } from "@/components/ui/label";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { EM_DASH } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
 
 import {
   createCategory,
@@ -21,7 +23,7 @@ import {
 } from "@/app/(app)/admin/categories/actions";
 
 import { CategoryBadge } from "./category-badge";
-import type { CategoryLite } from "./library-meta";
+import { categoryDescription, categoryName, type CategoryLite } from "./library-meta";
 
 type EditorState = {
   mode: "create" | "edit";
@@ -53,6 +55,9 @@ const NEW_EDITOR: EditorState = {
 export function CategoryManager({ categories }: { categories: CategoryLite[] }) {
   const router = useRouter();
   const { success, error } = useToast();
+  const d = useDict();
+  const locale = useLocale();
+  const c = d.library.categories;
 
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [deleting, setDeleting] = useState<CategoryLite | null>(null);
@@ -104,11 +109,11 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
             });
 
       if (result.ok) {
-        success(editor.mode === "create" ? "Category created" : "Category updated", result.message);
+        success(editor.mode === "create" ? c.createdTitle : c.updatedTitle, result.message);
         setEditor(null);
         router.refresh();
       } else {
-        error("Could not save category", result.error);
+        error(c.saveFailedTitle, result.error);
       }
     });
   }
@@ -122,10 +127,10 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
       });
       setTogglingId(null);
       if (result.ok) {
-        success("Category updated", result.message);
+        success(c.updatedTitle, result.message);
         router.refresh();
       } else {
-        error("Could not update category", result.error);
+        error(c.updateFailedTitle, result.error);
       }
     });
   }
@@ -135,11 +140,11 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
     startDelete(async () => {
       const result = await deleteCategory({ id: deleting.id });
       if (result.ok) {
-        success("Category deleted", result.message);
+        success(c.deletedTitle, result.message);
         setDeleting(null);
         router.refresh();
       } else {
-        error("Could not delete category", result.error);
+        error(c.deleteFailedTitle, result.error);
       }
     });
   }
@@ -151,7 +156,7 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
   return (
     <>
       <div className="mb-4 flex items-center justify-end">
-        <Button onClick={openCreate}>New category</Button>
+        <Button onClick={openCreate}>{c.newCategory}</Button>
       </div>
 
       <Card>
@@ -159,12 +164,12 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
           <Table>
             <THead>
               <TR>
-                <TH>Category</TH>
-                <TH>Slug</TH>
-                <TH>Description (prompt text)</TH>
-                <TH align="center">AI</TH>
-                <TH align="right">Sort</TH>
-                <TH align="right">Actions</TH>
+                <TH>{c.colCategory}</TH>
+                <TH>{c.colSlug}</TH>
+                <TH>{c.colDescription}</TH>
+                <TH align="center">{c.colAi}</TH>
+                <TH align="right">{c.colSort}</TH>
+                <TH align="right">{d.common.actions}</TH>
               </TR>
             </THead>
             <TBody>
@@ -178,7 +183,7 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
                   </TD>
                   <TD className="max-w-md">
                     <span className="line-clamp-2 text-xs text-muted">
-                      {category.description ?? "—"}
+                      {categoryDescription(category, locale) ?? EM_DASH}
                     </span>
                   </TD>
                   <TD align="center">
@@ -187,14 +192,10 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
                       onClick={() => toggle(category)}
                       disabled={saving && togglingId === category.id}
                       className="disabled:opacity-50"
-                      title={
-                        category.ai_enabled
-                          ? "The classifier may suggest this category. Click to disable."
-                          : "Human-only filing. Click to enable AI suggestions."
-                      }
+                      title={category.ai_enabled ? c.aiOnTitle : c.aiOffTitle}
                     >
                       <Badge variant={category.ai_enabled ? "success" : "muted"} dot>
-                        {category.ai_enabled ? "Enabled" : "Off"}
+                        {category.ai_enabled ? c.aiOn : c.aiOffShort}
                       </Badge>
                     </button>
                   </TD>
@@ -202,7 +203,7 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
                   <TD align="right">
                     <div className="flex items-center justify-end gap-1">
                       <Button variant="ghost" size="sm" onClick={() => openEdit(category)}>
-                        Edit
+                        {d.common.edit}
                       </Button>
                       <Button
                         variant="ghost"
@@ -210,7 +211,7 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
                         className="text-danger"
                         onClick={() => setDeleting(category)}
                       >
-                        Delete
+                        {d.common.delete}
                       </Button>
                     </div>
                   </TD>
@@ -225,16 +226,16 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
         open={editor !== null}
         onClose={closeEditor}
         dismissible={!saving}
-        title={editor?.mode === "create" ? "New category" : "Edit category"}
-        description="The description is handed verbatim to the classifier as the category's definition — editing it changes how files are suggested."
+        title={editor?.mode === "create" ? c.newCategory : c.editTitle}
+        description={c.editorDescription}
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={closeEditor} disabled={saving}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="category-form" loading={saving}>
-              {editor?.mode === "create" ? "Create category" : "Save changes"}
+              {editor?.mode === "create" ? c.createCta : c.saveCta}
             </Button>
           </>
         }
@@ -243,14 +244,10 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
           <form id="category-form" onSubmit={save} className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field
-                help={
-                  editor.mode === "create"
-                    ? "Stable machine key, e.g. incoming_money. Cannot be changed later."
-                    : "The slug is a stable machine key and cannot be renamed."
-                }
+                help={editor.mode === "create" ? c.slugHelpCreate : c.slugHelpEdit}
               >
                 <Label htmlFor="cat-slug" required>
-                  Slug
+                  {c.slugLabel}
                 </Label>
                 <Input
                   id="cat-slug"
@@ -259,12 +256,12 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
                   value={editor.slug}
                   maxLength={60}
                   onChange={(e) => set("slug", e.target.value)}
-                  placeholder="incoming_money"
+                  placeholder={c.slugPlaceholder}
                 />
               </Field>
 
-              <Field help="UI ordering. Lower sorts first.">
-                <Label htmlFor="cat-sort">Sort</Label>
+              <Field help={c.sortHelp}>
+                <Label htmlFor="cat-sort">{c.sortLabel}</Label>
                 <Input
                   id="cat-sort"
                   type="number"
@@ -278,7 +275,7 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
 
             <Field>
               <Label htmlFor="cat-name" required>
-                Name
+                {c.nameLabel}
               </Label>
               <Input
                 id="cat-name"
@@ -286,19 +283,19 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
                 maxLength={80}
                 value={editor.name}
                 onChange={(e) => set("name", e.target.value)}
-                placeholder="Incoming money"
+                placeholder={c.namePlaceholder}
               />
             </Field>
 
-            <Field help="Prompt text: the definition the classifier uses to decide whether a file belongs here.">
-              <Label htmlFor="cat-description">Description</Label>
+            <Field help={c.descriptionHelp}>
+              <Label htmlFor="cat-description">{c.descriptionLabel}</Label>
               <Textarea
                 id="cat-description"
                 rows={3}
                 maxLength={1000}
                 value={editor.description}
                 onChange={(e) => set("description", e.target.value)}
-                placeholder="Platform payout statements, remittance advices, settlement reports — money received."
+                placeholder={c.descriptionPlaceholder}
               />
             </Field>
 
@@ -312,12 +309,9 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
                 />
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-foreground">
-                    Enabled for AI classification
+                    {c.aiEnabledToggle}
                   </span>
-                  <span className="mt-1 block text-xs text-muted">
-                    When off, the classifier is never told this category exists — filing under
-                    it is human-only (docs/12 §6). This is the control used for identity documents.
-                  </span>
+                  <span className="mt-1 block text-xs text-muted">{c.aiEnabledHelp}</span>
                 </span>
               </label>
             </div>
@@ -329,24 +323,26 @@ export function CategoryManager({ categories }: { categories: CategoryLite[] }) 
         open={deleting !== null}
         onClose={() => (isDeleting ? undefined : setDeleting(null))}
         dismissible={!isDeleting}
-        title="Delete this category?"
-        description="A category still referenced by a file cannot be deleted."
+        title={c.deleteTitle}
+        description={c.deleteDescription}
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={() => setDeleting(null)} disabled={isDeleting}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button variant="danger" loading={isDeleting} onClick={confirmDelete}>
-              Delete category
+              {c.deleteCta}
             </Button>
           </>
         }
       >
         {deleting ? (
           <p className="text-sm text-muted">
-            <span className="font-medium text-foreground">{deleting.name}</span> (
-            <code className="text-xs">{deleting.slug}</code>)
+            <span className="font-medium text-foreground">
+              {categoryName(deleting, locale)}
+            </span>{" "}
+            (<code className="text-xs">{deleting.slug}</code>)
           </p>
         ) : null}
       </Dialog>

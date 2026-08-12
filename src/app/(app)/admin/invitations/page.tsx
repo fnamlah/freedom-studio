@@ -5,21 +5,26 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/guard";
-import { ROLE_LABELS, type Role } from "@/lib/auth/roles";
+import { roleLabel, type Role } from "@/lib/auth/roles";
 import type { Database } from "@/lib/database.types";
-import { date, EM_DASH } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
+import { EM_DASH } from "@/lib/format";
 
 import { InviteForm, type ModelOption, type OperatorOption } from "./invite-form";
 
-export const metadata: Metadata = { title: "Invitations" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).adminAi.invitations.metaTitle };
+}
 
 type InvitationStatus = Database["public"]["Enums"]["invitation_status"];
 
-const STATUS_BADGE: Record<InvitationStatus, { variant: BadgeVariant; label: string }> = {
-  pending: { variant: "warning", label: "Pending" },
-  accepted: { variant: "success", label: "Accepted" },
-  expired: { variant: "muted", label: "Expired" },
-  revoked: { variant: "danger", label: "Revoked" },
+/** Colour only; the label is looked up per row against the reader's dictionary. */
+const STATUS_BADGE: Record<InvitationStatus, BadgeVariant> = {
+  pending: "warning",
+  accepted: "success",
+  expired: "muted",
+  revoked: "danger",
 };
 
 /**
@@ -32,6 +37,17 @@ const STATUS_BADGE: Record<InvitationStatus, { variant: BadgeVariant; label: str
  */
 export default async function AdminInvitationsPage() {
   const { supabase } = await requireRole("super_admin");
+  const locale = await getLocale();
+  const dict = await getDict();
+  const d = dict.adminAi.invitations;
+  const fm = fmt(locale);
+
+  const statusLabel: Record<InvitationStatus, string> = {
+    pending: d.statusPending,
+    accepted: d.statusAccepted,
+    expired: d.statusExpired,
+    revoked: d.statusRevoked,
+  };
 
   const [invitationsResult, modelsResult, operatorsResult] = await Promise.all([
     supabase
@@ -57,32 +73,30 @@ export default async function AdminInvitationsPage() {
   return (
     <>
       <PageHeader
-        title="Invitations"
-        description="Invite staff, models and operators. Accounts are created only after the invitee sets a password and enrolls TOTP."
-        breadcrumbs={[{ label: "Admin" }, { label: "Invitations" }]}
+        title={d.title}
+        description={d.description}
+        breadcrumbs={[{ label: dict.nav.sectionAdmin }, { label: d.title }]}
         actions={<InviteForm models={models} operators={operators} />}
       />
 
       {invitations.length === 0 ? (
         <EmptyState
-          title="No invitations yet"
-          description="Invite the first user to get started. They receive a one-time link to set a password and enroll two-factor authentication."
+          title={d.emptyTitle}
+          description={d.emptyDescription}
           action={<InviteForm models={models} operators={operators} />}
         />
       ) : (
         <>
-          <p className="mb-4 text-sm text-muted">
-            {pendingCount} pending {pendingCount === 1 ? "invitation" : "invitations"}.
-          </p>
+          <p className="mb-4 text-sm text-muted">{d.pendingCount(pendingCount)}</p>
           <Table containerClassName="rounded-lg border border-border">
             <THead>
               <TR>
-                <TH>Email</TH>
-                <TH>Role</TH>
-                <TH>Pre-link</TH>
-                <TH>Status</TH>
-                <TH>Sent</TH>
-                <TH>Expires</TH>
+                <TH>{d.colEmail}</TH>
+                <TH>{d.colRole}</TH>
+                <TH>{d.colPreLink}</TH>
+                <TH>{dict.common.status}</TH>
+                <TH>{d.colSent}</TH>
+                <TH>{d.colExpires}</TH>
               </TR>
             </THead>
             <TBody>
@@ -90,9 +104,9 @@ export default async function AdminInvitationsPage() {
                 const isExpired =
                   invite.status === "pending" &&
                   new Date(invite.expires_at).getTime() < now;
-                const statusMeta = isExpired
-                  ? STATUS_BADGE.expired
-                  : STATUS_BADGE[invite.status];
+                const effectiveStatus: InvitationStatus = isExpired
+                  ? "expired"
+                  : invite.status;
 
                 const preLink = invite.model_id
                   ? modelNames.get(invite.model_id)
@@ -106,16 +120,16 @@ export default async function AdminInvitationsPage() {
                       <span className="font-medium text-foreground">{invite.email}</span>
                     </TD>
                     <TD>
-                      <Badge variant="neutral">{ROLE_LABELS[invite.role as Role]}</Badge>
+                      <Badge variant="neutral">{roleLabel(locale, invite.role as Role)}</Badge>
                     </TD>
                     <TD className="text-muted">{preLink ?? EM_DASH}</TD>
                     <TD>
-                      <Badge variant={statusMeta.variant} dot>
-                        {statusMeta.label}
+                      <Badge variant={STATUS_BADGE[effectiveStatus]} dot>
+                        {statusLabel[effectiveStatus]}
                       </Badge>
                     </TD>
-                    <TD className="text-muted">{date(invite.created_at)}</TD>
-                    <TD className="text-muted">{date(invite.expires_at)}</TD>
+                    <TD className="text-muted">{fm.date(invite.created_at)}</TD>
+                    <TD className="text-muted">{fm.date(invite.expires_at)}</TD>
                   </TR>
                 );
               })}

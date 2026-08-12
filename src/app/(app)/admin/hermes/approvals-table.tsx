@@ -11,7 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Field, Label } from "@/components/ui/label";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { dateTime } from "@/lib/format";
+import { isRole, roleLabel } from "@/lib/auth/roles";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { decideApproval } from "./actions";
 
@@ -40,13 +42,14 @@ export type ApprovalRowView = {
   attempt_count: number;
 };
 
-const STATE_META: Record<ApprovalState, { label: string; variant: BadgeVariant }> = {
-  pending: { label: "Awaiting you", variant: "warning" },
-  approved: { label: "Approved — executing", variant: "primary" },
-  executed: { label: "Done", variant: "success" },
-  rejected: { label: "Rejected", variant: "muted" },
-  failed: { label: "Failed", variant: "danger" },
-  expired: { label: "Expired", variant: "muted" },
+/** Colour only. `state` is a DB value; its label is read per render. */
+const STATE_VARIANT: Record<ApprovalState, BadgeVariant> = {
+  pending: "warning",
+  approved: "primary",
+  executed: "success",
+  rejected: "muted",
+  failed: "danger",
+  expired: "muted",
 };
 
 /**
@@ -58,24 +61,21 @@ const STATE_META: Record<ApprovalState, { label: string; variant: BadgeVariant }
  * never a double execution.
  */
 export function ApprovalsTable({ rows }: { rows: ApprovalRowView[] }) {
+  const d = useDict().adminAi.hermes;
+
   if (rows.length === 0) {
-    return (
-      <EmptyState
-        title="Nothing awaiting a decision"
-        description="Hermes proposes actions here when it finds work that needs your authorisation — an unclosed period, a payee with an outstanding balance. Proposals it can't execute alone will always wait for you."
-      />
-    );
+    return <EmptyState title={d.emptyTitle} description={d.emptyDescription} />;
   }
 
   return (
     <Table>
       <THead>
         <TR>
-          <TH>Proposal</TH>
-          <TH>Requires</TH>
-          <TH>Raised</TH>
-          <TH>State</TH>
-          <TH className="text-right">Decision</TH>
+          <TH>{d.colProposal}</TH>
+          <TH>{d.colRequires}</TH>
+          <TH>{d.colRaised}</TH>
+          <TH>{d.colState}</TH>
+          <TH className="text-right">{d.colDecision}</TH>
         </TR>
       </THead>
       <TBody>
@@ -89,18 +89,29 @@ export function ApprovalsTable({ rows }: { rows: ApprovalRowView[] }) {
 
 function ApprovalRow({ row }: { row: ApprovalRowView }) {
   const router = useRouter();
+  const dict = useDict();
+  const d = dict.adminAi.hermes;
+  const locale = useLocale();
+  const fm = fmt(locale);
   const toast = useToast();
   const [pending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState<null | "approve" | "reject">(null);
   const [note, setNote] = useState("");
 
-  const meta = STATE_META[row.state];
+  const stateLabel: Record<ApprovalState, string> = {
+    pending: d.statePending,
+    approved: d.stateApproved,
+    executed: d.stateExecuted,
+    rejected: d.stateRejected,
+    failed: d.stateFailed,
+    expired: d.stateExpired,
+  };
 
   function decide(verdict: "approve" | "reject") {
     startTransition(async () => {
       const result = await decideApproval({ id: row.id, verdict, note });
       if (result.ok) {
-        toast.success(result.message ?? "Decision recorded.");
+        toast.success(result.message ?? d.okDecision);
         setConfirming(null);
         setNote("");
         router.refresh();
@@ -117,7 +128,7 @@ function ApprovalRow({ row }: { row: ApprovalRowView }) {
           <div className="font-medium text-foreground">{row.summary}</div>
           <div className="mt-0.5 text-xs text-muted">
             {row.action_type}
-            {row.job_name ? ` · raised by ${row.job_name}` : ""}
+            {row.job_name ? d.raisedBy(row.job_name) : ""}
           </div>
           {row.details.length > 0 && (
             <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
@@ -135,17 +146,23 @@ function ApprovalRow({ row }: { row: ApprovalRowView }) {
           {row.state === "failed" && row.last_error && (
             <p className="mt-2 text-xs text-danger">
               {row.last_error}
-              {row.attempt_count > 0 ? ` (after ${row.attempt_count} attempts)` : ""}
+              {row.attempt_count > 0 ? d.afterAttempts(row.attempt_count) : ""}
             </p>
           )}
         </TD>
-        <TD className="whitespace-nowrap text-sm">{row.required_role.replace("_", " ")}</TD>
-        <TD className="whitespace-nowrap text-sm text-muted">{dateTime(row.created_at)}</TD>
+        {/* `required_role` is a `user_role` enum value; a value the app does not
+            know is shown as-is rather than blank. */}
+        <TD className="whitespace-nowrap text-sm">
+          {isRole(row.required_role)
+            ? roleLabel(locale, row.required_role)
+            : row.required_role.replace("_", " ")}
+        </TD>
+        <TD className="whitespace-nowrap text-sm text-muted">{fm.dateTime(row.created_at)}</TD>
         <TD>
-          <Badge variant={meta.variant}>{meta.label}</Badge>
+          <Badge variant={STATE_VARIANT[row.state]}>{stateLabel[row.state]}</Badge>
           {row.decided_at && row.decider_name && (
             <div className="mt-1 text-xs text-muted">
-              by {row.decider_name}, {dateTime(row.decided_at)}
+              {d.decidedBy(row.decider_name, fm.dateTime(row.decided_at))}
             </div>
           )}
         </TD>
@@ -158,10 +175,10 @@ function ApprovalRow({ row }: { row: ApprovalRowView }) {
                 disabled={pending}
                 onClick={() => setConfirming("reject")}
               >
-                Reject
+                {d.reject}
               </Button>
               <Button size="sm" disabled={pending} onClick={() => setConfirming("approve")}>
-                Approve
+                {d.approve}
               </Button>
             </div>
           ) : (
@@ -173,35 +190,32 @@ function ApprovalRow({ row }: { row: ApprovalRowView }) {
       <Dialog
         open={confirming !== null}
         onClose={() => setConfirming(null)}
-        title={confirming === "approve" ? "Approve this proposal?" : "Reject this proposal?"}
+        title={confirming === "approve" ? d.approveDialogTitle : d.rejectDialogTitle}
       >
         <p className="text-sm text-muted">{row.summary}</p>
         {confirming === "approve" && (
-          <p className="mt-3 text-sm text-foreground">
-            This will be carried out under your name, not the agent&apos;s. Hermes executes it
-            within a few seconds.
-          </p>
+          <p className="mt-3 text-sm text-foreground">{d.approveDialogBody}</p>
         )}
         <Field className="mt-4">
-          <Label htmlFor={`note-${row.id}`}>Note (optional)</Label>
+          <Label htmlFor={`note-${row.id}`}>{d.noteLabel}</Label>
           <Input
             id={`note-${row.id}`}
             value={note}
             maxLength={1000}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Recorded on the decision"
+            placeholder={d.notePlaceholder}
           />
         </Field>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setConfirming(null)} disabled={pending}>
-            Cancel
+            {dict.common.cancel}
           </Button>
           <Button
             variant={confirming === "reject" ? "danger" : "primary"}
             disabled={pending}
             onClick={() => confirming && decide(confirming)}
           >
-            {pending ? "Recording…" : confirming === "approve" ? "Approve" : "Reject"}
+            {pending ? d.recording : confirming === "approve" ? d.approve : d.reject}
           </Button>
         </div>
       </Dialog>

@@ -28,6 +28,7 @@ import {
 } from "@/components/charts/chart-frame";
 import {
   AXIS_PROPS,
+  axisLabelWidth,
   BAR_MAX_SIZE,
   BAR_RADIUS_TOP,
   CHART_GRID,
@@ -37,6 +38,7 @@ import {
   LEGEND_PROPS,
   SEGMENT_GAP,
 } from "@/components/charts/theme";
+import { useLocale } from "@/lib/i18n/client";
 
 export type GroupedBarCardProps = Omit<ChartFrameProps, "children"> & {
   data: readonly ChartDatum[];
@@ -66,8 +68,9 @@ export function GroupedBarCard({
   emptyMessage,
   ...frame
 }: GroupedBarCardProps) {
-  const valueFormatter = resolveValueFormat(valueFormat);
-  const xFormatter = resolveAxisFormat(xFormat);
+  const locale = useLocale();
+  const valueFormatter = resolveValueFormat(valueFormat, locale);
+  const xFormatter = resolveAxisFormat(xFormat, locale);
   const hasData = data.length > 0 && series.length > 0;
 
   return (
@@ -91,9 +94,11 @@ export function GroupedBarCard({
             />
             <YAxis
               {...AXIS_PROPS}
-              width={64}
+              width={axisLabelWidth(locale)}
               tickFormatter={(value) =>
-                valueFormatter ? valueFormatter(Number(value)) : compactAxisNumber(Number(value))
+                valueFormatter
+                  ? valueFormatter(Number(value))
+                  : compactAxisNumber(Number(value), locale)
               }
             />
             <Tooltip

@@ -21,6 +21,7 @@ import {
   SEGMENT_GAP,
   type SliceDatum,
 } from "@/components/charts/theme";
+import { useDict, useLocale } from "@/lib/i18n/client";
 
 export type PieChartCardProps = Omit<ChartFrameProps, "children"> & {
   /** Slices. Values must be non-negative; the component does not normalise them. */
@@ -58,8 +59,13 @@ export function PieChartCard({
   centerValue,
   ...frame
 }: PieChartCardProps) {
-  const valueFormatter = resolveValueFormat(valueFormat);
-  const slices = foldToTop(data, maxSlices);
+  const d = useDict();
+  const locale = useLocale();
+  const valueFormatter = resolveValueFormat(valueFormat, locale);
+  // The folded tail is labelled from the dictionary, and the same string is what
+  // the neutral "Other" colour is matched on below — one value, never two.
+  const otherLabel = d.money.charts.other;
+  const slices = foldToTop(data, maxSlices, otherLabel);
   const total = slices.reduce((sum, slice) => sum + (Number(slice.value) || 0), 0);
   const hasData = slices.length > 0 && total > 0;
 
@@ -95,7 +101,7 @@ export function PieChartCard({
                     key={slice.name}
                     fill={
                       colorByName?.[slice.name] ??
-                      (slice.name === "Other" ? OTHER_COLOR : colorForIndex(index))
+                      (slice.name === otherLabel ? OTHER_COLOR : colorForIndex(index))
                     }
                   />
                 ))}

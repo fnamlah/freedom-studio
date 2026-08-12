@@ -9,6 +9,7 @@ import { isCompleteOtp } from "@/components/auth/otp";
 import { Button, Field, Label, Spinner } from "@/components/ui";
 import { AUTH_ROUTES } from "@/lib/auth/routes";
 import { challengeAndVerifyTotp, getVerifiedTotpFactor } from "@/lib/auth/mfa";
+import { useDict } from "@/lib/i18n/client";
 import { createBrowserSupabase } from "@/lib/supabase/browser";
 
 type Phase = "loading" | "ready";
@@ -20,6 +21,7 @@ type Phase = "loading" | "ready";
  */
 export function ChallengeForm({ next }: { next: string }) {
   const router = useRouter();
+  const d = useDict();
   const [phase, setPhase] = useState<Phase>("loading");
   const [factorId, setFactorId] = useState<string | null>(null);
   const [code, setCode] = useState("");
@@ -50,7 +52,7 @@ export function ChallengeForm({ next }: { next: string }) {
 
     if (!factorId) return;
     if (!isCompleteOtp(code)) {
-      setError("Enter the 6-digit code from your authenticator app.");
+      setError(d.auth.mfaChallengeIntro);
       return;
     }
 
@@ -59,7 +61,7 @@ export function ChallengeForm({ next }: { next: string }) {
       const supabase = createBrowserSupabase();
       await challengeAndVerifyTotp(supabase, factorId, code);
     } catch {
-      setError("That code didn't match. Check your authenticator app and try again.");
+      setError(d.auth.invalidOtp);
       setPending(false);
       return;
     }
@@ -77,9 +79,9 @@ export function ChallengeForm({ next }: { next: string }) {
 
   if (phase === "loading") {
     return (
-      <AuthCard title="Two-factor verification">
+      <AuthCard title={d.auth.mfaChallengeTitle}>
         <div className="flex items-center justify-center gap-3 py-8 text-sm text-muted">
-          <Spinner /> Loading…
+          <Spinner /> {d.common.loading}
         </div>
       </AuthCard>
     );
@@ -87,8 +89,8 @@ export function ChallengeForm({ next }: { next: string }) {
 
   return (
     <AuthCard
-      title="Two-factor verification"
-      description="Enter the current 6-digit code from your authenticator app to finish signing in."
+      title={d.auth.mfaChallengeTitle}
+      description={d.auth.mfaChallengeIntro}
       footer={
         <button
           type="button"
@@ -96,7 +98,7 @@ export function ChallengeForm({ next }: { next: string }) {
           disabled={pending}
           className="text-primary hover:underline disabled:opacity-50"
         >
-          Sign in as a different user
+          {d.authFlow.signInAsDifferentUser}
         </button>
       }
     >
@@ -105,7 +107,7 @@ export function ChallengeForm({ next }: { next: string }) {
       <form onSubmit={onSubmit} noValidate className="space-y-4">
         <Field>
           <Label htmlFor="otp" required>
-            Verification code
+            {d.auth.otpLabel}
           </Label>
           <OtpInput
             id="otp"
@@ -118,7 +120,7 @@ export function ChallengeForm({ next }: { next: string }) {
         </Field>
 
         <Button type="submit" fullWidth loading={pending} disabled={!isCompleteOtp(code)}>
-          Verify
+          {d.auth.verify}
         </Button>
       </form>
     </AuthCard>

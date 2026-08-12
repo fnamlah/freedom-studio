@@ -1,5 +1,7 @@
 import type { BadgeVariant } from "@/components/ui/badge";
+import type { SelectOption } from "@/components/ui/select";
 import type { Database } from "@/lib/database.types";
+import type { Dictionary } from "@/lib/i18n";
 
 /**
  * `account_status` — the lifecycle of a model's account on a platform
@@ -14,30 +16,44 @@ export const ACCOUNT_STATUSES: readonly AccountStatus[] = [
   "closed",
 ] as const;
 
-export const ACCOUNT_STATUS_META: Record<
-  AccountStatus,
-  { variant: BadgeVariant; label: string }
-> = {
-  active: { variant: "success", label: "Active" },
-  suspended: { variant: "warning", label: "Suspended" },
-  closed: { variant: "muted", label: "Closed" },
+/** Badge colour only — labels come from `d.studio.accountStatus`. */
+export const ACCOUNT_STATUS_VARIANT: Record<AccountStatus, BadgeVariant> = {
+  active: "success",
+  suspended: "warning",
+  closed: "muted",
 };
 
-export const ACCOUNT_STATUS_OPTIONS = ACCOUNT_STATUSES.map((value) => ({
-  value,
-  label: ACCOUNT_STATUS_META[value].label,
-}));
+export function accountStatusMeta(
+  d: Dictionary,
+  status: AccountStatus,
+): { variant: BadgeVariant; label: string } {
+  return { variant: ACCOUNT_STATUS_VARIANT[status], label: d.studio.accountStatus[status] };
+}
+
+export function accountStatusOptions(d: Dictionary): SelectOption[] {
+  return ACCOUNT_STATUSES.map((value) => ({
+    value,
+    label: d.studio.accountStatus[value],
+  }));
+}
 
 /** Platform `is_active` rendered as a badge (docs/04 §4.4). */
-export const PLATFORM_ACTIVE_META: Record<
-  "active" | "inactive",
-  { variant: BadgeVariant; label: string }
-> = {
-  active: { variant: "success", label: "Active" },
-  inactive: { variant: "muted", label: "Inactive" },
+export const PLATFORM_ACTIVE_VARIANT: Record<"active" | "inactive", BadgeVariant> = {
+  active: "success",
+  inactive: "muted",
 };
 
-export const PLATFORM_ACTIVE_OPTIONS = [
-  { value: "active", label: "Active" },
-  { value: "inactive", label: "Inactive" },
-];
+export function platformActiveMeta(
+  d: Dictionary,
+  isActive: boolean,
+): { variant: BadgeVariant; label: string } {
+  const key = isActive ? "active" : "inactive";
+  return { variant: PLATFORM_ACTIVE_VARIANT[key], label: d.studio.platformActive[key] };
+}
+
+export function platformActiveOptions(d: Dictionary): SelectOption[] {
+  return [
+    { value: "active", label: d.studio.platformActive.active },
+    { value: "inactive", label: d.studio.platformActive.inactive },
+  ];
+}

@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { requireRole } from "@/lib/auth/guard";
-import { money } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { PayeeFilter, type PayeeOption } from "../ledger/payee-filter";
 import {
@@ -13,7 +14,9 @@ import {
 } from "./create-payout-form";
 import { PayoutsTable, type PayoutRowView } from "./payouts-table";
 
-export const metadata: Metadata = { title: "Payouts" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).money.payouts.metaTitle };
+}
 
 type PayoutStatus = "pending" | "approved" | "paid" | "cancelled";
 
@@ -53,6 +56,8 @@ export default async function PayoutsPage({
     "operator",
   );
   const { payee } = await searchParams;
+  const d = await getDict();
+  const fm = fmt(await getLocale());
 
   const canCreate = role === "super_admin" || role === "manager" || role === "finance";
 
@@ -68,20 +73,22 @@ export default async function PayoutsPage({
 
   /* ------------------------------------------------------------- payee list --- */
 
+  // Payee vocabulary is shared with the ledger — one word for "model", one for
+  // "operator", across the whole Money section.
   const pickOptions: PayeePickOption[] = [
     ...models
       .filter((m): m is { id: string; stage_name: string } => !!m.id)
       .map((m) => ({
         payee_type: "model" as const,
         payee_id: m.id,
-        label: `${m.stage_name ?? "Model"} · model`,
+        label: `${m.stage_name ?? d.money.ledger.fallbackModel} · ${d.money.ledger.payeeType.model}`,
       })),
     ...operators
       .filter((o): o is { id: string; display_name: string } => !!o.id)
       .map((o) => ({
         payee_type: "operator" as const,
         payee_id: o.id,
-        label: `${o.display_name ?? "Operator"} · operator`,
+        label: `${o.display_name ?? d.money.ledger.fallbackOperator} · ${d.money.ledger.payeeType.operator}`,
       })),
   ].sort((a, b) => a.label.localeCompare(b.label));
 
@@ -90,7 +97,9 @@ export default async function PayoutsPage({
   for (const b of balanceRows) {
     if (b.payee_type && b.payee_id && b.display_name) {
       const key = `${b.payee_type}:${b.payee_id}`;
-      if (!payeeName.has(key)) payeeName.set(key, `${b.display_name} · ${b.payee_type}`);
+      if (!payeeName.has(key)) {
+        payeeName.set(key, `${b.display_name} · ${d.money.ledger.payeeType[b.payee_type]}`);
+      }
     }
   }
 
@@ -136,7 +145,7 @@ export default async function PayoutsPage({
     id: p.id,
     payee_name:
       payeeName.get(`${p.payee_type}:${p.payee_id}`) ??
-      `${p.payee_type} · ${p.payee_id.slice(0, 8)}`,
+      `${d.money.ledger.payeeType[p.payee_type]} · ${p.payee_id.slice(0, 8)}`,
     period_start: p.period_start,
     period_end: p.period_end,
     gross_amount: p.gross_amount,
@@ -166,24 +175,40 @@ export default async function PayoutsPage({
   return (
     <>
       <PageHeader
-        title="Payouts"
-        description="Maker-checker payments: finance/manager create, the Super Admin approves, finance settles. Marking paid posts the settlement ledger entry automatically (docs/09 §6)."
-        breadcrumbs={[{ label: "Payouts" }]}
+        title={d.money.payouts.title}
+        description={d.money.payouts.description}
+        breadcrumbs={[{ label: d.money.payouts.title }]}
         actions={
           canCreate ? <CreatePayoutForm payees={pickOptions} balances={balanceMap} /> : undefined
         }
       />
 
       <StatTileRow className="mb-6" columns={4}>
-        <StatTile label="Pending" value={count("pending")} hint={money(pendingNet)} />
-        <StatTile label="Approved" value={count("approved")} hint={`${money(approvedNet)} to settle`} />
-        <StatTile label="Paid" value={count("paid")} hint={money(paidNet)} />
-        <StatTile label="Total" value={payouts.length} hint={active ? "Filtered payee" : "All payees"} />
+        <StatTile
+          label={d.money.payouts.statPending}
+          value={fm.number(count("pending"))}
+          hint={fm.money(pendingNet)}
+        />
+        <StatTile
+          label={d.money.payouts.statApproved}
+          value={fm.number(count("approved"))}
+          hint={d.money.payouts.toSettle(fm.money(approvedNet))}
+        />
+        <StatTile
+          label={d.money.payouts.statPaid}
+          value={fm.number(count("paid"))}
+          hint={fm.money(paidNet)}
+        />
+        <StatTile
+          label={d.money.payouts.statTotal}
+          value={fm.number(payouts.length)}
+          hint={active ? d.money.payouts.filteredPayee : d.money.payouts.allPayees}
+        />
       </StatTileRow>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <PayeeFilter current={active ?? "all"} payees={filterOptions} basePath="/payouts" />
-        <span className="text-xs text-muted">{rows.length} shown (max 500)</span>
+        <span className="text-xs text-muted">{d.money.payouts.shown(rows.length)}</span>
       </div>
 
       <PayoutsTable rows={rows} role={role} />

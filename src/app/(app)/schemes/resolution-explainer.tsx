@@ -1,4 +1,5 @@
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { getDict } from "@/lib/i18n/server";
 
 /**
  * Static explainer for scheme resolution (docs/09 §4.1). For each earning row,
@@ -6,30 +7,19 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
  * matching on the row's `period_end`. Rendered above the table so a reader
  * understands why a given scheme applies before scanning the list.
  */
-export function ResolutionExplainer() {
+export async function ResolutionExplainer() {
+  const d = await getDict();
   const steps = [
-    {
-      n: 1,
-      title: "Account-specific",
-      body: "A scheme for the earning's exact platform account, whose effective range contains the period's close date.",
-    },
-    {
-      n: 2,
-      title: "Model-specific",
-      body: "Otherwise, a scheme for the earning's model, effective on the period's close date.",
-    },
-    {
-      n: 3,
-      title: "Studio default",
-      body: "Otherwise, the default scheme — exactly one always exists, so resolution never fails.",
-    },
+    { n: 1, title: d.money.schemes.explainerStep1Title, body: d.money.schemes.explainerStep1Body },
+    { n: 2, title: d.money.schemes.explainerStep2Title, body: d.money.schemes.explainerStep2Body },
+    { n: 3, title: d.money.schemes.explainerStep3Title, body: d.money.schemes.explainerStep3Body },
   ];
 
   return (
     <Card>
       <CardHeader
-        title="How a scheme is chosen"
-        description="One scheme resolves per earning row, matched on the period's close date (period_end)."
+        title={d.money.schemes.explainerTitle}
+        description={d.money.schemes.explainerDesc}
       />
       <CardBody>
         <ol className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -56,12 +46,7 @@ export function ResolutionExplainer() {
             </li>
           ))}
         </ol>
-        <p className="mt-4 text-xs text-muted">
-          The most specific effective scheme wins:{" "}
-          <span className="font-medium text-foreground">account → model → default</span>. A
-          non-overlap exclusion per scope guarantees at most one candidate at each tier, so the
-          split is always deterministic.
-        </p>
+        <p className="mt-4 text-xs text-muted">{d.money.schemes.explainerFooter}</p>
       </CardBody>
     </Card>
   );

@@ -12,7 +12,8 @@ import { Field, Label } from "@/components/ui/label";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import type { Role } from "@/lib/auth/roles";
-import { date, dateRange, money } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { approvePayout, cancelPayout, markPayoutPaid } from "./actions";
 
@@ -34,11 +35,15 @@ export type PayoutRowView = {
   created_at: string;
 };
 
-const STATUS_META: Record<PayoutStatus, { label: string; variant: BadgeVariant }> = {
-  pending: { label: "Pending", variant: "warning" },
-  approved: { label: "Approved", variant: "primary" },
-  paid: { label: "Paid", variant: "success" },
-  cancelled: { label: "Cancelled", variant: "muted" },
+/**
+ * Badge colour per status. The LABEL comes from `d.money.payouts.status` — the
+ * one payout-status dictionary shared with the dashboard's payout table.
+ */
+const STATUS_VARIANT: Record<PayoutStatus, BadgeVariant> = {
+  pending: "warning",
+  approved: "primary",
+  paid: "success",
+  cancelled: "muted",
 };
 
 /**
@@ -50,12 +55,12 @@ const STATUS_META: Record<PayoutStatus, { label: string; variant: BadgeVariant }
  * transition, so a stale button that shouldn't act simply surfaces an error.
  */
 export function PayoutsTable({ rows, role }: { rows: PayoutRowView[]; role: Role }) {
+  const d = useDict();
+  const fm = fmt(useLocale());
+
   if (rows.length === 0) {
     return (
-      <EmptyState
-        title="No payouts"
-        description="No payouts match this view. Create one to start the maker-checker workflow, or clear the payee filter."
-      />
+      <EmptyState title={d.money.payouts.emptyTitle} description={d.money.payouts.emptyDesc} />
     );
   }
 
@@ -67,18 +72,17 @@ export function PayoutsTable({ rows, role }: { rows: PayoutRowView[]; role: Role
     <Table containerClassName="rounded-lg border border-border">
       <THead>
         <TR>
-          <TH>Payee</TH>
-          <TH>Period</TH>
-          <TH align="right">Gross</TH>
-          <TH align="right">Deductions</TH>
-          <TH align="right">Net</TH>
-          <TH>Status</TH>
-          <TH align="right">Actions</TH>
+          <TH>{d.money.payouts.colPayee}</TH>
+          <TH>{d.money.payouts.colPeriod}</TH>
+          <TH align="right">{d.money.payouts.colGross}</TH>
+          <TH align="right">{d.money.payouts.colDeductions}</TH>
+          <TH align="right">{d.money.payouts.colNet}</TH>
+          <TH>{d.common.status}</TH>
+          <TH align="right">{d.common.actions}</TH>
         </TR>
       </THead>
       <TBody>
         {rows.map((row) => {
-          const meta = STATUS_META[row.status];
           const showApprove = isSA && row.status === "pending";
           const showMarkPaid = canSettle && row.status === "approved";
           const showCancel =
@@ -91,29 +95,31 @@ export function PayoutsTable({ rows, role }: { rows: PayoutRowView[]; role: Role
             <TR key={row.id}>
               <TD className="font-medium text-foreground">{row.payee_name}</TD>
               <TD className="whitespace-nowrap text-muted">
-                {dateRange(row.period_start, row.period_end)}
+                {fm.dateRange(row.period_start, row.period_end)}
               </TD>
               <TD numeric className="text-muted">
-                {money(row.gross_amount, row.currency)}
+                {fm.money(row.gross_amount, row.currency)}
               </TD>
               <TD numeric className="text-muted">
-                {money(row.deductions, row.currency)}
+                {fm.money(row.deductions, row.currency)}
               </TD>
               <TD numeric className="font-medium text-foreground">
-                {money(row.net_amount, row.currency)}
+                {fm.money(row.net_amount, row.currency)}
               </TD>
               <TD>
-                <Badge variant={meta.variant}>{meta.label}</Badge>
+                <Badge variant={STATUS_VARIANT[row.status]}>
+                  {d.money.payouts.status[row.status]}
+                </Badge>
                 {row.status === "paid" && row.paid_at ? (
-                  <span className="ml-2 text-xs text-muted">{date(row.paid_at)}</span>
+                  <span className="ml-2 text-xs text-muted">{fm.date(row.paid_at)}</span>
                 ) : null}
               </TD>
               <TD align="right">
                 {hasAction ? (
                   <div className="flex items-center justify-end gap-2">
-                    {showApprove ? <ApproveButton id={row.id} payee={row.payee_name} net={money(row.net_amount, row.currency)} /> : null}
+                    {showApprove ? <ApproveButton id={row.id} payee={row.payee_name} net={fm.money(row.net_amount, row.currency)} /> : null}
                     {showMarkPaid ? (
-                      <MarkPaidButton id={row.id} payee={row.payee_name} net={money(row.net_amount, row.currency)} />
+                      <MarkPaidButton id={row.id} payee={row.payee_name} net={fm.money(row.net_amount, row.currency)} />
                     ) : null}
                     {showCancel ? <CancelButton id={row.id} payee={row.payee_name} /> : null}
                   </div>
@@ -133,6 +139,7 @@ export function PayoutsTable({ rows, role }: { rows: PayoutRowView[]; role: Role
 
 function ApproveButton({ id, payee, net }: { id: string; payee: string; net: string }) {
   const router = useRouter();
+  const d = useDict();
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
@@ -141,11 +148,11 @@ function ApproveButton({ id, payee, net }: { id: string; payee: string; net: str
     startTransition(async () => {
       const result = await approvePayout({ id });
       if (result.ok) {
-        success("Payout approved", result.message);
+        success(d.money.payouts.approveToastOk, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not approve", result.error);
+        error(d.money.payouts.approveToastErr, result.error);
       }
     });
   }
@@ -153,31 +160,27 @@ function ApproveButton({ id, payee, net }: { id: string; payee: string; net: str
   return (
     <>
       <Button size="sm" onClick={() => setOpen(true)}>
-        Approve
+        {d.money.payouts.approveCta}
       </Button>
       <Dialog
         open={open}
         onClose={() => !isRunning && setOpen(false)}
         dismissible={!isRunning}
-        title="Approve this payout?"
-        description="Only a Super Admin can authorize a payout. This is the maker-checker gate before settlement (docs/09 §6)."
+        title={d.money.payouts.approveTitle}
+        description={d.money.payouts.approveDesc}
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button onClick={confirm} loading={isRunning}>
-              Approve payout
+              {d.money.payouts.approveConfirm}
             </Button>
           </>
         }
       >
-        <p className="text-sm text-muted">
-          Approving <span className="font-medium text-foreground">{net}</span> to{" "}
-          <span className="font-medium text-foreground">{payee}</span>. Finance will then record
-          the external payment.
-        </p>
+        <p className="text-sm text-muted">{d.money.payouts.approveBody(net, payee)}</p>
       </Dialog>
     </>
   );
@@ -187,6 +190,7 @@ function ApproveButton({ id, payee, net }: { id: string; payee: string; net: str
 
 function MarkPaidButton({ id, payee, net }: { id: string; payee: string; net: string }) {
   const router = useRouter();
+  const d = useDict();
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
@@ -203,11 +207,11 @@ function MarkPaidButton({ id, payee, net }: { id: string; payee: string; net: st
     startTransition(async () => {
       const result = await markPayoutPaid({ id, reference, payment_method: method });
       if (result.ok) {
-        success("Payout settled", result.message);
+        success(d.money.payouts.markPaidToastOk, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not mark paid", result.error);
+        error(d.money.payouts.markPaidToastErr, result.error);
       }
     });
   }
@@ -215,49 +219,46 @@ function MarkPaidButton({ id, payee, net }: { id: string; payee: string; net: st
   return (
     <>
       <Button size="sm" variant="secondary" onClick={open_}>
-        Mark paid
+        {d.money.payouts.markPaidCta}
       </Button>
       <Dialog
         open={open}
         onClose={() => !isRunning && setOpen(false)}
         dismissible={!isRunning}
-        title="Record settlement"
-        description="Mark this approved payout paid after executing the payment externally. This posts the negative settlement entry to the ledger automatically (docs/09 §6)."
+        title={d.money.payouts.markPaidTitle}
+        description={d.money.payouts.markPaidDesc}
         size="md"
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button onClick={confirm} loading={isRunning}>
-              Mark paid
+              {d.money.payouts.markPaidCta}
             </Button>
           </>
         }
       >
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-muted">
-            Settling <span className="font-medium text-foreground">{net}</span> to{" "}
-            <span className="font-medium text-foreground">{payee}</span>.
-          </p>
-          <Field help="Optional — external transaction reference for the audit trail.">
-            <Label htmlFor={`paid-ref-${id}`}>Reference</Label>
+          <p className="text-sm text-muted">{d.money.payouts.markPaidBody(net, payee)}</p>
+          <Field help={d.money.payouts.markPaidReferenceHelp}>
+            <Label htmlFor={`paid-ref-${id}`}>{d.money.payouts.markPaidReference}</Label>
             <Input
               id={`paid-ref-${id}`}
               autoComplete="off"
               value={reference}
               onChange={(e) => setReference(e.target.value)}
-              placeholder="e.g. TXN-48213"
+              placeholder={d.money.payouts.markPaidReferencePlaceholder}
             />
           </Field>
-          <Field help="Optional — bank, wallet, etc.">
-            <Label htmlFor={`paid-method-${id}`}>Payment method</Label>
+          <Field help={d.money.payouts.markPaidMethodHelp}>
+            <Label htmlFor={`paid-method-${id}`}>{d.money.payouts.markPaidMethod}</Label>
             <Input
               id={`paid-method-${id}`}
               autoComplete="off"
               value={method}
               onChange={(e) => setMethod(e.target.value)}
-              placeholder="e.g. Wise transfer"
+              placeholder={d.money.payouts.markPaidMethodPlaceholder}
             />
           </Field>
         </div>
@@ -270,6 +271,7 @@ function MarkPaidButton({ id, payee, net }: { id: string; payee: string; net: st
 
 function CancelButton({ id, payee }: { id: string; payee: string }) {
   const router = useRouter();
+  const d = useDict();
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
@@ -278,11 +280,11 @@ function CancelButton({ id, payee }: { id: string; payee: string }) {
     startTransition(async () => {
       const result = await cancelPayout({ id });
       if (result.ok) {
-        success("Payout cancelled", result.message);
+        success(d.money.payouts.cancelToastOk, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not cancel", result.error);
+        error(d.money.payouts.cancelToastErr, result.error);
       }
     });
   }
@@ -290,29 +292,27 @@ function CancelButton({ id, payee }: { id: string; payee: string }) {
   return (
     <>
       <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-        Cancel
+        {d.money.payouts.cancelCta}
       </Button>
       <Dialog
         open={open}
         onClose={() => !isRunning && setOpen(false)}
         dismissible={!isRunning}
-        title="Cancel this payout?"
-        description="Cancelling is only possible before payment. A paid payout can never be cancelled — reverse it with a ledger adjustment instead (docs/09 §5.2)."
+        title={d.money.payouts.cancelTitle}
+        description={d.money.payouts.cancelDesc}
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={isRunning}>
-              Keep payout
+              {d.money.payouts.cancelKeep}
             </Button>
             <Button variant="danger" onClick={confirm} loading={isRunning}>
-              Cancel payout
+              {d.money.payouts.cancelConfirm}
             </Button>
           </>
         }
       >
-        <p className="text-sm text-muted">
-          This cancels the payout to <span className="font-medium text-foreground">{payee}</span>.
-        </p>
+        <p className="text-sm text-muted">{d.money.payouts.cancelBody(payee)}</p>
       </Dialog>
     </>
   );

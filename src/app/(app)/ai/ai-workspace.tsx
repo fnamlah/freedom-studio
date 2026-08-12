@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { useDict } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 import { createBrowserSupabase } from "@/lib/supabase/browser";
 import type { ProviderId } from "@/lib/ai/types";
@@ -42,6 +43,7 @@ export function AiWorkspace({
   providerId,
   providerLabel,
 }: AiWorkspaceProps) {
+  const d = useDict().adminAi.assistant;
   const { error: toastError } = useToast();
   const supabase = useRef(createBrowserSupabase());
 
@@ -130,8 +132,8 @@ export function AiWorkspace({
       const contentType = response.headers.get("Content-Type") ?? "";
       if (!response.ok && !contentType.includes("text/event-stream")) {
         // AuthzError / 400 / 404 / 500 — a plain JSON error body.
-        let messageText = "The assistant is unavailable right now.";
-        if (response.status === 404) messageText = "That conversation could not be found.";
+        let messageText = d.errUnavailable;
+        if (response.status === 404) messageText = d.errConversationMissing;
         try {
           const errBody = (await response.json()) as {
             error?: { message?: string };
@@ -139,7 +141,11 @@ export function AiWorkspace({
           };
           if (errBody?.configured === false) {
             setNotConfigured(true);
-            patchMessage(assistantKey, (m) => ({ ...m, pending: false, error: NOT_CONFIGURED }));
+            patchMessage(assistantKey, (m) => ({
+              ...m,
+              pending: false,
+              error: d.notConfiguredShort,
+            }));
             return;
           }
           if (errBody?.error?.message) messageText = errBody.error.message;
@@ -157,7 +163,7 @@ export function AiWorkspace({
             if (!activeId) setActiveId(event.conversationId);
             bumpConversation(
               event.conversationId,
-              event.title ?? deriveTitle(text),
+              event.title ?? deriveTitle(text, d.newChat),
             );
             break;
           }
@@ -172,16 +178,20 @@ export function AiWorkspace({
           case "not_configured": {
             setNotConfigured(true);
             if (event.provider) setDownProvider(event.provider);
-            patchMessage(assistantKey, (m) => ({ ...m, pending: false, error: NOT_CONFIGURED }));
+            patchMessage(assistantKey, (m) => ({
+              ...m,
+              pending: false,
+              error: d.notConfiguredShort,
+            }));
             break;
           }
           case "error": {
             const reason =
               event.status === "rate_limited"
-                ? event.reason ?? "You have hit the hourly request limit. Try again soon."
+                ? event.reason ?? d.errRateLimited
                 : event.status === "budget_exceeded"
-                  ? event.reason ?? "The token budget for this window is exhausted."
-                  : event.reason ?? "The assistant hit an error.";
+                  ? event.reason ?? d.errBudget
+                  : event.reason ?? d.errGeneric;
             patchMessage(assistantKey, (m) => ({ ...m, pending: false, error: reason }));
             toastError(reason);
             break;
@@ -191,22 +201,20 @@ export function AiWorkspace({
               ...m,
               pending: false,
               error:
-                m.content.length === 0 && !m.error
-                  ? "The assistant returned no answer."
-                  : m.error,
+                m.content.length === 0 && !m.error ? d.errNoAnswer : m.error,
             }));
             break;
           }
         }
       }
     } catch {
-      const msg = "The connection to the assistant was interrupted.";
+      const msg = d.errInterrupted;
       patchMessage(assistantKey, (m) => ({ ...m, pending: false, error: msg }));
       toastError(msg);
     } finally {
       setSending(false);
     }
-  }, [activeId, bumpConversation, input, notConfigured, patchMessage, sending, toastError]);
+  }, [activeId, bumpConversation, d, input, notConfigured, patchMessage, sending, toastError]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -223,13 +231,13 @@ export function AiWorkspace({
       <aside className="flex max-h-48 min-h-0 min-w-0 flex-col rounded-lg border border-border bg-surface md:max-h-none">
         <div className="border-b border-border p-3">
           <Button fullWidth size="sm" variant="secondary" onClick={startNewChat}>
-            New chat
+            {d.newChat}
           </Button>
         </div>
         <nav className="min-h-0 flex-1 overflow-y-auto p-2">
           {conversations.length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-muted">
-              No conversations yet. Ask the assistant a question to begin.
+              {d.noConversations}
             </p>
           ) : (
             <ul className="space-y-0.5">
@@ -244,9 +252,9 @@ export function AiWorkspace({
                         ? "bg-primary/15 text-foreground"
                         : "text-muted hover:bg-surface-2 hover:text-foreground",
                     )}
-                    title={c.title ?? "Untitled chat"}
+                    title={c.title ?? d.untitledChat}
                   >
-                    {c.title ?? "Untitled chat"}
+                    {c.title ?? d.untitledChat}
                   </button>
                 </li>
               ))}
@@ -259,17 +267,14 @@ export function AiWorkspace({
       <section className="flex min-h-0 min-w-0 flex-col rounded-lg border border-border bg-surface">
         {notConfigured ? (
           <div className="border-b border-border bg-warning/10 px-4 py-2.5 text-xs text-foreground">
-            <span className="font-medium text-warning">AI provider not configured</span>{" "}
-            — add{" "}
-            <code className="rounded bg-surface-2 px-1 py-0.5 text-[11px]">
-              {bannerProvider === "moonshot" ? "MOONSHOT_API_KEY" : "ZHIPU_API_KEY"}
-            </code>{" "}
-            (or the other provider&apos;s key) in Vercel, then switch the active
-            provider in Admin → Settings.
+            <span className="font-medium text-warning">{d.notConfiguredTitle}</span>{" "}
+            {d.notConfiguredBody(
+              bannerProvider === "moonshot" ? "MOONSHOT_API_KEY" : "ZHIPU_API_KEY",
+            )}
           </div>
         ) : (
           <div className="flex items-center justify-between border-b border-border px-4 py-2.5 text-xs text-muted">
-            <span>Answers come from your own RLS-scoped data — aggregates only.</span>
+            <span>{d.aggregatesNote}</span>
             <Badge variant="muted" dot>
               {providerLabel}
             </Badge>
@@ -283,11 +288,7 @@ export function AiWorkspace({
             </div>
           ) : messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">
-              <EmptyState
-                bare
-                title="Ask about the studio's numbers"
-                description="Earnings, hours, payouts, balances, forecasts, compliance — the assistant reads only what you can, and only in aggregate. Try: “Top earners by net last month.”"
-              />
+              <EmptyState bare title={d.emptyTitle} description={d.emptyDescription} />
             </div>
           ) : (
             <ul className="mx-auto flex max-w-3xl flex-col gap-4">
@@ -308,11 +309,7 @@ export function AiWorkspace({
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               disabled={notConfigured}
-              placeholder={
-                notConfigured
-                  ? "AI is not configured."
-                  : "Ask a question… (Enter to send, Shift+Enter for a new line)"
-              }
+              placeholder={notConfigured ? d.placeholderNotConfigured : d.placeholderAsk}
               className="max-h-40 min-h-[42px] resize-none"
             />
             <Button
@@ -320,7 +317,7 @@ export function AiWorkspace({
               loading={sending}
               disabled={notConfigured || input.trim().length === 0}
             >
-              Send
+              {d.send}
             </Button>
           </div>
         </div>
@@ -329,9 +326,8 @@ export function AiWorkspace({
   );
 }
 
-const NOT_CONFIGURED = "AI provider not configured.";
-
 function MessageBubble({ message }: { message: ChatMessageView }) {
+  const d = useDict().adminAi;
   const isUser = message.role === "user";
   return (
     <div className={cn("flex flex-col gap-1.5", isUser ? "items-end" : "items-start")}>
@@ -339,7 +335,7 @@ function MessageBubble({ message }: { message: ChatMessageView }) {
         <div className="flex flex-wrap gap-1.5">
           {message.tools.map((tool, i) => (
             <Badge key={`${tool}-${i}`} variant="primary">
-              {prettyToolName(tool)}
+              {prettyToolName(tool, d.tools)}
             </Badge>
           ))}
         </div>
@@ -357,7 +353,7 @@ function MessageBubble({ message }: { message: ChatMessageView }) {
           <p className="whitespace-pre-wrap break-words">{message.content}</p>
         ) : message.pending ? (
           <span className="inline-flex items-center gap-1.5 text-muted">
-            <Spinner size="sm" /> Thinking…
+            <Spinner size="sm" /> {d.assistant.thinking}
           </span>
         ) : null}
 

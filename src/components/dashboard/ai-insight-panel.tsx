@@ -1,7 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { dateTime, month } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 export type AiInsight = {
   title: string;
@@ -17,23 +18,29 @@ export type AiInsight = {
  * docs/11). Rendered SA/FIN only — the query that feeds it is gated upstream. The
  * markdown body is shown as a trimmed plain-text preview: the dashboard is a
  * glance surface, and the full report lives under `/ai/reports`.
+ *
+ * The report's own `title` and body are NOT translated — they are content the
+ * model produced, in whatever language it was asked for.
  */
-export function AiInsightPanel({
+export async function AiInsightPanel({
   report,
   className,
 }: {
   report: AiInsight | null;
   className?: string;
 }) {
+  const d = await getDict();
+  const fm = fmt(await getLocale());
+
   if (!report) {
     return (
       <Card className={className}>
-        <CardHeader title="AI monthly insight" />
+        <CardHeader title={d.money.dashboard.aiInsightTitle} />
         <CardBody>
           <EmptyState
             bare
-            title="No report yet"
-            description="Monthly market insights appear here once the first AI report is generated."
+            title={d.money.dashboard.aiInsightEmptyTitle}
+            description={d.money.dashboard.aiInsightEmptyDesc}
           />
         </CardBody>
       </Card>
@@ -46,8 +53,11 @@ export function AiInsightPanel({
   return (
     <Card className={className}>
       <CardHeader
-        title="AI monthly insight"
-        description={`${month(report.report_month)} · ${report.title}`}
+        title={d.money.dashboard.aiInsightTitle}
+        description={d.money.dashboard.aiInsightHeading(
+          fm.month(report.report_month),
+          report.title,
+        )}
         action={<Badge variant="muted">{report.provider}</Badge>}
       />
       <CardBody>
@@ -56,7 +66,7 @@ export function AiInsightPanel({
           {truncated ? "…" : ""}
         </p>
         <p className="mt-3 text-xs text-muted">
-          Generated {dateTime(report.created_at)} · {report.model}. Full report under AI · Reports.
+          {d.money.dashboard.aiInsightFooter(fm.dateTime(report.created_at), report.model)}
         </p>
       </CardBody>
     </Card>

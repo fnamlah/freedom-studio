@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -21,6 +22,10 @@ import { isAuthzError } from "@/lib/supabase/admin";
  * Neither `platforms` nor `platform_accounts` carries a `created_by` column
  * (docs/04 §4.4–4.5), so inserts set no actor column — provenance lives in the
  * audit trail instead.
+ *
+ * Schemas are FACTORIES taking the caller's dictionary: a module-scope schema is
+ * built at import time, where no locale exists, so its messages could only ever be
+ * English. The language comes off the profile `requireRole()` already loaded.
  */
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -34,60 +39,68 @@ const emptyToNull = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? null : value;
 
 /** Website URL: optional, normalized to include a scheme, then validated. */
-const optionalUrl = z
-  .preprocess((v) => {
-    if (typeof v !== "string") return v;
-    const trimmed = v.trim();
-    if (trimmed === "") return null;
-    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  }, z.string().url("Enter a valid website URL.").max(2048, "That URL is too long.").nullable())
-  .optional();
+const optionalUrl = (d: Dictionary) =>
+  z
+    .preprocess((v) => {
+      if (typeof v !== "string") return v;
+      const trimmed = v.trim();
+      if (trimmed === "") return null;
+      return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    }, z.string().url(d.studio.platforms.errUrl).max(2048, d.studio.platforms.errUrlLong).nullable())
+    .optional();
 
 /** Platform revenue cut: optional (nullable in the schema), 0–100 when present. */
-const optionalFeePercent = z
-  .preprocess(
-    emptyToNull,
-    z.coerce
-      .number({ invalid_type_error: "Enter a fee percentage." })
-      .min(0, "Fee can't be negative.")
-      .max(100, "Fee can't exceed 100%.")
-      .nullable(),
-  )
-  .optional();
+const optionalFeePercent = (d: Dictionary) =>
+  z
+    .preprocess(
+      emptyToNull,
+      z.coerce
+        .number({ invalid_type_error: d.studio.platforms.errFeeType })
+        .min(0, d.studio.platforms.errFeeMin)
+        .max(100, d.studio.platforms.errFeeMax)
+        .nullable(),
+    )
+    .optional();
 
-const platformName = z.string().trim().min(1, "Platform name is required.").max(160);
-const accountUsername = z.string().trim().min(1, "Username is required.").max(160);
+const platformName = (d: Dictionary) =>
+  z.string().trim().min(1, d.studio.platforms.errNameRequired).max(160);
+const accountUsername = (d: Dictionary) =>
+  z.string().trim().min(1, d.studio.platforms.errUsernameRequired).max(160);
 
-const createPlatformSchema = z.object({
-  name: platformName,
-  website_url: optionalUrl,
-  is_active: z.boolean(),
-});
+const createPlatformSchema = (d: Dictionary) =>
+  z.object({
+    name: platformName(d),
+    website_url: optionalUrl(d),
+    is_active: z.boolean(),
+  });
 
-const updatePlatformSchema = z.object({
-  id: z.string().uuid(),
-  name: platformName,
-  website_url: optionalUrl,
-});
+const updatePlatformSchema = (d: Dictionary) =>
+  z.object({
+    id: z.string().uuid(),
+    name: platformName(d),
+    website_url: optionalUrl(d),
+  });
 
 const setPlatformActiveSchema = z.object({
   id: z.string().uuid(),
   is_active: z.boolean(),
 });
 
-const createAccountSchema = z.object({
-  model_id: z.string().uuid("Choose a model."),
-  platform_id: z.string().uuid("Choose a platform."),
-  username: accountUsername,
-  platform_fee_percent: optionalFeePercent,
-  status: z.enum(ACCOUNT_STATUSES),
-});
+const createAccountSchema = (d: Dictionary) =>
+  z.object({
+    model_id: z.string().uuid(d.studio.platforms.errModelRequired),
+    platform_id: z.string().uuid(d.studio.platforms.errPlatformRequired),
+    username: accountUsername(d),
+    platform_fee_percent: optionalFeePercent(d),
+    status: z.enum(ACCOUNT_STATUSES),
+  });
 
-const updateAccountSchema = z.object({
-  id: z.string().uuid(),
-  username: accountUsername,
-  platform_fee_percent: optionalFeePercent,
-});
+const updateAccountSchema = (d: Dictionary) =>
+  z.object({
+    id: z.string().uuid(),
+    username: accountUsername(d),
+    platform_fee_percent: optionalFeePercent(d),
+  });
 
 const setAccountStatusSchema = z.object({
   id: z.string().uuid(),
@@ -124,39 +137,40 @@ export type UpdatePlatformAccountInput = {
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Please check the form and try again.";
+function firstIssue(error: z.ZodError, d: Dictionary): string {
+  return error.issues[0]?.message ?? d.studio.platforms.errForm;
 }
 
 /** Maps a Postgres error to a friendly message; DB constraints back-stop zod. */
-function describePlatformError(code: string | undefined): string {
+function describePlatformError(code: string | undefined, d: Dictionary): string {
   if (code === "23505") {
-    return "A platform with that name already exists.";
+    return d.studio.platforms.errPlatformDuplicate;
   }
-  return "Could not save the platform. Please try again.";
+  return d.studio.platforms.errPlatformSaveFailed;
 }
 
-function describeAccountError(code: string | undefined): string {
+function describeAccountError(code: string | undefined, d: Dictionary): string {
   if (code === "23505") {
-    return "That model already has an account with this username on this platform.";
+    return d.studio.platforms.errAccountDuplicate;
   }
   if (code === "23503") {
-    return "The selected model or platform no longer exists.";
+    return d.studio.platforms.errAccountFk;
   }
   if (code === "23514") {
-    return "That doesn't satisfy a database rule — check the platform fee (0–100%).";
+    return d.studio.platforms.errAccountCheck;
   }
-  return "Could not save the account. Please try again.";
+  return d.studio.platforms.errAccountSaveFailed;
 }
 
 /* --------------------------------------------------------- platforms: create --- */
 
 export async function createPlatform(input: CreatePlatformInput): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = createPlatformSchema.safeParse(input);
+  const parsed = createPlatformSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -172,7 +186,7 @@ export async function createPlatform(input: CreatePlatformInput): Promise<Action
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describePlatformError(error?.code) };
+      return { ok: false, error: describePlatformError(error?.code, d) };
     }
 
     await writeAudit({
@@ -183,23 +197,24 @@ export async function createPlatform(input: CreatePlatformInput): Promise<Action
     });
 
     revalidatePath("/platforms");
-    return { ok: true, message: `${data.name} added.` };
+    return { ok: true, message: d.studio.platforms.msgPlatformAdded(data.name) };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to add platforms." };
+      return { ok: false, error: d.studio.platforms.errNotAuthorizedAddPlatform };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* --------------------------------------------------------- platforms: update --- */
 
 export async function updatePlatform(input: UpdatePlatformInput): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = updatePlatformSchema.safeParse(input);
+  const parsed = updatePlatformSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -215,10 +230,10 @@ export async function updatePlatform(input: UpdatePlatformInput): Promise<Action
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describePlatformError(error.code) };
+      return { ok: false, error: describePlatformError(error.code, d) };
     }
     if (!updated) {
-      return { ok: false, error: "That platform no longer exists." };
+      return { ok: false, error: d.studio.platforms.errPlatformGone };
     }
 
     await writeAudit({
@@ -229,12 +244,12 @@ export async function updatePlatform(input: UpdatePlatformInput): Promise<Action
     });
 
     revalidatePath("/platforms");
-    return { ok: true, message: "Platform updated." };
+    return { ok: true, message: d.studio.platforms.msgPlatformUpdated };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to edit platforms." };
+      return { ok: false, error: d.studio.platforms.errNotAuthorizedEditPlatform };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -244,11 +259,12 @@ export async function setPlatformActive(input: {
   id: string;
   is_active: boolean;
 }): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   const parsed = setPlatformActiveSchema.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid change." };
+    return { ok: false, error: d.studio.platforms.errPlatformInvalid };
   }
   const { id, is_active } = parsed.data;
 
@@ -260,13 +276,13 @@ export async function setPlatformActive(input: {
       .maybeSingle();
 
     if (readError) {
-      return { ok: false, error: "Could not load that platform." };
+      return { ok: false, error: d.studio.platforms.errPlatformLoadFailed };
     }
     if (!current) {
-      return { ok: false, error: "That platform no longer exists." };
+      return { ok: false, error: d.studio.platforms.errPlatformGone };
     }
     if (current.is_active === is_active) {
-      return { ok: false, error: `Platform is already ${is_active ? "active" : "inactive"}.` };
+      return { ok: false, error: d.studio.platforms.msgPlatformAlready(is_active) };
     }
 
     const { error: updateError } = await supabase
@@ -275,7 +291,7 @@ export async function setPlatformActive(input: {
       .eq("id", id);
 
     if (updateError) {
-      return { ok: false, error: "Could not change the platform. Please try again." };
+      return { ok: false, error: d.studio.platforms.errPlatformToggleFailed };
     }
 
     await writeAudit({
@@ -288,13 +304,13 @@ export async function setPlatformActive(input: {
     revalidatePath("/platforms");
     return {
       ok: true,
-      message: `${current.name} is now ${is_active ? "active" : "inactive"}.`,
+      message: d.studio.platforms.msgPlatformNow(current.name, is_active),
     };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to change platforms." };
+      return { ok: false, error: d.studio.platforms.errNotAuthorizedChangePlatform };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -303,11 +319,12 @@ export async function setPlatformActive(input: {
 export async function createPlatformAccount(
   input: CreatePlatformAccountInput,
 ): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = createAccountSchema.safeParse(input);
+  const parsed = createAccountSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -325,7 +342,7 @@ export async function createPlatformAccount(
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeAccountError(error?.code) };
+      return { ok: false, error: describeAccountError(error?.code, d) };
     }
 
     await writeAudit({
@@ -342,12 +359,12 @@ export async function createPlatformAccount(
 
     revalidatePath("/platforms");
     revalidatePath(`/models/${data.model_id}`);
-    return { ok: true, message: `Account ${data.username} added.` };
+    return { ok: true, message: d.studio.platforms.msgAccountAdded(data.username) };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to add platform accounts." };
+      return { ok: false, error: d.studio.platforms.errNotAuthorizedAddAccount };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -356,11 +373,12 @@ export async function createPlatformAccount(
 export async function updatePlatformAccount(
   input: UpdatePlatformAccountInput,
 ): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = updateAccountSchema.safeParse(input);
+  const parsed = updateAccountSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d) };
   }
   const data = parsed.data;
 
@@ -376,10 +394,10 @@ export async function updatePlatformAccount(
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeAccountError(error.code) };
+      return { ok: false, error: describeAccountError(error.code, d) };
     }
     if (!updated) {
-      return { ok: false, error: "That account no longer exists." };
+      return { ok: false, error: d.studio.platforms.errAccountGone };
     }
 
     await writeAudit({
@@ -391,12 +409,12 @@ export async function updatePlatformAccount(
 
     revalidatePath("/platforms");
     revalidatePath(`/models/${updated.model_id}`);
-    return { ok: true, message: "Account updated." };
+    return { ok: true, message: d.studio.platforms.msgAccountUpdated };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to edit platform accounts." };
+      return { ok: false, error: d.studio.platforms.errNotAuthorizedEditAccount };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -406,11 +424,12 @@ export async function setPlatformAccountStatus(input: {
   id: string;
   status: string;
 }): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager");
+  const { supabase, profile } = await requireRole("super_admin", "manager");
+  const d = dict(toLocale(profile.locale));
 
   const parsed = setAccountStatusSchema.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid status change." };
+    return { ok: false, error: d.studio.platforms.errAccountInvalidStatus };
   }
   const { id, status } = parsed.data;
 
@@ -422,13 +441,16 @@ export async function setPlatformAccountStatus(input: {
       .maybeSingle();
 
     if (readError) {
-      return { ok: false, error: "Could not load that account." };
+      return { ok: false, error: d.studio.platforms.errAccountLoadFailed };
     }
     if (!current) {
-      return { ok: false, error: "That account no longer exists." };
+      return { ok: false, error: d.studio.platforms.errAccountGone };
     }
     if (current.status === status) {
-      return { ok: false, error: `Account is already ${status}.` };
+      return {
+        ok: false,
+        error: d.studio.platforms.msgAccountAlready(d.studio.accountStatus[status]),
+      };
     }
 
     const { error: updateError } = await supabase
@@ -437,7 +459,7 @@ export async function setPlatformAccountStatus(input: {
       .eq("id", id);
 
     if (updateError) {
-      return { ok: false, error: "Could not change the status. Please try again." };
+      return { ok: false, error: d.studio.platforms.errAccountStatusFailed };
     }
 
     await writeAudit({
@@ -449,11 +471,17 @@ export async function setPlatformAccountStatus(input: {
 
     revalidatePath("/platforms");
     revalidatePath(`/models/${current.model_id}`);
-    return { ok: true, message: `${current.username} is now ${status}.` };
+    return {
+      ok: true,
+      message: d.studio.platforms.msgAccountNow(
+        current.username,
+        d.studio.accountStatus[status],
+      ),
+    };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to change account status." };
+      return { ok: false, error: d.studio.platforms.errNotAuthorizedAccountStatus };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }

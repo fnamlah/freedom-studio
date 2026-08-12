@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -27,7 +28,9 @@ export type SnapshotResult =
   | { ok: false; error: string };
 
 export async function snapshotForecast(): Promise<SnapshotResult> {
-  const { supabase } = await requireRole("super_admin", "finance");
+  const { supabase, profile } = await requireRole("super_admin", "finance");
+  // The guard already loaded the profile, so the caller's language is free.
+  const d = dict(toLocale(profile.locale));
 
   try {
     const { data, error } = await supabase.rpc("fn_snapshot_forecast", {});
@@ -35,16 +38,12 @@ export async function snapshotForecast(): Promise<SnapshotResult> {
     if (error) {
       // 23505 = the per-scope-per-day unique index already holds today's snapshot.
       if (error.code === "23505") {
-        return {
-          ok: false,
-          error:
-            "Today's forecast has already been snapshotted — only one snapshot per scope per day is kept.",
-        };
+        return { ok: false, error: d.money.forecasts.errAlreadySnapshotted };
       }
       if (error.code === "42501") {
-        return { ok: false, error: "You are not authorized to snapshot the forecast." };
+        return { ok: false, error: d.money.forecasts.errNotAuthorized };
       }
-      return { ok: false, error: "Could not snapshot the forecast. Please try again." };
+      return { ok: false, error: d.money.forecasts.errSnapshotFailed };
     }
 
     const count = typeof data === "number" ? data : 0;
@@ -60,15 +59,15 @@ export async function snapshotForecast(): Promise<SnapshotResult> {
     return {
       ok: true,
       count,
+      // Russian inflects the noun by count (1 строка / 2 строки / 5 строк), so
+      // the whole sentence is one dictionary function, not a stitched-on "s".
       message:
-        count > 0
-          ? `Snapshotted ${count} forecast ${count === 1 ? "row" : "rows"} for accuracy tracking.`
-          : "Snapshot recorded — no new forecast rows to store for this period.",
+        count > 0 ? d.money.forecasts.okSnapshotted(count) : d.money.forecasts.okSnapshotEmpty,
     };
   } catch (err) {
     if (isAuthzError(err)) {
-      return { ok: false, error: "You are not authorized to snapshot the forecast." };
+      return { ok: false, error: d.money.forecasts.errNotAuthorized };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }

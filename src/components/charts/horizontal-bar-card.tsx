@@ -32,7 +32,9 @@ import {
   colorForIndex,
   compactAxisNumber,
   STATUS_COLORS,
+  valueLabelSpace,
 } from "@/components/charts/theme";
+import { useDict, useLocale } from "@/lib/i18n/client";
 
 export type HorizontalBarDatum = {
   /** Category label shown on the y axis. */
@@ -78,7 +80,9 @@ export function HorizontalBarCard({
   categoryWidth = 120,
   ...frame
 }: HorizontalBarCardProps) {
-  const valueFormatter = resolveValueFormat(valueFormat);
+  const d = useDict();
+  const locale = useLocale();
+  const valueFormatter = resolveValueFormat(valueFormat, locale);
   const hasData = data.length > 0;
   const resolvedHeight = height ?? Math.max(180, data.length * 34 + 48);
 
@@ -91,7 +95,14 @@ export function HorizontalBarCard({
           <BarChart
             data={data as HorizontalBarDatum[]}
             layout="vertical"
-            margin={{ top: 8, right: showValueLabels ? 56 : 16, bottom: 4, left: 4 }}
+            margin={{
+              top: 8,
+              // Russian money labels are wider (trailing symbol, comma decimal),
+              // so the gutter the bar tips write into grows with the locale.
+              right: showValueLabels ? valueLabelSpace(locale) : 16,
+              bottom: 4,
+              left: 4,
+            }}
             barCategoryGap="30%"
           >
             <CartesianGrid stroke={CHART_GRID} strokeWidth={1} horizontal={false} />
@@ -99,7 +110,9 @@ export function HorizontalBarCard({
               type="number"
               {...AXIS_PROPS}
               tickFormatter={(value) =>
-                valueFormatter ? valueFormatter(Number(value)) : compactAxisNumber(Number(value))
+                valueFormatter
+                  ? valueFormatter(Number(value))
+                  : compactAxisNumber(Number(value), locale)
               }
             />
             <YAxis
@@ -115,7 +128,7 @@ export function HorizontalBarCard({
             />
             <Bar
               dataKey="value"
-              name="Value"
+              name={d.money.charts.value}
               maxBarSize={BAR_MAX_SIZE}
               radius={BAR_RADIUS_RIGHT}
               isAnimationActive={false}
@@ -140,7 +153,7 @@ export function HorizontalBarCard({
                   formatter={(value: number | string) =>
                     valueFormatter
                       ? valueFormatter(Number(value))
-                      : compactAxisNumber(Number(value))
+                      : compactAxisNumber(Number(value), locale)
                   }
                 />
               ) : null}

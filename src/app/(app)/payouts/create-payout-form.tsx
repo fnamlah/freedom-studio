@@ -10,7 +10,8 @@ import { Field, Label } from "@/components/ui/label";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { money } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { createPayout } from "./actions";
 
@@ -76,6 +77,8 @@ export function CreatePayoutForm({
   balances: Record<string, PayeeBalance>;
 }) {
   const router = useRouter();
+  const d = useDict();
+  const fm = fmt(useLocale());
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
@@ -136,11 +139,11 @@ export function CreatePayoutForm({
       });
 
       if (result.ok) {
-        success("Payout created", result.message);
+        success(d.money.payouts.createToastOk, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not create payout", result.error);
+        error(d.money.payouts.createToastErr, result.error);
       }
     });
   }
@@ -149,47 +152,46 @@ export function CreatePayoutForm({
 
   return (
     <>
-      <Button onClick={openDialog}>Create payout</Button>
+      <Button onClick={openDialog}>{d.money.payouts.createCta}</Button>
 
       <Dialog
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title="Create a payout"
-        description="Creates a pending payout. A Super Admin approves it, then finance records settlement — which posts the ledger entry automatically (docs/09 §6)."
+        title={d.money.payouts.createTitle}
+        description={d.money.payouts.createDesc}
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="create-payout-form" loading={isRunning} disabled={noPayees}>
-              Create payout
+              {d.money.payouts.createCta}
             </Button>
           </>
         }
       >
         {noPayees ? (
-          <p className="text-sm text-muted">
-            No payees are available. Add a model or operator first — every payout targets exactly
-            one payee.
-          </p>
+          <p className="text-sm text-muted">{d.money.payouts.createNoPayees}</p>
         ) : (
           <form id="create-payout-form" onSubmit={submit} className="flex flex-col gap-4">
             <Field
               help={
                 selectedBalance
-                  ? `Outstanding balance: ${money(selectedBalance.balance, selectedBalance.currency)}`
-                  : "Money is owed to a model or operator — never the studio (docs/09 §1)."
+                  ? d.money.payouts.createOutstanding(
+                      fm.money(selectedBalance.balance, selectedBalance.currency),
+                    )
+                  : d.money.payouts.createPayeeHelp
               }
             >
               <Label htmlFor="payout-payee" required>
-                Payee
+                {d.money.payouts.colPayee}
               </Label>
               <Select
                 id="payout-payee"
                 required
-                placeholder="Select a payee…"
+                placeholder={d.money.payouts.createSelectPayee}
                 options={payeeOptions}
                 value={form.payee}
                 onChange={(e) => set("payee", e.target.value)}
@@ -199,7 +201,7 @@ export function CreatePayoutForm({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field>
                 <Label htmlFor="payout-start" required>
-                  Period start
+                  {d.money.payouts.createPeriodStart}
                 </Label>
                 <Input
                   id="payout-start"
@@ -211,7 +213,7 @@ export function CreatePayoutForm({
               </Field>
               <Field>
                 <Label htmlFor="payout-end" required>
-                  Period end
+                  {d.money.payouts.createPeriodEnd}
                 </Label>
                 <Input
                   id="payout-end"
@@ -224,9 +226,13 @@ export function CreatePayoutForm({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field help="Amount owed for the period.">
-                <Label htmlFor="payout-gross" required hint="≥ 0">
-                  Gross
+              <Field help={d.money.payouts.createGrossHelp}>
+                <Label
+                  htmlFor="payout-gross"
+                  required
+                  hint={d.money.payouts.createHintNonNegative}
+                >
+                  {d.money.payouts.createGross}
                 </Label>
                 <Input
                   id="payout-gross"
@@ -239,9 +245,9 @@ export function CreatePayoutForm({
                   onChange={(e) => onMoneyChange("gross_amount", e.target.value)}
                 />
               </Field>
-              <Field help="Studio processing fee, if any.">
-                <Label htmlFor="payout-fee" hint="≥ 0">
-                  Studio fee
+              <Field help={d.money.payouts.createFeeHelp}>
+                <Label htmlFor="payout-fee" hint={d.money.payouts.createHintNonNegative}>
+                  {d.money.payouts.createFee}
                 </Label>
                 <Input
                   id="payout-fee"
@@ -253,9 +259,9 @@ export function CreatePayoutForm({
                   onChange={(e) => onMoneyChange("studio_fee_amount", e.target.value)}
                 />
               </Field>
-              <Field help="Withheld from this payout.">
-                <Label htmlFor="payout-deductions" hint="≥ 0">
-                  Deductions
+              <Field help={d.money.payouts.createDeductionsHelp}>
+                <Label htmlFor="payout-deductions" hint={d.money.payouts.createHintNonNegative}>
+                  {d.money.payouts.createDeductions}
                 </Label>
                 <Input
                   id="payout-deductions"
@@ -270,9 +276,9 @@ export function CreatePayoutForm({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field help="Gross − studio fee − deductions. Editable.">
-                <Label htmlFor="payout-net" required hint="≥ 0">
-                  Net payable
+              <Field help={d.money.payouts.createNetHelp}>
+                <Label htmlFor="payout-net" required hint={d.money.payouts.createHintNonNegative}>
+                  {d.money.payouts.createNet}
                 </Label>
                 <Input
                   id="payout-net"
@@ -288,9 +294,9 @@ export function CreatePayoutForm({
                   }}
                 />
               </Field>
-              <Field help="3-letter code, e.g. USD.">
+              <Field help={d.money.payouts.createCurrencyHelp}>
                 <Label htmlFor="payout-currency" required>
-                  Currency
+                  {d.money.payouts.createCurrency}
                 </Label>
                 <Input
                   id="payout-currency"
@@ -306,28 +312,27 @@ export function CreatePayoutForm({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field help="Optional — bank, wallet, etc.">
-                <Label htmlFor="payout-method">Payment method</Label>
+              <Field help={d.money.payouts.createMethodHelp}>
+                <Label htmlFor="payout-method">{d.money.payouts.createMethod}</Label>
                 <Input
                   id="payout-method"
                   autoComplete="off"
                   value={form.payment_method}
                   onChange={(e) => set("payment_method", e.target.value)}
-                  placeholder="e.g. Wise transfer"
+                  placeholder={d.money.payouts.createMethodPlaceholder}
                 />
               </Field>
               <div className="flex items-end">
                 <p className="text-xs text-muted">
-                  Net payable:{" "}
-                  <span className="font-medium text-foreground">
-                    {money(num(form.net_amount), form.currency || "USD")}
-                  </span>
+                  {d.money.payouts.createNetPreview(
+                    fm.money(num(form.net_amount), form.currency || "USD"),
+                  )}
                 </p>
               </div>
             </div>
 
-            <Field help="Optional. Context for approver and audit trail.">
-              <Label htmlFor="payout-notes">Notes</Label>
+            <Field help={d.money.payouts.createNotesHelp}>
+              <Label htmlFor="payout-notes">{d.common.notes}</Label>
               <Textarea
                 id="payout-notes"
                 rows={2}

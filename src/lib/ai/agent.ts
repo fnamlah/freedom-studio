@@ -19,6 +19,8 @@
  */
 
 import type { Json, TablesInsert } from "@/lib/database.types";
+import { dict } from "@/lib/i18n";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/locales";
 import { getSetting } from "@/lib/settings";
 
 import { checkBudget, recordUsage } from "./budget";
@@ -43,13 +45,50 @@ import {
 
 const MAX_ROUNDS = 6;
 
-const DEFAULT_SYSTEM_PROMPT = [
+/**
+ * The domain rules. Deliberately English in BOTH locales: they are written
+ * against the same English vocabulary the tool `description` strings in
+ * `./registry` use, and the model maps a Russian question onto that vocabulary
+ * far more reliably than onto a translated paraphrase of it. What changes per
+ * locale is the OUTPUT language instruction below — the one thing the reader
+ * actually experiences.
+ */
+const DOMAIN_RULES = [
   "You are the Freedom Studio assistant, an internal analyst for a talent-management studio.",
   "Answer operational and financial questions using ONLY the provided tools; never invent figures.",
   "Tool results are already de-identified aggregates — refer to people by their stage or display names.",
   "Call a tool whenever a question needs data. If a tool returns no rows, say so plainly.",
   "Be concise. Format money and percentages clearly. Do not ask the user for UUIDs — use names.",
 ].join(" ");
+
+/**
+ * The output-language clause, stated three ways on purpose: as an English
+ * instruction (which the rest of the prompt has already put the model in the
+ * frame of), as the same instruction IN the target language, and as an explicit
+ * ban on the other language. A single sentence is easy for a model mid-answer to
+ * drift away from once the tool results — whose keys and enum values are all
+ * English — start arriving; the repetition is what makes compliance stick.
+ *
+ * Names inside tool results (stage names, platform names, category names) are
+ * data, not prose, and are quoted as they come back rather than transliterated.
+ */
+const LANGUAGE_CLAUSE: Record<Locale, string> = {
+  en: [
+    "Always answer in English, regardless of the language the question was asked in.",
+    "Reproduce names, identifiers and category labels from tool results exactly as they appear.",
+  ].join(" "),
+  ru: [
+    "ALWAYS answer in Russian. Отвечай ТОЛЬКО по-русски, даже если вопрос задан по-английски.",
+    "Never answer in English: every sentence you write to the user must be in Russian.",
+    "Названия, имена и категории из результатов инструментов приводи ровно так, как они пришли,",
+    "не переводя и не транслитерируя их.",
+  ].join(" "),
+};
+
+/** The system prompt for one reader. The ONLY locale-dependent part is the language clause. */
+export function systemPromptFor(locale: Locale): string {
+  return `${DOMAIN_RULES} ${LANGUAGE_CLAUSE[locale]}`;
+}
 
 export interface RunAgentTurnOptions {
   /** Full message history for this turn (system prompt optional — one is added). */
@@ -62,7 +101,12 @@ export interface RunAgentTurnOptions {
   conversationId: string;
   /** Streams incremental assistant text as it is produced. */
   onDelta?: (text: string) => void;
-  /** Optional override of the system prompt. */
+  /**
+   * The CALLER's language (`profiles.locale`). Decides the language the
+   * assistant answers in; defaults to the studio's Russian.
+   */
+  locale?: Locale;
+  /** Optional override of the system prompt. Wins over `locale` when set. */
   systemPrompt?: string;
   signal?: AbortSignal;
 }
@@ -114,12 +158,13 @@ export async function runAgentTurn(
   opts: RunAgentTurnOptions,
 ): Promise<RunAgentTurnResult> {
   const { userId, supabase, service, conversationId, onDelta, signal } = opts;
+  const locale = opts.locale ?? DEFAULT_LOCALE;
   const startedAt = Date.now();
   const usageTotal = emptyUsage();
   let toolCallsCount = 0;
 
   // 1. Budget check BEFORE any provider work (docs/11 §8). Refusals are metered.
-  const budget = await checkBudget(userId, service);
+  const budget = await checkBudget(userId, service, locale);
   if (!budget.ok && budget.status !== "ok") {
     await meterRefusal(service, userId, conversationId, budget.status);
     return {
@@ -168,7 +213,7 @@ export async function runAgentTurn(
   }
 
   // 4. Build the provider message list (system prompt + scrubbed history).
-  const systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+  const systemPrompt = opts.systemPrompt ?? systemPromptFor(locale);
   const providerMessages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
     ...redactOutbound(opts.messages.filter((m) => m.role !== "system")),
@@ -245,7 +290,7 @@ export async function runAgentTurn(
         let projected: Record<string, unknown>[];
         try {
           args = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
-          const rows = await executeTool(tc.function.name, args, supabase);
+          const rows = await executeTool(tc.function.name, args, supabase, locale);
           projected = redactToolResult(tc.function.name, rows);
         } catch (e) {
           projected = [{ error: e instanceof Error ? e.message : "tool error" }];
@@ -294,7 +339,8 @@ export async function runAgentTurn(
       usage: usageTotal,
       toolCallsCount,
       rounds,
-      reason: e instanceof Error ? e.message : "AI request failed.",
+      reason:
+        e instanceof Error ? e.message : dict(locale).adminAi.assistant.errRequestFailed,
     };
   }
 

@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
+import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -27,6 +28,9 @@ import { isAuthzError } from "@/lib/supabase/admin";
  * Each action re-guards with `requireRole(...)`, writes through the caller's own
  * RLS-scoped client, and each `.eq("status", …)` pre-filter targets only the legal
  * source state so an illegal transition simply matches zero rows and is surfaced.
+ *
+ * Every message the client can surface is resolved from the CALLER's dictionary
+ * — `requireRole` already loaded their profile, so the locale costs nothing.
  */
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -47,57 +51,66 @@ function isValidYmd(value: string): boolean {
   );
 }
 
-const dateOnly = z.string().refine(isValidYmd, "Enter a valid date (YYYY-MM-DD).");
+/**
+ * The schemas are FACTORIES, not module constants. A module-scope `z.object` is
+ * evaluated at import time — before any request, and therefore before any
+ * locale — so its messages could only ever be in one language. Building the
+ * schema inside the action lets every message come from the caller's dictionary.
+ */
+const dateOnly = (d: Dictionary) => z.string().refine(isValidYmd, d.money.payouts.errInvalidDate);
 
-const currency = z.preprocess(
-  (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : "USD"),
-  z.string().regex(/^[A-Z]{3}$/, "Use a 3-letter currency code, e.g. USD."),
-);
-
-const money2 = z.coerce
-  .number({ invalid_type_error: "Enter an amount." })
-  .min(0, "Amount can't be negative.")
-  .max(9_999_999_999.99, "That amount is too large.");
-
-const money2OrZero = z.preprocess(
-  (v) => (v === "" || v === null || v === undefined ? 0 : v),
-  money2,
-);
-
-const optionalText = (max: number) =>
+const currencyField = (d: Dictionary) =>
   z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    z.string().max(max, `Keep this under ${max} characters.`).nullable().optional(),
+    (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : "USD"),
+    z.string().regex(/^[A-Z]{3}$/, d.money.payouts.errCurrency),
   );
 
-const createSchema = z
-  .object({
-    payee_type: z.enum(["model", "operator"], {
-      errorMap: () => ({ message: "Choose a payee." }),
-    }),
-    payee_id: z.string().uuid("Choose a payee."),
-    period_start: dateOnly,
-    period_end: dateOnly,
-    gross_amount: money2,
-    studio_fee_amount: money2OrZero,
-    deductions: money2OrZero,
-    net_amount: money2,
-    currency,
-    payment_method: optionalText(120),
-    notes: optionalText(1000),
-  })
-  .refine((d) => d.period_end >= d.period_start, {
-    message: "The period end must be on or after the period start.",
-    path: ["period_end"],
+const money2 = (d: Dictionary) =>
+  z.coerce
+    .number({ invalid_type_error: d.money.payouts.errEnterAmount })
+    .min(0, d.money.payouts.errAmountNegative)
+    .max(9_999_999_999.99, d.money.payouts.errAmountTooLarge);
+
+const money2OrZero = (d: Dictionary) =>
+  z.preprocess((v) => (v === "" || v === null || v === undefined ? 0 : v), money2(d));
+
+const optionalText = (d: Dictionary, max: number) =>
+  z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+    z.string().max(max, d.money.payouts.errTextTooLong(max)).nullable().optional(),
+  );
+
+const createSchema = (d: Dictionary) =>
+  z
+    .object({
+      payee_type: z.enum(["model", "operator"], {
+        errorMap: () => ({ message: d.money.payouts.errChoosePayee }),
+      }),
+      payee_id: z.string().uuid(d.money.payouts.errChoosePayee),
+      period_start: dateOnly(d),
+      period_end: dateOnly(d),
+      gross_amount: money2(d),
+      studio_fee_amount: money2OrZero(d),
+      deductions: money2OrZero(d),
+      net_amount: money2(d),
+      currency: currencyField(d),
+      payment_method: optionalText(d, 120),
+      notes: optionalText(d, 1000),
+    })
+    .refine((v) => v.period_end >= v.period_start, {
+      message: d.money.payouts.errPeriodOrder,
+      path: ["period_end"],
+    });
+
+const idSchema = (d: Dictionary) =>
+  z.object({ id: z.string().uuid(d.money.payouts.errInvalidPayout) });
+
+const markPaidSchema = (d: Dictionary) =>
+  z.object({
+    id: z.string().uuid(d.money.payouts.errInvalidPayout),
+    reference: optionalText(d, 200),
+    payment_method: optionalText(d, 120),
   });
-
-const idSchema = z.object({ id: z.string().uuid("Invalid payout.") });
-
-const markPaidSchema = z.object({
-  id: z.string().uuid("Invalid payout."),
-  reference: optionalText(200),
-  payment_method: optionalText(120),
-});
 
 /* ------------------------------------------------------------------ types --- */
 
@@ -123,31 +136,32 @@ export type MarkPaidInput = {
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Please check the form and try again.";
+function firstIssue(d: Dictionary, error: z.ZodError): string {
+  return error.issues[0]?.message ?? d.money.payouts.errCheckForm;
 }
 
-function describeDbError(code: string | undefined): string {
+function describeDbError(d: Dictionary, code: string | undefined): string {
   if (code === "23514") {
-    return "That breaks a database rule — the period end must be on or after the start, and amounts can't be negative.";
+    return d.money.payouts.errDbCheck;
   }
   if (code === "23503" || code === "P0001") {
-    return "That payee could not be validated. Refresh the payee list and try again.";
+    return d.money.payouts.errDbPayee;
   }
   if (code === "42501") {
-    return "You are not authorized for that payout action.";
+    return d.money.payouts.errDbForbidden;
   }
-  return "Could not complete the payout action. Please try again.";
+  return d.money.payouts.errDbGeneric;
 }
 
 /* ------------------------------------------------------------------ create --- */
 
 export async function createPayout(input: CreatePayoutInput): Promise<ActionResult> {
-  const { supabase, user } = await requireRole("super_admin", "manager", "finance");
+  const { supabase, user, profile } = await requireRole("super_admin", "manager", "finance");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = createSchema.safeParse(input);
+  const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(d, parsed.error) };
   }
   const data = parsed.data;
 
@@ -173,7 +187,7 @@ export async function createPayout(input: CreatePayoutInput): Promise<ActionResu
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(error?.code) };
+      return { ok: false, error: describeDbError(d, error?.code) };
     }
 
     await writeAudit({
@@ -191,12 +205,12 @@ export async function createPayout(input: CreatePayoutInput): Promise<ActionResu
     });
 
     revalidatePath("/payouts");
-    return { ok: true, message: "Payout created (pending approval)." };
+    return { ok: true, message: d.money.payouts.okCreated };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to create payouts." };
+      return { ok: false, error: d.money.payouts.errNotAuthorizedCreate };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
@@ -204,11 +218,12 @@ export async function createPayout(input: CreatePayoutInput): Promise<ActionResu
 
 export async function approvePayout(input: { id: string }): Promise<ActionResult> {
   // Maker-checker: ONLY the Super Admin authorizes (docs/03, docs/09 §6).
-  const { supabase, user } = await requireRole("super_admin");
+  const { supabase, user, profile } = await requireRole("super_admin");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = idSchema.safeParse(input);
+  const parsed = idSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid payout." };
+    return { ok: false, error: d.money.payouts.errInvalidPayout };
   }
 
   try {
@@ -221,13 +236,10 @@ export async function approvePayout(input: { id: string }): Promise<ActionResult
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(error.code) };
+      return { ok: false, error: describeDbError(d, error.code) };
     }
     if (!updated) {
-      return {
-        ok: false,
-        error: "That payout can't be approved — it's no longer pending. Refresh and try again.",
-      };
+      return { ok: false, error: d.money.payouts.errNotPending };
     }
 
     await writeAudit({
@@ -243,23 +255,24 @@ export async function approvePayout(input: { id: string }): Promise<ActionResult
     });
 
     revalidatePath("/payouts");
-    return { ok: true, message: "Payout approved." };
+    return { ok: true, message: d.money.payouts.okApproved };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "Only a Super Admin can approve payouts." };
+      return { ok: false, error: d.money.payouts.errNotAuthorizedApprove };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* -------------------------------------------------------------- mark paid --- */
 
 export async function markPayoutPaid(input: MarkPaidInput): Promise<ActionResult> {
-  const { supabase } = await requireRole("finance", "super_admin");
+  const { supabase, profile } = await requireRole("finance", "super_admin");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = markPaidSchema.safeParse(input);
+  const parsed = markPaidSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
+    return { ok: false, error: firstIssue(d, parsed.error) };
   }
   const data = parsed.data;
 
@@ -278,14 +291,10 @@ export async function markPayoutPaid(input: MarkPaidInput): Promise<ActionResult
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(error.code) };
+      return { ok: false, error: describeDbError(d, error.code) };
     }
     if (!updated) {
-      return {
-        ok: false,
-        error:
-          "That payout can't be marked paid — it must be approved first (and not already paid). Refresh and try again.",
-      };
+      return { ok: false, error: d.money.payouts.errNotApproved };
     }
 
     await writeAudit({
@@ -304,23 +313,24 @@ export async function markPayoutPaid(input: MarkPaidInput): Promise<ActionResult
     revalidatePath("/payouts");
     revalidatePath("/ledger");
     revalidatePath("/statements");
-    return { ok: true, message: "Payout marked paid — settlement posted to the ledger." };
+    return { ok: true, message: d.money.payouts.okPaid };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to settle payouts." };
+      return { ok: false, error: d.money.payouts.errNotAuthorizedSettle };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }
 
 /* ------------------------------------------------------------------ cancel --- */
 
 export async function cancelPayout(input: { id: string }): Promise<ActionResult> {
-  const { supabase } = await requireRole("super_admin", "manager", "finance");
+  const { supabase, profile } = await requireRole("super_admin", "manager", "finance");
+  const d = dict(toLocale(profile.locale));
 
-  const parsed = idSchema.safeParse(input);
+  const parsed = idSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid payout." };
+    return { ok: false, error: d.money.payouts.errInvalidPayout };
   }
 
   try {
@@ -333,14 +343,10 @@ export async function cancelPayout(input: { id: string }): Promise<ActionResult>
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(error.code) };
+      return { ok: false, error: describeDbError(d, error.code) };
     }
     if (!updated) {
-      return {
-        ok: false,
-        error:
-          "That payout can't be cancelled — it may already be paid or cancelled, or you lack permission for its current state.",
-      };
+      return { ok: false, error: d.money.payouts.errNotCancellable };
     }
 
     await writeAudit({
@@ -356,11 +362,11 @@ export async function cancelPayout(input: { id: string }): Promise<ActionResult>
     });
 
     revalidatePath("/payouts");
-    return { ok: true, message: "Payout cancelled." };
+    return { ok: true, message: d.money.payouts.okCancelled };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to cancel payouts." };
+      return { ok: false, error: d.money.payouts.errNotAuthorizedCancel };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: d.common.unknownError };
   }
 }

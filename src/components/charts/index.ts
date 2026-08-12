@@ -32,6 +32,7 @@ export {
 export {
   activeDotSpec,
   AXIS_PROPS,
+  axisLabelWidth,
   BAR_MAX_SIZE,
   BAR_RADIUS_RIGHT,
   BAR_RADIUS_TOP,
@@ -50,5 +51,6 @@ export {
   OTHER_COLOR,
   SEGMENT_GAP,
   STATUS_COLORS,
+  valueLabelSpace,
   type SliceDatum,
 } from "./theme";

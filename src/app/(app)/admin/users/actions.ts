@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { writeAudit } from "@/lib/audit";
+import type { Dictionary } from "@/lib/i18n";
+import { getDict } from "@/lib/i18n/server";
 import { guardedAdminClient, isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -19,7 +21,13 @@ import { guardedAdminClient, isAuthzError } from "@/lib/supabase/admin";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
-const targetSchema = z.object({ userId: z.string().uuid() });
+/**
+ * Zod schemas are module-scope constants evaluated at import, long before a
+ * request exists, so they cannot read a locale. Making the schema a factory the
+ * action calls once it HAS one is what lets the message be translated.
+ */
+const targetSchema = (d: Dictionary) =>
+  z.object({ userId: z.string().uuid(d.adminAi.users.errInvalidUser) });
 
 /**
  * Deactivates a user (session-assurance state machine, docs/05 §6):
@@ -34,9 +42,14 @@ const targetSchema = z.object({ userId: z.string().uuid() });
  * exists, and no in-app actor outranks them).
  */
 export async function deactivateUser(input: { userId: string }): Promise<ActionResult> {
-  const parsed = targetSchema.safeParse(input);
+  // The locale before the guard: a refusal below still has to be readable, and
+  // `getDict()` resolves from the session cookie/profile without elevating.
+  const dictionary = await getDict();
+  const d = dictionary.adminAi.users;
+
+  const parsed = targetSchema(dictionary).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid user reference." };
+    return { ok: false, error: d.errInvalidUser };
   }
   const { userId } = parsed.data;
 
@@ -44,7 +57,7 @@ export async function deactivateUser(input: { userId: string }): Promise<ActionR
     const { admin, user } = await guardedAdminClient(["super_admin"]);
 
     if (userId === user.id) {
-      return { ok: false, error: "You cannot deactivate your own account." };
+      return { ok: false, error: d.errSelfDeactivate };
     }
 
     const { data: target, error: readError } = await admin
@@ -54,16 +67,16 @@ export async function deactivateUser(input: { userId: string }): Promise<ActionR
       .maybeSingle();
 
     if (readError) {
-      return { ok: false, error: "Could not load that user." };
+      return { ok: false, error: d.errLoadUser };
     }
     if (!target) {
-      return { ok: false, error: "User not found." };
+      return { ok: false, error: d.errUserNotFound };
     }
     if (target.role === "super_admin") {
-      return { ok: false, error: "The Super Admin account cannot be deactivated." };
+      return { ok: false, error: d.errSuperAdminProtected };
     }
     if (target.status === "deactivated") {
-      return { ok: false, error: "This user is already deactivated." };
+      return { ok: false, error: d.errAlreadyDeactivated };
     }
 
     const { error: updateError } = await admin
@@ -72,7 +85,7 @@ export async function deactivateUser(input: { userId: string }): Promise<ActionR
       .eq("id", userId);
 
     if (updateError) {
-      return { ok: false, error: "Could not deactivate the user. Please try again." };
+      return { ok: false, error: d.errDeactivateFailed };
     }
 
     // Revoke sessions: delete every MFA factor (a verified factor deletion logs
@@ -92,9 +105,9 @@ export async function deactivateUser(input: { userId: string }): Promise<ActionR
     });
 
     revalidatePath("/admin/users");
-    return { ok: true, message: `${target.full_name} has been deactivated.` };
+    return { ok: true, message: d.okDeactivated(target.full_name) };
   } catch (error) {
-    return { ok: false, error: describeError(error) };
+    return { ok: false, error: describeError(error, dictionary) };
   }
 }
 
@@ -106,9 +119,12 @@ export async function deactivateUser(input: { userId: string }): Promise<ActionR
  * this is ever triggered (runbook step 2).
  */
 export async function resetUserMfa(input: { userId: string }): Promise<ActionResult> {
-  const parsed = targetSchema.safeParse(input);
+  const dictionary = await getDict();
+  const d = dictionary.adminAi.users;
+
+  const parsed = targetSchema(dictionary).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: "Invalid user reference." };
+    return { ok: false, error: d.errInvalidUser };
   }
   const { userId } = parsed.data;
 
@@ -116,10 +132,7 @@ export async function resetUserMfa(input: { userId: string }): Promise<ActionRes
     const { admin, user } = await guardedAdminClient(["super_admin"]);
 
     if (userId === user.id) {
-      return {
-        ok: false,
-        error: "Reset your own factor through the Supabase Dashboard (docs/05 §8.2).",
-      };
+      return { ok: false, error: d.errSelfMfaReset };
     }
 
     const { data: target, error: readError } = await admin
@@ -129,16 +142,16 @@ export async function resetUserMfa(input: { userId: string }): Promise<ActionRes
       .maybeSingle();
 
     if (readError) {
-      return { ok: false, error: "Could not load that user." };
+      return { ok: false, error: d.errLoadUser };
     }
     if (!target) {
-      return { ok: false, error: "User not found." };
+      return { ok: false, error: d.errUserNotFound };
     }
 
     const revokedFactors = await revokeSessionsByDeletingFactors(admin, userId);
 
     if (revokedFactors === 0) {
-      return { ok: false, error: "This user has no MFA factor to reset." };
+      return { ok: false, error: d.errNoFactor };
     }
 
     await writeAudit({
@@ -153,12 +166,9 @@ export async function resetUserMfa(input: { userId: string }): Promise<ActionRes
     });
 
     revalidatePath("/admin/users");
-    return {
-      ok: true,
-      message: `MFA reset for ${target.full_name}. They must re-enroll on next login.`,
-    };
+    return { ok: true, message: d.okMfaReset(target.full_name) };
   } catch (error) {
-    return { ok: false, error: describeError(error) };
+    return { ok: false, error: describeError(error, dictionary) };
   }
 }
 
@@ -186,9 +196,9 @@ async function revokeSessionsByDeletingFactors(
   return deleted;
 }
 
-function describeError(error: unknown): string {
+function describeError(error: unknown, d: Dictionary): string {
   if (isAuthzError(error)) {
-    return "You are not authorized to perform this action.";
+    return d.adminAi.users.errNotAuthorized;
   }
-  return "Something went wrong. Please try again.";
+  return d.common.unknownError;
 }

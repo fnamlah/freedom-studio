@@ -8,6 +8,7 @@
  */
 
 import type { ProviderId } from "@/lib/ai/types";
+import type { Dictionary } from "@/lib/i18n";
 
 /** The SSE event stream the `/api/ai/chat` route emits, one JSON object per event. */
 export type SseEvent =
@@ -52,21 +53,39 @@ export interface AiMessageRowLite {
   tool_args: unknown;
 }
 
+/** Product names — never translated (model + vendor). */
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   moonshot: "Kimi K3 · Moonshot",
   zhipu: "GLM 5.2 · Zhipu",
 };
 
-/** Prettify a registry tool name (`earnings_summary` → `Earnings summary`). */
-export function prettyToolName(name: string): string {
+type ToolLabels = Dictionary["adminAi"]["tools"];
+
+/**
+ * The chip label for a registry tool.
+ *
+ * The registry's tool NAMES are English snake_case identifiers, and the old
+ * `earnings_summary → "Earnings summary"` title-casing could only ever produce
+ * English. The dictionary carries a real label per tool instead; the title-case
+ * path survives only as the fallback for a tool added to the registry before its
+ * label — a chip reading `Some new tool` beats a blank one.
+ */
+export function prettyToolName(name: string, labels: ToolLabels): string {
+  const label = labels[name as keyof ToolLabels];
+  if (label) return label;
   const spaced = name.replace(/_/g, " ");
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-/** Derive a conversation title from the first user message (server + client agree). */
-export function deriveTitle(message: string): string {
+/**
+ * Derive a conversation title from the first user message (server + client
+ * agree). The title is the user's own words, so only the empty-message fallback
+ * needs translating — passed in, since this module stays dictionary-free so the
+ * streaming route can `import type` from it without pulling in a bundle.
+ */
+export function deriveTitle(message: string, emptyFallback: string): string {
   const trimmed = message.trim().replace(/\s+/g, " ");
-  if (trimmed.length === 0) return "New chat";
+  if (trimmed.length === 0) return emptyFallback;
   return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed;
 }
 

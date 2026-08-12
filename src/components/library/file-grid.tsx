@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
-import { date, fileSize } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { deleteLibraryFile, getLibraryDownloadUrl } from "@/app/(app)/library/actions";
 
@@ -64,6 +65,8 @@ function FileCard({
 }) {
   const router = useRouter();
   const { error, success } = useToast();
+  const d = useDict();
+  const fm = fmt(useLocale());
   const [downloading, setDownloading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isDeleting, startDelete] = useTransition();
@@ -87,7 +90,7 @@ function FileCard({
       }
     } else {
       pre?.close();
-      error("Could not download", res.error);
+      error(d.library.downloadFailedTitle, res.error);
     }
   }
 
@@ -95,11 +98,11 @@ function FileCard({
     startDelete(async () => {
       const res = await deleteLibraryFile(file.id);
       if (res.ok) {
-        success("File deleted", res.message);
+        success(d.library.fileDeletedTitle, res.message);
         setConfirmOpen(false);
         router.refresh();
       } else {
-        error("Could not delete file", res.error);
+        error(d.library.deleteFailedTitle, res.error);
       }
     });
   }
@@ -123,22 +126,22 @@ function FileCard({
       <div className="flex flex-wrap items-center gap-2">
         <CategoryBadge category={category} />
         {file.ai_exempt ? (
-          <span className="text-xs text-muted">Exempt</span>
+          <span className="text-xs text-muted">{d.library.exempt}</span>
         ) : null}
       </div>
 
       <div className="flex items-center justify-between gap-2 text-xs text-muted">
-        <span className="tabular-nums">{fileSize(file.size_bytes)}</span>
-        <span>{date(file.created_at)}</span>
+        <span className="tabular-nums">{fm.fileSize(file.size_bytes)}</span>
+        <span>{fm.date(file.created_at)}</span>
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" loading={downloading} onClick={download}>
-          Download
+          {d.common.download}
         </Button>
         {canClassify ? (
           <Button variant="ghost" size="sm" loading={classifying} onClick={onClassify}>
-            Classify
+            {d.library.classify}
           </Button>
         ) : null}
         <Button
@@ -147,7 +150,7 @@ function FileCard({
           className="ml-auto text-danger"
           onClick={() => setConfirmOpen(true)}
         >
-          Delete
+          {d.common.delete}
         </Button>
       </div>
 
@@ -155,23 +158,21 @@ function FileCard({
         open={confirmOpen}
         onClose={() => (isDeleting ? undefined : setConfirmOpen(false))}
         dismissible={!isDeleting}
-        title="Delete this file?"
-        description="The file object and its metadata are removed. This cannot be undone."
+        title={d.library.deleteFileTitle}
+        description={d.library.deleteFileDescription}
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={isDeleting}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button variant="danger" loading={isDeleting} onClick={remove}>
-              Delete file
+              {d.library.deleteFileCta}
             </Button>
           </>
         }
       >
-        <p className="text-sm text-muted">
-          <span className="font-medium text-foreground">{file.name}</span> in {file.folder_path}
-        </p>
+        <p className="text-sm text-muted">{d.library.fileInFolder(file.name, file.folder_path)}</p>
       </Dialog>
     </div>
   );

@@ -14,10 +14,11 @@ import { Select, type SelectOption } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { dateRange, EM_DASH, percent } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { createAssignment, deleteAssignment, updateAssignment } from "./actions";
-import { ASSIGNMENT_ACTIVITY_META, type AssignmentActivity } from "./status";
+import { assignmentActivityMeta, type AssignmentActivity } from "./status";
 
 export type AssignmentRow = {
   id: string;
@@ -71,6 +72,8 @@ export function AssignmentEditor({
 }) {
   const router = useRouter();
   const { success, error } = useToast();
+  const d = useDict();
+  const fm = fmt(useLocale());
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<AssignmentRow | null>(null);
@@ -119,11 +122,21 @@ export function AssignmentEditor({
         : await createAssignment(payload);
 
       if (result.ok) {
-        success(editing ? "Assignment updated" : "Assignment created", result.message);
+        success(
+          editing
+            ? d.studio.operators.toastAssignmentUpdated
+            : d.studio.operators.toastAssignmentCreated,
+          result.message,
+        );
         setEditorOpen(false);
         router.refresh();
       } else {
-        error(editing ? "Could not update assignment" : "Could not create assignment", result.error);
+        error(
+          editing
+            ? d.studio.operators.toastAssignmentUpdateFailed
+            : d.studio.operators.toastAssignmentCreateFailed,
+          result.error,
+        );
       }
     });
   }
@@ -134,11 +147,11 @@ export function AssignmentEditor({
     startTransition(async () => {
       const result = await deleteAssignment({ id: target.id, operator_id: operatorId });
       if (result.ok) {
-        success("Assignment removed", result.message);
+        success(d.studio.operators.toastAssignmentRemoved, result.message);
         setDeleteTarget(null);
         router.refresh();
       } else {
-        error("Could not remove assignment", result.error);
+        error(d.studio.operators.toastAssignmentRemoveFailed, result.error);
       }
     });
   }
@@ -148,11 +161,11 @@ export function AssignmentEditor({
   return (
     <Card>
       <CardHeader
-        title="Assignments"
-        description="Models this operator serves, their pool share, and the active period."
+        title={d.studio.operators.assignmentsTitle}
+        description={d.studio.operators.assignmentsDescription}
         action={
           <Button size="sm" onClick={openCreate} disabled={noModels}>
-            New assignment
+            {d.studio.operators.newAssignment}
           </Button>
         }
       />
@@ -160,16 +173,16 @@ export function AssignmentEditor({
       {assignments.length === 0 ? (
         <EmptyState
           bare
-          title="No assignments yet"
+          title={d.studio.operators.assignmentsEmptyTitle}
           description={
             noModels
-              ? "Create a model first, then assign this operator to it."
-              : "Assign this operator to a model to start crediting them a share of its operator pool."
+              ? d.studio.operators.assignmentsEmptyNoModels
+              : d.studio.operators.assignmentsEmptyDescription
           }
           action={
             noModels ? undefined : (
               <Button size="sm" onClick={openCreate}>
-                New assignment
+                {d.studio.operators.newAssignment}
               </Button>
             )
           }
@@ -178,16 +191,16 @@ export function AssignmentEditor({
         <Table containerClassName="border-t border-border">
           <THead>
             <TR>
-              <TH>Model</TH>
-              <TH align="right">Pool share</TH>
-              <TH>Period</TH>
-              <TH>State</TH>
-              <TH align="right">Actions</TH>
+              <TH>{d.studio.operators.colModel}</TH>
+              <TH align="right">{d.studio.operators.colPoolShare}</TH>
+              <TH>{d.studio.operators.colPeriod}</TH>
+              <TH>{d.studio.operators.colState}</TH>
+              <TH align="right">{d.common.actions}</TH>
             </TR>
           </THead>
           <TBody>
             {assignments.map((row) => {
-              const activityMeta = ASSIGNMENT_ACTIVITY_META[row.activity];
+              const activityMeta = assignmentActivityMeta(d, row.activity);
               return (
                 <TR key={row.id}>
                   <TD>
@@ -196,11 +209,11 @@ export function AssignmentEditor({
                       <div className="mt-0.5 max-w-xs truncate text-xs text-muted">{row.notes}</div>
                     ) : null}
                   </TD>
-                  <TD numeric>{percent(row.pool_share_percent)}</TD>
+                  <TD numeric>{fm.percent(row.pool_share_percent)}</TD>
                   <TD className="text-muted">
-                    {dateRange(row.assigned_from, row.assigned_to)}
+                    {fm.dateRange(row.assigned_from, row.assigned_to)}
                     {row.assigned_to === null ? (
-                      <span className="ml-1 text-xs">(open-ended)</span>
+                      <span className="ml-1 text-xs">{d.studio.operators.openEnded}</span>
                     ) : null}
                   </TD>
                   <TD>
@@ -216,7 +229,7 @@ export function AssignmentEditor({
                         disabled={isRunning}
                         onClick={() => openEdit(row)}
                       >
-                        Edit
+                        {d.common.edit}
                       </Button>
                       <Button
                         variant="danger"
@@ -224,7 +237,7 @@ export function AssignmentEditor({
                         disabled={isRunning}
                         onClick={() => setDeleteTarget(row)}
                       >
-                        Remove
+                        {d.studio.operators.remove}
                       </Button>
                     </div>
                   </TD>
@@ -240,38 +253,48 @@ export function AssignmentEditor({
         open={editorOpen}
         onClose={closeEditor}
         dismissible={!isRunning}
-        title={editing ? "Edit assignment" : "New assignment"}
-        description="The operator pool for a model can never exceed 100%, and windows for the same model can't overlap — both are enforced by the database."
+        title={
+          editing
+            ? d.studio.operators.assignmentEditTitle
+            : d.studio.operators.assignmentCreateTitle
+        }
+        description={d.studio.operators.assignmentDialogDescription}
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={closeEditor} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="assignment-form" loading={isRunning}>
-              {editing ? "Save changes" : "Create assignment"}
+              {editing
+                ? d.studio.operators.assignmentSubmitEdit
+                : d.studio.operators.assignmentSubmitCreate}
             </Button>
           </>
         }
       >
         <form id="assignment-form" onSubmit={submit} className="flex flex-col gap-4">
-          <Field help="The model this operator serves.">
+          <Field help={d.studio.operators.helpModel}>
             <Label htmlFor="assignment-model" required>
-              Model
+              {d.studio.operators.fieldModel}
             </Label>
             <Select
               id="assignment-model"
               required
-              placeholder="Select a model…"
+              placeholder={d.studio.operators.selectModel}
               options={modelOptions}
               value={form.model_id}
               onChange={(e) => field("model_id")(e.target.value)}
             />
           </Field>
 
-          <Field help="This operator's slice of the model's operator pool. All operators on one model must sum to ≤ 100%.">
-            <Label htmlFor="assignment-share" required hint="0–100%">
-              Pool share %
+          <Field help={d.studio.operators.helpPoolShare}>
+            <Label
+              htmlFor="assignment-share"
+              required
+              hint={d.studio.operators.hintPoolShare}
+            >
+              {d.studio.operators.fieldPoolShare}
             </Label>
             <Input
               id="assignment-share"
@@ -289,7 +312,7 @@ export function AssignmentEditor({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field>
               <Label htmlFor="assignment-from" required>
-                Assigned from
+                {d.studio.operators.fieldAssignedFrom}
               </Label>
               <Input
                 id="assignment-from"
@@ -300,8 +323,8 @@ export function AssignmentEditor({
               />
             </Field>
 
-            <Field help="Leave blank for an open-ended assignment.">
-              <Label htmlFor="assignment-to">Assigned to</Label>
+            <Field help={d.studio.operators.helpAssignedTo}>
+              <Label htmlFor="assignment-to">{d.studio.operators.fieldAssignedTo}</Label>
               <Input
                 id="assignment-to"
                 type="date"
@@ -312,12 +335,14 @@ export function AssignmentEditor({
           </div>
 
           <Field>
-            <Label htmlFor="assignment-notes">Notes</Label>
+            <Label htmlFor="assignment-notes">
+              {d.studio.operators.fieldAssignmentNotes}
+            </Label>
             <Textarea
               id="assignment-notes"
               value={form.notes}
               onChange={(e) => field("notes")(e.target.value)}
-              placeholder="Optional context for this assignment"
+              placeholder={d.studio.operators.placeholderAssignmentNotes}
             />
           </Field>
         </form>
@@ -330,29 +355,29 @@ export function AssignmentEditor({
           if (!isRunning) setDeleteTarget(null);
         }}
         dismissible={!isRunning}
-        title="Remove assignment"
+        title={d.studio.operators.removeTitle}
         size="md"
         footer={
           <>
             <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button variant="danger" onClick={confirmDelete} loading={isRunning}>
-              Remove
+              {d.studio.operators.remove}
             </Button>
           </>
         }
       >
         <div className="text-sm text-foreground">
           <p>
-            Remove this operator&rsquo;s assignment to{" "}
-            <strong className="text-foreground">{deleteTarget?.model_name}</strong>
-            {deleteTarget ? ` (${dateRange(deleteTarget.assigned_from, deleteTarget.assigned_to)})` : ""}?
+            {deleteTarget
+              ? d.studio.operators.removeQuestion(
+                  deleteTarget.model_name,
+                  fm.dateRange(deleteTarget.assigned_from, deleteTarget.assigned_to),
+                )
+              : null}
           </p>
-          <p className="mt-2 text-muted">
-            Ledger entries already posted from past periods are unaffected — they are append-only.
-            This change is recorded in the audit log.
-          </p>
+          <p className="mt-2 text-muted">{d.studio.operators.removeBody}</p>
         </div>
       </Dialog>
     </Card>

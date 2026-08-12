@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
 
 import { CategoryManager } from "@/components/library/category-manager";
-import type { CategoryLite } from "@/components/library/library-meta";
+import {
+  CATEGORY_COLUMNS,
+  type CategoryLite,
+} from "@/components/library/library-meta";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireRole } from "@/lib/auth/guard";
+import { getDict } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Categories" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).library.categories.metaTitle };
+}
 
 /**
  * Document categories — SUPER ADMIN ONLY (docs/12 §2.4). This is the
@@ -21,10 +27,11 @@ export const metadata: Metadata = { title: "Categories" };
  */
 export default async function AdminCategoriesPage() {
   const { supabase } = await requireRole("super_admin");
+  const d = await getDict();
 
   const { data } = await supabase
     .from("doc_categories")
-    .select("id, slug, name, description, ai_enabled, sort")
+    .select(CATEGORY_COLUMNS)
     .order("sort", { ascending: true })
     .order("name", { ascending: true });
 
@@ -33,9 +40,12 @@ export default async function AdminCategoriesPage() {
   return (
     <>
       <PageHeader
-        title="Categories"
-        description="The Library's classification vocabulary. Each description is the prompt text the classifier uses to decide a file's category — edits change model behaviour, so this surface is Super Admin only (docs/12)."
-        breadcrumbs={[{ label: "Admin" }, { label: "Categories" }]}
+        title={d.library.categories.title}
+        description={d.library.categories.description}
+        breadcrumbs={[
+          { label: d.nav.sectionAdmin },
+          { label: d.library.categories.title },
+        ]}
       />
 
       <CategoryManager categories={categories} />

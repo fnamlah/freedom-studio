@@ -9,7 +9,9 @@ import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { dateTime, duration, EM_DASH, money } from "@/lib/format";
+import { EM_DASH } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { deleteSession } from "./actions";
 import { SessionForm, type AccountOption, type EditableSession, type ModelOption } from "./session-form";
@@ -41,11 +43,14 @@ export function SessionsTable({
   models: ModelOption[];
   accounts: AccountOption[];
 }) {
+  const d = useDict();
+  const fm = fmt(useLocale());
+
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No sessions to show"
-        description="No work sessions match this view. Log one, or clear the model filter to see the full list."
+        title={d.studio.sessions.emptyTitle}
+        description={d.studio.sessions.emptyDescription}
       />
     );
   }
@@ -54,13 +59,13 @@ export function SessionsTable({
     <Table containerClassName="rounded-lg border border-border">
       <THead>
         <TR>
-          <TH>Model</TH>
-          <TH>Account</TH>
-          <TH>Started</TH>
-          <TH>Ended</TH>
-          <TH align="right">Duration</TH>
-          <TH align="right">Gross</TH>
-          <TH align="right">Actions</TH>
+          <TH>{d.studio.sessions.colModel}</TH>
+          <TH>{d.studio.sessions.colAccount}</TH>
+          <TH>{d.studio.sessions.colStarted}</TH>
+          <TH>{d.studio.sessions.colEnded}</TH>
+          <TH align="right">{d.studio.sessions.colDuration}</TH>
+          <TH align="right">{d.studio.sessions.colGross}</TH>
+          <TH align="right">{d.common.actions}</TH>
         </TR>
       </THead>
       <TBody>
@@ -80,20 +85,20 @@ export function SessionsTable({
             <TR key={row.id}>
               <TD className="font-medium text-foreground">{row.model_name}</TD>
               <TD className="text-muted">{row.account_label}</TD>
-              <TD className="text-muted">{dateTime(row.started_at)}</TD>
+              <TD className="text-muted">{fm.dateTime(row.started_at)}</TD>
               <TD>
                 {row.ended_at ? (
-                  <span className="text-muted">{dateTime(row.ended_at)}</span>
+                  <span className="text-muted">{fm.dateTime(row.ended_at)}</span>
                 ) : (
                   <Badge variant="warning" dot>
-                    Open
+                    {d.studio.sessions.badgeOpen}
                   </Badge>
                 )}
               </TD>
               <TD numeric>
-                {row.duration_minutes === null ? EM_DASH : duration(row.duration_minutes)}
+                {row.duration_minutes === null ? EM_DASH : fm.duration(row.duration_minutes)}
               </TD>
-              <TD numeric>{money(row.gross_earnings, row.currency)}</TD>
+              <TD numeric>{fm.money(row.gross_earnings, row.currency)}</TD>
               <TD align="right">
                 <div className="flex items-center justify-end gap-2">
                   <SessionForm
@@ -122,16 +127,17 @@ function DeleteSessionButton({ id, label }: { id: string; label: string }) {
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
+  const d = useDict();
 
   function confirm() {
     startTransition(async () => {
       const result = await deleteSession({ id });
       if (result.ok) {
-        success("Session deleted", result.message);
+        success(d.studio.sessions.toastDeleted, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not delete session", result.error);
+        error(d.studio.sessions.toastDeleteFailed, result.error);
       }
     });
   }
@@ -139,29 +145,27 @@ function DeleteSessionButton({ id, label }: { id: string; label: string }) {
   return (
     <>
       <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
-        Delete
+        {d.common.delete}
       </Button>
       <Dialog
         open={open}
         onClose={() => !isRunning && setOpen(false)}
         dismissible={!isRunning}
-        title="Delete session?"
-        description={`This permanently removes the session for ${label}. This can't be undone.`}
+        title={d.studio.sessions.deleteTitle}
+        description={d.studio.sessions.deleteDescription(label)}
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button variant="danger" onClick={confirm} loading={isRunning}>
-              Delete session
+              {d.studio.sessions.deleteConfirm}
             </Button>
           </>
         }
       >
-        <p className="text-sm text-muted">
-          Deleting a session removes its recorded hours. Money statements in Earnings are unaffected.
-        </p>
+        <p className="text-sm text-muted">{d.studio.sessions.deleteBody}</p>
       </Dialog>
     </>
   );

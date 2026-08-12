@@ -12,18 +12,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireRole } from "@/lib/auth/guard";
 import type { Database } from "@/lib/database.types";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { date, dateRange, EM_DASH, money, percent } from "@/lib/format";
+import { EM_DASH } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { ModelForm, type EditableModel } from "../model-form";
-import { MODEL_STATUS_META, type ModelStatus } from "../status";
+import { modelStatusMeta, type ModelStatus } from "../status";
 import { StatusControl } from "./detail-actions";
 
 type AccountStatus = Database["public"]["Enums"]["account_status"];
 
-const ACCOUNT_STATUS_META: Record<AccountStatus, { variant: BadgeVariant; label: string }> = {
-  active: { variant: "success", label: "Active" },
-  suspended: { variant: "warning", label: "Suspended" },
-  closed: { variant: "muted", label: "Closed" },
+/** Badge colour per account status; the label comes from `d.studio.accountStatus`. */
+const ACCOUNT_STATUS_VARIANT: Record<AccountStatus, BadgeVariant> = {
+  active: "success",
+  suspended: "warning",
+  closed: "muted",
 };
 
 export async function generateMetadata({
@@ -32,13 +35,14 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
+  const d = await getDict();
   const supabase = await createServerSupabase();
   const { data } = await supabase
     .from("models")
     .select("stage_name")
     .eq("id", id)
     .maybeSingle();
-  return { title: data?.stage_name ?? "Model" };
+  return { title: data?.stage_name ?? d.studio.models.detailMetaFallback };
 }
 
 /**
@@ -56,6 +60,8 @@ export default async function ModelDetailPage({
 }) {
   const { id } = await params;
   const { supabase } = await requireRole("super_admin", "manager");
+  const d = await getDict();
+  const fm = fmt(await getLocale());
 
   const { data: model } = await supabase
     .from("models")
@@ -102,12 +108,12 @@ export default async function ModelDetailPage({
   );
 
   const documentsTotal = documents.length;
-  const documentsActive = documents.filter((d) => !d.is_archived).length;
+  const documentsActive = documents.filter((doc) => !doc.is_archived).length;
   const validCount = compliance?.valid_count ?? 0;
   const expiringCount = compliance?.expiring_count ?? 0;
   const expiredCount = compliance?.expired_count ?? 0;
 
-  const statusMeta = MODEL_STATUS_META[model.status];
+  const statusMeta = modelStatusMeta(d, model.status);
 
   const editable: EditableModel = {
     id: model.id,
@@ -134,7 +140,10 @@ export default async function ModelDetailPage({
             <span className="text-muted">{model.legal_name}</span>
           </span>
         }
-        breadcrumbs={[{ label: "Models", href: "/models" }, { label: model.stage_name }]}
+        breadcrumbs={[
+          { label: d.studio.models.title, href: "/models" },
+          { label: model.stage_name },
+        ]}
         actions={
           <>
             <StatusControl id={model.id} status={model.status as ModelStatus} />
@@ -144,58 +153,101 @@ export default async function ModelDetailPage({
       />
 
       <Tabs defaultValue="profile">
-        <TabsList ariaLabel="Model detail sections">
-          <TabsTrigger value="profile">Profile</TabsTrigger>
+        <TabsList ariaLabel={d.studio.models.tabsAria}>
+          <TabsTrigger value="profile">{d.studio.models.tabProfile}</TabsTrigger>
           <TabsTrigger value="accounts" badge={<Count value={accounts.length} />}>
-            Platform accounts
+            {d.studio.models.tabAccounts}
           </TabsTrigger>
           <TabsTrigger value="earnings" badge={<Count value={earnings.length} />}>
-            Recent earnings
+            {d.studio.models.tabEarnings}
           </TabsTrigger>
           <TabsTrigger value="compliance" badge={<Count value={documentsTotal} />}>
-            Documents &amp; compliance
+            {d.studio.models.tabCompliance}
           </TabsTrigger>
         </TabsList>
 
         {/* -------------------------------------------------------- profile --- */}
         <TabsContent value="profile">
           <Card>
-            <CardHeader title="Profile" description="Business record. Sensitive fields are visible to Super Admin and Managers only." />
+            <CardHeader
+              title={d.studio.models.profileTitle}
+              description={d.studio.models.profileDescription}
+            />
             <CardBody>
               <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-                <DetailRow label="Stage name" value={model.stage_name} />
-                <DetailRow label="Legal name" value={model.legal_name} sensitive />
-                <DetailRow label="Date of birth" value={date(model.date_of_birth)} sensitive />
-                <DetailRow label="Country" value={model.country ?? EM_DASH} />
-                <DetailRow label="Start date" value={model.start_date ? date(model.start_date) : EM_DASH} />
                 <DetailRow
-                  label="Status"
+                  label={d.studio.models.rowStageName}
+                  value={model.stage_name}
+                  sensitiveLabel={d.studio.models.sensitive}
+                />
+                <DetailRow
+                  label={d.studio.models.rowLegalName}
+                  value={model.legal_name}
+                  sensitive
+                  sensitiveLabel={d.studio.models.sensitive}
+                />
+                <DetailRow
+                  label={d.studio.models.rowDob}
+                  value={fm.date(model.date_of_birth)}
+                  sensitive
+                  sensitiveLabel={d.studio.models.sensitive}
+                />
+                <DetailRow
+                  label={d.studio.models.rowCountry}
+                  value={model.country ?? EM_DASH}
+                  sensitiveLabel={d.studio.models.sensitive}
+                />
+                <DetailRow
+                  label={d.studio.models.rowStartDate}
+                  value={model.start_date ? fm.date(model.start_date) : EM_DASH}
+                  sensitiveLabel={d.studio.models.sensitive}
+                />
+                <DetailRow
+                  label={d.studio.models.rowStatus}
+                  sensitiveLabel={d.studio.models.sensitive}
                   value={
                     <Badge variant={statusMeta.variant} dot>
                       {statusMeta.label}
                     </Badge>
                   }
                 />
-                <DetailRow label="Commission (legacy)" value={percent(model.commission_percent)} />
-                <DetailRow label="Email" value={model.email ?? EM_DASH} />
-                <DetailRow label="Phone" value={model.phone ?? EM_DASH} />
                 <DetailRow
-                  label="Self-service login"
+                  label={d.studio.models.rowCommissionLegacy}
+                  value={fm.percent(model.commission_percent)}
+                  sensitiveLabel={d.studio.models.sensitive}
+                />
+                <DetailRow
+                  label={d.studio.models.rowEmail}
+                  value={model.email ?? EM_DASH}
+                  sensitiveLabel={d.studio.models.sensitive}
+                />
+                <DetailRow
+                  label={d.studio.models.rowPhone}
+                  value={model.phone ?? EM_DASH}
+                  sensitiveLabel={d.studio.models.sensitive}
+                />
+                <DetailRow
+                  label={d.studio.models.rowSelfService}
+                  sensitiveLabel={d.studio.models.sensitive}
                   value={
                     model.profile_id ? (
-                      <Badge variant="primary">Linked</Badge>
+                      <Badge variant="primary">{d.studio.models.linked}</Badge>
                     ) : (
-                      <Badge variant="muted">Not linked</Badge>
+                      <Badge variant="muted">{d.studio.models.notLinked}</Badge>
                     )
                   }
                 />
-                <DetailRow label="Created" value={date(model.created_at)} />
+                <DetailRow
+                  label={d.studio.models.rowCreated}
+                  value={fm.date(model.created_at)}
+                  sensitiveLabel={d.studio.models.sensitive}
+                />
               </dl>
 
               {model.notes ? (
                 <div className="mt-6 border-t border-border pt-4">
                   <p className="mb-1 text-xs font-medium tracking-wide text-muted uppercase">
-                    Notes
+                    {d.studio.models.notesHeading}
                   </p>
                   <p className="text-sm whitespace-pre-wrap text-foreground">{model.notes}</p>
                 </div>
@@ -208,48 +260,45 @@ export default async function ModelDetailPage({
         <TabsContent value="accounts">
           <Card>
             <CardHeader
-              title="Platform accounts"
-              description="Accounts this model holds across the studio's platforms."
+              title={d.studio.models.accountsTitle}
+              description={d.studio.models.accountsDescription}
             />
             <CardBody flush>
               {accounts.length === 0 ? (
                 <EmptyState
                   bare
-                  title="No platform accounts"
-                  description="Platform accounts are managed from the Platforms module."
+                  title={d.studio.models.accountsEmptyTitle}
+                  description={d.studio.models.accountsEmptyDescription}
                 />
               ) : (
                 <Table>
                   <THead>
                     <TR>
-                      <TH>Platform</TH>
-                      <TH>Username</TH>
-                      <TH align="right">Platform fee</TH>
-                      <TH>Status</TH>
+                      <TH>{d.studio.models.colPlatform}</TH>
+                      <TH>{d.studio.models.colUsername}</TH>
+                      <TH align="right">{d.studio.models.colPlatformFee}</TH>
+                      <TH>{d.studio.models.rowStatus}</TH>
                     </TR>
                   </THead>
                   <TBody>
-                    {accounts.map((account) => {
-                      const meta = ACCOUNT_STATUS_META[account.status];
-                      return (
-                        <TR key={account.id}>
-                          <TD className="font-medium text-foreground">
-                            {platformName.get(account.platform_id) ?? EM_DASH}
-                          </TD>
-                          <TD className="text-muted">{account.username}</TD>
-                          <TD numeric>
-                            {account.platform_fee_percent === null
-                              ? EM_DASH
-                              : percent(account.platform_fee_percent)}
-                          </TD>
-                          <TD>
-                            <Badge variant={meta.variant} dot>
-                              {meta.label}
-                            </Badge>
-                          </TD>
-                        </TR>
-                      );
-                    })}
+                    {accounts.map((account) => (
+                      <TR key={account.id}>
+                        <TD className="font-medium text-foreground">
+                          {platformName.get(account.platform_id) ?? EM_DASH}
+                        </TD>
+                        <TD className="text-muted">{account.username}</TD>
+                        <TD numeric>
+                          {account.platform_fee_percent === null
+                            ? EM_DASH
+                            : fm.percent(account.platform_fee_percent)}
+                        </TD>
+                        <TD>
+                          <Badge variant={ACCOUNT_STATUS_VARIANT[account.status]} dot>
+                            {d.studio.accountStatus[account.status]}
+                          </Badge>
+                        </TD>
+                      </TR>
+                    ))}
                   </TBody>
                 </Table>
               )}
@@ -261,24 +310,24 @@ export default async function ModelDetailPage({
         <TabsContent value="earnings">
           <Card>
             <CardHeader
-              title="Recent earnings"
-              description="The 10 most recent statement periods. Earnings are the money source of truth (docs/04 §4.7)."
+              title={d.studio.models.earningsTitle}
+              description={d.studio.models.earningsDescription}
             />
             <CardBody flush>
               {earnings.length === 0 ? (
                 <EmptyState
                   bare
-                  title="No earnings recorded"
-                  description="Statement periods are recorded from the Earnings module."
+                  title={d.studio.models.earningsEmptyTitle}
+                  description={d.studio.models.earningsEmptyDescription}
                 />
               ) : (
                 <Table>
                   <THead>
                     <TR>
-                      <TH>Period</TH>
-                      <TH>Account</TH>
-                      <TH align="right">Gross</TH>
-                      <TH align="right">Net</TH>
+                      <TH>{d.studio.models.colPeriod}</TH>
+                      <TH>{d.studio.models.colAccount}</TH>
+                      <TH align="right">{d.studio.models.colGross}</TH>
+                      <TH align="right">{d.studio.models.colNet}</TH>
                     </TR>
                   </THead>
                   <TBody>
@@ -287,7 +336,7 @@ export default async function ModelDetailPage({
                       return (
                         <TR key={row.id}>
                           <TD className="text-muted">
-                            {dateRange(row.period_start, row.period_end)}
+                            {fm.dateRange(row.period_start, row.period_end)}
                           </TD>
                           <TD>
                             {acct ? (
@@ -299,9 +348,9 @@ export default async function ModelDetailPage({
                               EM_DASH
                             )}
                           </TD>
-                          <TD numeric>{money(row.gross_amount, row.currency)}</TD>
+                          <TD numeric>{fm.money(row.gross_amount, row.currency)}</TD>
                           <TD numeric className="font-medium text-foreground">
-                            {money(row.net_amount, row.currency)}
+                            {fm.money(row.net_amount, row.currency)}
                           </TD>
                         </TR>
                       );
@@ -317,43 +366,49 @@ export default async function ModelDetailPage({
         <TabsContent value="compliance">
           <StatTileRow columns={4} className="mb-6">
             <StatTile
-              label="Documents"
+              label={d.studio.models.statDocuments}
               value={documentsTotal}
-              hint={`${documentsActive} active`}
+              hint={d.studio.models.statDocumentsHint(documentsActive)}
             />
-            <StatTile label="Valid" value={validCount} hint="Not expiring soon" />
             <StatTile
-              label="Expiring"
-              value={expiringCount}
-              hint="Within 30 days"
+              label={d.studio.models.statValid}
+              value={validCount}
+              hint={d.studio.models.statValidHint}
             />
-            <StatTile label="Expired" value={expiredCount} hint="Past expiry" />
+            <StatTile
+              label={d.studio.models.statExpiring}
+              value={expiringCount}
+              hint={d.studio.models.statExpiringHint}
+            />
+            <StatTile
+              label={d.studio.models.statExpired}
+              value={expiredCount}
+              hint={d.studio.models.statExpiredHint}
+            />
           </StatTileRow>
 
           <Card>
             <CardHeader
-              title="Compliance status"
-              description="Derived from document expiry dates (docs/07). Documents live in the Documents module."
+              title={d.studio.models.complianceTitle}
+              description={d.studio.models.complianceDescription}
             />
             <CardBody>
               {documentsTotal === 0 ? (
                 <EmptyState
                   bare
-                  title="No documents on file"
-                  description="Identity and compliance documents are uploaded from the Documents module."
+                  title={d.studio.models.complianceEmptyTitle}
+                  description={d.studio.models.complianceEmptyDescription}
                 />
               ) : expiredCount > 0 ? (
                 <p className="text-sm text-danger">
-                  {expiredCount} document{expiredCount === 1 ? "" : "s"} expired. Renewal is required
-                  to keep this model compliant.
+                  {d.studio.models.complianceExpired(expiredCount)}
                 </p>
               ) : expiringCount > 0 ? (
                 <p className="text-sm text-warning">
-                  {expiringCount} document{expiringCount === 1 ? "" : "s"} expiring within 30 days.
-                  Plan renewals soon.
+                  {d.studio.models.complianceExpiring(expiringCount)}
                 </p>
               ) : (
-                <p className="text-sm text-success">All documents are valid.</p>
+                <p className="text-sm text-success">{d.studio.models.complianceAllValid}</p>
               )}
             </CardBody>
           </Card>
@@ -367,10 +422,12 @@ function DetailRow({
   label,
   value,
   sensitive = false,
+  sensitiveLabel,
 }: {
   label: string;
   value: ReactNode;
   sensitive?: boolean;
+  sensitiveLabel: string;
 }) {
   return (
     <div className="min-w-0">
@@ -378,7 +435,7 @@ function DetailRow({
         {label}
         {sensitive ? (
           <Badge variant="muted" className="px-1.5 py-0 text-[10px] normal-case">
-            Sensitive
+            {sensitiveLabel}
           </Badge>
         ) : null}
       </dt>

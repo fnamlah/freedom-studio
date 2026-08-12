@@ -18,6 +18,8 @@
  *  - One y-axis per chart. Two measures of different scale = two charts.
  */
 
+import { DEFAULT_LOCALE, INTL_LOCALE, type Locale } from "@/lib/i18n/locales";
+
 /** Categorical slots 1–8, in fixed order. */
 export const CHART_COLORS = [
   "#3987e5", // 1 blue
@@ -109,14 +111,48 @@ export const LEGEND_PROPS = {
 
 /* ------------------------------------------------------------- helpers */
 
-/** Compact axis numbers: 1200 → "1.2K". Keeps y-axis ticks short and clean. */
-export function compactAxisNumber(value: number | string): string {
+/**
+ * Compact axis numbers: 1200 → "1.2K" (en) / "1,2 тыс." (ru). Keeps y-axis ticks
+ * short and clean.
+ *
+ * This used to be `toFixed(1).replace(/\.0$/, "")` plus hardcoded "K"/"M"
+ * suffixes — a decimal point and an English unit no matter the locale. `Intl`
+ * knows both the separator and the unit word, so the string surgery is gone.
+ */
+export function compactAxisNumber(
+  value: number | string,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return String(value);
-  const abs = Math.abs(parsed);
-  if (abs >= 1_000_000) return `${(parsed / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (abs >= 1_000) return `${(parsed / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
-  return String(parsed);
+  if (Math.abs(parsed) < 1_000) {
+    return new Intl.NumberFormat(INTL_LOCALE[locale], { maximumFractionDigits: 2 }).format(
+      parsed,
+    );
+  }
+  return new Intl.NumberFormat(INTL_LOCALE[locale], {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(parsed);
+}
+
+/* --------------------------------------------------- locale-aware sizing */
+
+/**
+ * Width reserved for y-axis tick labels.
+ *
+ * Russian money is wider than English at the same magnitude: the group
+ * separator is a narrow no-break space, the decimal mark is a comma, and the
+ * currency symbol trails the number (`1 234,50 $` vs `$1,234.50`). 64px clips
+ * it, so the axis gutter grows with the locale rather than the labels being cut.
+ */
+export function axisLabelWidth(locale: Locale): number {
+  return locale === "ru" ? 88 : 64;
+}
+
+/** Right margin reserved for bar-tip value labels — same widening reason. */
+export function valueLabelSpace(locale: Locale): number {
+  return locale === "ru" ? 76 : 56;
 }
 
 export type SliceDatum = { name: string; value: number };

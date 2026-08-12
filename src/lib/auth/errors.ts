@@ -2,6 +2,8 @@
  * Typed authorization failures shared by the guard and the admin client.
  */
 
+import { DEFAULT_LOCALE, dict, type Locale } from "@/lib/i18n";
+
 export type AuthzErrorCode =
   /** No session at all. */
   | "unauthenticated"
@@ -34,8 +36,15 @@ export class AuthzError extends Error {
   readonly code: AuthzErrorCode;
   readonly status: number;
 
-  constructor(code: AuthzErrorCode, message?: string) {
-    super(message ?? defaultMessage(code));
+  /**
+   * `message` is what the caller eventually reads (route handlers put it in the
+   * JSON body, server actions toast it), so it is translated. The constructor is
+   * synchronous and cannot await `getLocale()`, hence the explicit `locale`
+   * argument — callers that already resolved one should pass it; everyone else
+   * gets the default language, which is the studio's own.
+   */
+  constructor(code: AuthzErrorCode, message?: string, locale: Locale = DEFAULT_LOCALE) {
+    super(message ?? defaultMessage(code, locale));
     this.name = "AuthzError";
     this.code = code;
     this.status = STATUS_BY_CODE[code];
@@ -51,19 +60,11 @@ export function isAuthzError(value: unknown): value is AuthzError {
   return value instanceof AuthzError;
 }
 
-function defaultMessage(code: AuthzErrorCode): string {
-  switch (code) {
-    case "unauthenticated":
-      return "Not signed in.";
-    case "aal2_required":
-      return "Two-factor verification is required for this action.";
-    case "profile_missing":
-      return "No profile is linked to this account.";
-    case "profile_inactive":
-      return "This account is not active.";
-    case "forbidden":
-      return "Your role does not permit this action.";
-    case "misconfigured":
-      return "Server is not configured for privileged operations.";
-  }
+/**
+ * The dictionary keys under `authFlow.errors` are the `AuthzErrorCode` values
+ * themselves, so this is a plain index — and a new code without a translation is
+ * a compile error rather than an empty message.
+ */
+export function defaultMessage(code: AuthzErrorCode, locale: Locale = DEFAULT_LOCALE): string {
+  return dict(locale).authFlow.errors[code];
 }

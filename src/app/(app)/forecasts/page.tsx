@@ -12,11 +12,14 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { requireRole } from "@/lib/auth/guard";
-import { money, month, percent } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { SnapshotButton } from "./snapshot-button";
 
-export const metadata: Metadata = { title: "Forecasts" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).money.forecasts.metaTitle };
+}
 
 /* ------------------------------------------------------------------ types --- */
 
@@ -55,6 +58,8 @@ const STUDIO_KEY = "studio";
  */
 export default async function ForecastsPage() {
   const { supabase, role } = await requireRole("super_admin", "manager", "finance");
+  const d = await getDict();
+  const fm = fmt(await getLocale());
   const canGovern = role === "super_admin" || role === "finance";
 
   const [monthlyRes, forecastRes, directoryRes] = await Promise.all([
@@ -89,8 +94,8 @@ export default async function ForecastsPage() {
 
   const modelName = new Map<string, string>(
     directory
-      .filter((d): d is DirectoryRow & { id: string } => Boolean(d.id))
-      .map((d) => [d.id, d.stage_name ?? "Unknown model"]),
+      .filter((row): row is DirectoryRow & { id: string } => Boolean(row.id))
+      .map((row) => [row.id, row.stage_name ?? d.money.forecasts.unknownModel]),
   );
 
   /* ------------------------------------------------------------ aggregate --- */
@@ -148,8 +153,13 @@ export default async function ForecastsPage() {
   }
 
   const lineSeries: ChartSeries[] = [
-    { key: "net_amount", label: "Actual net", color: CHART_COLORS[0] },
-    { key: "predicted_net", label: "Projected net", color: CHART_COLORS[0], dash: "6 4" },
+    { key: "net_amount", label: d.money.forecasts.lineActual, color: CHART_COLORS[0] },
+    {
+      key: "predicted_net",
+      label: d.money.forecasts.linePredicted,
+      color: CHART_COLORS[0],
+      dash: "6 4",
+    },
   ];
 
   /* --------------------------------------- forecast breakdown by model ----- */
@@ -172,7 +182,9 @@ export default async function ForecastsPage() {
   });
 
   const labelForModelKey = (key: string) =>
-    key === STUDIO_KEY ? "Studio total" : modelName.get(key) ?? "Unknown model";
+    key === STUDIO_KEY
+      ? d.money.forecasts.studioTotal
+      : modelName.get(key) ?? d.money.forecasts.unknownModel;
 
   const breakdownSeries: ChartSeries[] = topModelKeys.map((key, index) => ({
     key,
@@ -180,7 +192,7 @@ export default async function ForecastsPage() {
     color: CHART_COLORS[index],
   }));
   if (hasOtherModels) {
-    breakdownSeries.push({ key: "other", label: "Other models", color: OTHER_COLOR });
+    breakdownSeries.push({ key: "other", label: d.money.forecasts.otherModels, color: OTHER_COLOR });
   }
 
   /* -------------------------------------------- forecast accuracy bar ------ */
@@ -189,7 +201,7 @@ export default async function ForecastsPage() {
     .slice(-ACCURACY_TAIL_MONTHS)
     .map((r) => ({ month: r.target_month, error_percent: r.error_percent }));
   const accuracySeries: ChartSeries[] = [
-    { key: "error_percent", label: "Error %", color: CHART_COLORS[3] },
+    { key: "error_percent", label: d.money.forecasts.accuracyError, color: CHART_COLORS[3] },
   ];
 
   /* ------------------------------------------------------------ stat tiles --- */
@@ -210,43 +222,47 @@ export default async function ForecastsPage() {
   return (
     <>
       <PageHeader
-        title="Forecasts"
-        description="Projected net revenue from recent momentum (3-month moving average × clamped growth, docs/09 §8). Solid is realized; dashed is projection."
-        breadcrumbs={[{ label: "Forecasts" }]}
+        title={d.money.forecasts.title}
+        description={d.money.forecasts.description}
+        breadcrumbs={[{ label: d.money.forecasts.title }]}
         actions={canGovern ? <SnapshotButton /> : undefined}
       />
 
       {isEmpty ? (
         <EmptyState
-          title="No forecast yet"
-          description="Forecasts are computed from recorded earnings. Once a few months of statements exist, the projection and its breakdown appear here."
+          title={d.money.forecasts.emptyTitle}
+          description={d.money.forecasts.emptyDesc}
         />
       ) : (
         <>
           <StatTileRow className="mb-6" columns={canGovern ? 4 : 3}>
             <StatTile
-              label="Next month projected"
-              value={nextMonthProjected === null ? "—" : money(nextMonthProjected)}
-              hint={firstForecastMonth ? month(firstForecastMonth) : "No horizon"}
+              label={d.money.forecasts.nextMonthProjected}
+              value={nextMonthProjected === null ? "—" : fm.money(nextMonthProjected)}
+              hint={
+                firstForecastMonth ? fm.month(firstForecastMonth) : d.money.forecasts.noHorizon
+              }
             />
             <StatTile
-              label="Projected (horizon)"
-              value={money(horizonProjected)}
-              hint={`Next ${forecastMonths.length || 3} months`}
+              label={d.money.forecasts.projectedHorizon}
+              value={fm.money(horizonProjected)}
+              hint={d.money.forecasts.nextMonths(forecastMonths.length || 3)}
             />
             <StatTile
-              label="Last actual net"
-              value={lastActualNet === null ? "—" : money(lastActualNet)}
-              hint={lastActualMonth ? month(lastActualMonth) : "No earnings yet"}
+              label={d.money.forecasts.lastActualNet}
+              value={lastActualNet === null ? "—" : fm.money(lastActualNet)}
+              hint={
+                lastActualMonth ? fm.month(lastActualMonth) : d.money.forecasts.noEarningsYet
+              }
             />
             {canGovern ? (
               <StatTile
-                label="Rolling MAPE"
-                value={latestMape === null ? "—" : percent(latestMape)}
+                label={d.money.forecasts.rollingMape}
+                value={latestMape === null ? "—" : fm.percent(latestMape)}
                 hint={
                   accuracy.length > 0
-                    ? "Studio-wide, trailing"
-                    : "Snapshot to start scoring"
+                    ? d.money.forecasts.mapeHint
+                    : d.money.forecasts.mapeEmptyHint
                 }
               />
             ) : null}
@@ -254,43 +270,41 @@ export default async function ForecastsPage() {
 
           <div className="mb-6">
             <LineChartCard
-              title="Projected vs actual net revenue"
-              description="Realized monthly net (solid) continued by the live projection (dashed)."
+              title={d.money.forecasts.lineTitle}
+              description={d.money.forecasts.lineDesc}
               data={lineData}
               xKey="month"
               series={lineSeries}
               connectNulls
               valueFormat="money"
               xFormat="month"
-              emptyMessage="No earnings recorded yet."
+              emptyMessage={d.money.forecasts.lineEmpty}
             />
           </div>
 
           <div className={canGovern ? "grid gap-6 lg:grid-cols-2" : ""}>
             <StackedBarCard
-              title="Forecast breakdown by model"
-              description={`Projected net per model for the next ${
-                forecastMonths.length || 3
-              } months.`}
+              title={d.money.forecasts.breakdownTitle}
+              description={d.money.forecasts.breakdownDesc(forecastMonths.length || 3)}
               data={breakdownData}
               xKey="month"
               series={breakdownSeries}
               valueFormat="money"
               xFormat="month"
-              emptyMessage="No projection to break down yet."
+              emptyMessage={d.money.forecasts.breakdownEmpty}
             />
 
             {canGovern ? (
               <StackedBarCard
-                title="Forecast accuracy"
-                description="Studio-wide prediction error vs realized net, trailing months. Positive over-predicts."
+                title={d.money.forecasts.accuracyTitle}
+                description={d.money.forecasts.accuracyDesc}
                 data={accuracyData}
                 xKey="month"
                 series={accuracySeries}
                 showTotal={false}
                 valueFormat="percent-signed"
                 xFormat="month"
-                emptyMessage="No snapshots scored yet — snapshot a forecast, then wait for its month to close."
+                emptyMessage={d.money.forecasts.accuracyEmpty}
               />
             ) : null}
           </div>

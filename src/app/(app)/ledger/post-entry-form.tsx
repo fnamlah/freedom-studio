@@ -10,7 +10,8 @@ import { Field, Label } from "@/components/ui/label";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { money } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { postLedgerEntry } from "./actions";
 
@@ -53,6 +54,8 @@ function num(value: string): number {
  */
 export function PostEntryForm({ payees }: { payees: PayeePickOption[] }) {
   const router = useRouter();
+  const d = useDict();
+  const fm = fmt(useLocale());
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
@@ -64,8 +67,8 @@ export function PostEntryForm({ payees }: { payees: PayeePickOption[] }) {
   );
 
   const entryOptions: SelectOption[] = [
-    { value: "adjustment", label: "Adjustment (±)" },
-    { value: "deduction", label: "Deduction (−)" },
+    { value: "adjustment", label: d.money.ledger.postAdjustmentOption },
+    { value: "deduction", label: d.money.ledger.postDeductionOption },
   ];
 
   const magnitude = Math.abs(num(form.amount));
@@ -101,11 +104,11 @@ export function PostEntryForm({ payees }: { payees: PayeePickOption[] }) {
       });
 
       if (result.ok) {
-        success("Ledger entry posted", result.message);
+        success(d.money.ledger.postToastOk, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not post entry", result.error);
+        error(d.money.ledger.postToastErr, result.error);
       }
     });
   }
@@ -114,42 +117,39 @@ export function PostEntryForm({ payees }: { payees: PayeePickOption[] }) {
 
   return (
     <>
-      <Button onClick={openDialog}>Post adjustment</Button>
+      <Button onClick={openDialog}>{d.money.ledger.postCta}</Button>
 
       <Dialog
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title="Post a ledger entry"
-        description="Manual corrections only. The ledger is append-only — fix a wrong posting with a reversing adjustment, never an edit (docs/09 §5.2)."
+        title={d.money.ledger.postTitle}
+        description={d.money.ledger.postDesc}
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="ledger-entry-form" loading={isRunning} disabled={noPayees}>
-              Post entry
+              {d.money.ledger.postSubmit}
             </Button>
           </>
         }
       >
         {noPayees ? (
-          <p className="text-sm text-muted">
-            No payees are available. Add a model or operator first — every ledger entry targets
-            exactly one payee.
-          </p>
+          <p className="text-sm text-muted">{d.money.ledger.postNoPayees}</p>
         ) : (
           <form id="ledger-entry-form" onSubmit={submit} className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field help="Money is owed to a model or operator — never the studio (docs/09 §1).">
+              <Field help={d.money.ledger.postPayeeHelp}>
                 <Label htmlFor="ledger-payee" required>
-                  Payee
+                  {d.money.ledger.payee}
                 </Label>
                 <Select
                   id="ledger-payee"
                   required
-                  placeholder="Select a payee…"
+                  placeholder={d.money.ledger.postSelectPayee}
                   options={payeeOptions}
                   value={form.payee}
                   onChange={(e) => set("payee", e.target.value)}
@@ -159,12 +159,12 @@ export function PostEntryForm({ payees }: { payees: PayeePickOption[] }) {
               <Field
                 help={
                   form.entry_type === "deduction"
-                    ? "Withheld from the payee — stored as a negative amount."
-                    : "A correction: positive credits the payee, negative reverses a prior posting."
+                    ? d.money.ledger.postDeductionHelp
+                    : d.money.ledger.postAdjustmentHelp
                 }
               >
                 <Label htmlFor="ledger-type" required>
-                  Entry type
+                  {d.money.ledger.postEntryTypeLabel}
                 </Label>
                 <Select
                   id="ledger-type"
@@ -180,12 +180,12 @@ export function PostEntryForm({ payees }: { payees: PayeePickOption[] }) {
               <Field
                 help={
                   form.entry_type === "deduction"
-                    ? "Enter the amount to withhold; the sign is applied for you."
-                    : "Use a minus sign to reverse an earlier credit."
+                    ? d.money.ledger.postAmountHelpDeduction
+                    : d.money.ledger.postAmountHelpAdjustment
                 }
               >
-                <Label htmlFor="ledger-amount" required hint="≠ 0">
-                  Amount
+                <Label htmlFor="ledger-amount" required hint={d.money.ledger.postAmountHint}>
+                  {d.money.ledger.postAmount}
                 </Label>
                 <Input
                   id="ledger-amount"
@@ -198,9 +198,9 @@ export function PostEntryForm({ payees }: { payees: PayeePickOption[] }) {
                 />
               </Field>
 
-              <Field help="3-letter code, e.g. USD.">
+              <Field help={d.money.ledger.postCurrencyHelp}>
                 <Label htmlFor="ledger-currency" required>
-                  Currency
+                  {d.money.ledger.postCurrency}
                 </Label>
                 <Input
                   id="ledger-currency"
@@ -215,26 +215,23 @@ export function PostEntryForm({ payees }: { payees: PayeePickOption[] }) {
               </Field>
             </div>
 
-            <Field help="Optional. Recorded on the entry for provenance.">
-              <Label htmlFor="ledger-note">Description</Label>
+            <Field help={d.money.ledger.postDescriptionHelp}>
+              <Label htmlFor="ledger-note">{d.money.ledger.postDescription}</Label>
               <Textarea
                 id="ledger-note"
                 rows={2}
                 value={form.description}
                 onChange={(e) => set("description", e.target.value)}
-                placeholder="e.g. Reversal of duplicated March share"
+                placeholder={d.money.ledger.postDescriptionPlaceholder}
               />
             </Field>
 
-            <p className="text-xs text-muted">
-              Posts as:{" "}
-              <span
-                className={
-                  preview < 0 ? "font-medium text-danger" : "font-medium text-foreground"
-                }
-              >
-                {money(preview, form.currency || "USD", { signed: true })}
-              </span>
+            <p
+              className={
+                preview < 0 ? "text-xs text-danger" : "text-xs text-muted"
+              }
+            >
+              {d.money.ledger.postsAs(fm.money(preview, form.currency || "USD", { signed: true }))}
             </p>
           </form>
         )}

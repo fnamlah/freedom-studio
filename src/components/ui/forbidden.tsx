@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+import { useDict } from "@/lib/i18n/client";
 
 export type ForbiddenViewProps = {
   title?: string;
@@ -16,13 +19,21 @@ export type ForbiddenViewProps = {
  *
  * Deliberately says nothing about what exists behind the wall: RLS is the real
  * boundary (docs/02 §3), and this page must not become an enumeration oracle.
+ *
+ * A client component so that its default copy can come from the dictionary: the
+ * `@/components/ui` barrel is imported by client components, so this module can
+ * never reach for `next/headers` the way a server-side `getDict()` would.
+ * `title` and `message` stay overridable for callers with something specific to
+ * say — `forbidden()` passes `undefined` and gets the translated defaults.
  */
 export function ForbiddenView({
-  title = "Not available for your role",
-  message = "Your account does not have access to this area. If you believe this is a mistake, contact the studio owner.",
+  title,
+  message,
   requiredRoles,
   backHref = "/dashboard",
 }: ForbiddenViewProps) {
+  const d = useDict();
+
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4">
       <div className="w-full max-w-md rounded-lg border border-border bg-surface p-8 text-center">
@@ -42,12 +53,12 @@ export function ForbiddenView({
           </svg>
         </div>
 
-        <h1 className="text-lg font-semibold text-foreground">{title}</h1>
-        <p className="mt-2 text-sm text-muted">{message}</p>
+        <h1 className="text-lg font-semibold text-foreground">{title ?? d.auth.forbiddenTitle}</h1>
+        <p className="mt-2 text-sm text-muted">{message ?? d.authFlow.forbiddenMessage}</p>
 
         {requiredRoles && requiredRoles.length > 0 ? (
           <p className="mt-3 text-xs text-muted">
-            Required role{requiredRoles.length > 1 ? "s" : ""}:{" "}
+            {d.authFlow.requiredRoles(requiredRoles.length)}{" "}
             <span className="text-foreground">{requiredRoles.join(", ")}</span>
           </p>
         ) : null}
@@ -55,7 +66,7 @@ export function ForbiddenView({
         <div className="mt-6">
           <Link href={backHref}>
             <Button variant="secondary" size="sm">
-              Back to dashboard
+              {d.auth.backToDashboard}
             </Button>
           </Link>
         </div>

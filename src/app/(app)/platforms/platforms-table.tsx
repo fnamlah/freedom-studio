@@ -9,10 +9,11 @@ import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { EM_DASH } from "@/lib/format";
+import { useDict } from "@/lib/i18n/client";
 
 import { setPlatformActive } from "./actions";
 import { PlatformForm, type EditablePlatform } from "./platform-form";
-import { PLATFORM_ACTIVE_META, PLATFORM_ACTIVE_OPTIONS } from "./status";
+import { platformActiveMeta, platformActiveOptions } from "./status";
 
 export type PlatformRowView = {
   id: string;
@@ -24,12 +25,14 @@ export type PlatformRowView = {
 
 /** Reference list of platforms with an inline activation toggle and edit dialog. */
 export function PlatformsTable({ rows }: { rows: PlatformRowView[] }) {
+  const d = useDict();
+
   if (rows.length === 0) {
     return (
       <EmptyState
         bare
-        title="No platforms yet"
-        description="Add the webcam platforms the studio works with, then link model accounts."
+        title={d.studio.platforms.platformsEmptyTitle}
+        description={d.studio.platforms.platformsEmptyDescription}
       />
     );
   }
@@ -38,18 +41,18 @@ export function PlatformsTable({ rows }: { rows: PlatformRowView[] }) {
     <Table>
       <THead>
         <TR>
-          <TH>Platform</TH>
-          <TH>Website</TH>
-          <TH align="right">Accounts</TH>
-          <TH>Status</TH>
+          <TH>{d.studio.platforms.colPlatform}</TH>
+          <TH>{d.studio.platforms.colWebsite}</TH>
+          <TH align="right">{d.studio.platforms.colAccounts}</TH>
+          <TH>{d.studio.platforms.colStatus}</TH>
           <TH align="right">
-            <span className="sr-only">Actions</span>
+            <span className="sr-only">{d.common.actions}</span>
           </TH>
         </TR>
       </THead>
       <TBody>
         {rows.map((platform) => {
-          const meta = PLATFORM_ACTIVE_META[platform.is_active ? "active" : "inactive"];
+          const meta = platformActiveMeta(d, platform.is_active);
           return (
             <TR key={platform.id}>
               <TD className="font-medium text-foreground">{platform.name}</TD>
@@ -112,6 +115,7 @@ function ActiveToggle({ id, isActive }: { id: string; isActive: boolean }) {
   const { success, error } = useToast();
   const [value, setValue] = useState(isActive);
   const [isRunning, startTransition] = useTransition();
+  const d = useDict();
 
   function change(next: boolean) {
     if (next === value) return;
@@ -121,20 +125,20 @@ function ActiveToggle({ id, isActive }: { id: string; isActive: boolean }) {
     startTransition(async () => {
       const result = await setPlatformActive({ id, is_active: next });
       if (result.ok) {
-        success("Platform updated", result.message);
+        success(d.studio.platforms.toastPlatformToggled, result.message);
         router.refresh();
       } else {
         setValue(previous);
-        error("Could not change platform", result.error);
+        error(d.studio.platforms.toastPlatformToggleFailed, result.error);
       }
     });
   }
 
   return (
     <Select
-      aria-label="Toggle platform active state"
+      aria-label={d.studio.platforms.activeToggleAria}
       className="h-9 w-32"
-      options={PLATFORM_ACTIVE_OPTIONS}
+      options={platformActiveOptions(d)}
       value={value ? "active" : "inactive"}
       disabled={isRunning}
       onChange={(e) => change(e.target.value === "active")}

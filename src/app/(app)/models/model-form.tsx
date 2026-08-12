@@ -10,9 +10,10 @@ import { Field, Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { useDict } from "@/lib/i18n/client";
 
 import { createModel, updateModel } from "./actions";
-import { MODEL_STATUS_OPTIONS, type ModelStatus } from "./status";
+import { modelStatusOptions, type ModelStatus } from "./status";
 
 /** The subset of columns the form reads/writes (sensitive fields included). */
 export type EditableModel = {
@@ -77,6 +78,7 @@ export function ModelForm({
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(() => initialState(model));
+  const d = useDict();
 
   const isCreate = mode === "create";
 
@@ -126,11 +128,19 @@ export function ModelForm({
           });
 
       if (result.ok) {
-        success(isCreate ? "Model added" : "Model updated", result.message);
+        success(
+          isCreate ? d.studio.models.toastCreated : d.studio.models.toastUpdated,
+          result.message,
+        );
         setOpen(false);
         router.refresh();
       } else {
-        error(isCreate ? "Could not add model" : "Could not update model", result.error);
+        error(
+          isCreate
+            ? d.studio.models.toastCreateFailed
+            : d.studio.models.toastUpdateFailed,
+          result.error,
+        );
       }
     });
   }
@@ -138,10 +148,10 @@ export function ModelForm({
   return (
     <>
       {isCreate ? (
-        <Button onClick={openDialog}>New model</Button>
+        <Button onClick={openDialog}>{d.studio.models.newModel}</Button>
       ) : (
         <Button variant="outline" size="sm" onClick={openDialog}>
-          Edit
+          {d.common.edit}
         </Button>
       )}
 
@@ -149,20 +159,20 @@ export function ModelForm({
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title={isCreate ? "Add a model" : "Edit model"}
+        title={isCreate ? d.studio.models.createTitle : d.studio.models.editTitle}
         description={
           isCreate
-            ? "Create the business record. A self-service login can be linked later via an invite."
-            : "Update this model's profile. Lifecycle status is changed from the header."
+            ? d.studio.models.createDescription
+            : d.studio.models.editDescription
         }
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="model-form" loading={isRunning}>
-              {isCreate ? "Add model" : "Save changes"}
+              {isCreate ? d.studio.models.submitCreate : d.studio.models.submitEdit}
             </Button>
           </>
         }
@@ -171,7 +181,7 @@ export function ModelForm({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field>
               <Label htmlFor="model-stage-name" required>
-                Stage name
+                {d.studio.models.fieldStageName}
               </Label>
               <Input
                 id="model-stage-name"
@@ -179,13 +189,13 @@ export function ModelForm({
                 autoComplete="off"
                 value={form.stage_name}
                 onChange={(e) => field("stage_name")(e.target.value)}
-                placeholder="Public working name"
+                placeholder={d.studio.models.placeholderStageName}
               />
             </Field>
 
-            <Field help="Sensitive — visible to Super Admin and Managers only.">
+            <Field help={d.studio.models.helpLegalName}>
               <Label htmlFor="model-legal-name" required>
-                Legal name
+                {d.studio.models.fieldLegalName}
               </Label>
               <Input
                 id="model-legal-name"
@@ -193,15 +203,15 @@ export function ModelForm({
                 autoComplete="off"
                 value={form.legal_name}
                 onChange={(e) => field("legal_name")(e.target.value)}
-                placeholder="Full legal name"
+                placeholder={d.studio.models.placeholderLegalName}
               />
             </Field>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field help="Must be 18 or older — enforced by the database.">
+            <Field help={d.studio.models.helpDob}>
               <Label htmlFor="model-dob" required>
-                Date of birth
+                {d.studio.models.fieldDob}
               </Label>
               <Input
                 id="model-dob"
@@ -212,9 +222,9 @@ export function ModelForm({
               />
             </Field>
 
-            <Field help="Legacy studio-cut default, superseded by commission schemes.">
-              <Label htmlFor="model-commission" required hint="0–100%">
-                Commission %
+            <Field help={d.studio.models.helpCommission}>
+              <Label htmlFor="model-commission" required hint={d.studio.models.hintCommission}>
+                {d.studio.models.fieldCommission}
               </Label>
               <Input
                 id="model-commission"
@@ -232,33 +242,33 @@ export function ModelForm({
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field>
-              <Label htmlFor="model-email">Email</Label>
+              <Label htmlFor="model-email">{d.studio.models.fieldEmail}</Label>
               <Input
                 id="model-email"
                 type="email"
                 autoComplete="off"
                 value={form.email}
                 onChange={(e) => field("email")(e.target.value)}
-                placeholder="model@example.com"
+                placeholder={d.studio.models.placeholderEmail}
               />
             </Field>
 
             <Field>
-              <Label htmlFor="model-phone">Phone</Label>
+              <Label htmlFor="model-phone">{d.studio.models.fieldPhone}</Label>
               <Input
                 id="model-phone"
                 type="tel"
                 autoComplete="off"
                 value={form.phone}
                 onChange={(e) => field("phone")(e.target.value)}
-                placeholder="Optional"
+                placeholder={d.studio.models.placeholderPhone}
               />
             </Field>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field help="ISO 3166-1 alpha-2, e.g. US, GB.">
-              <Label htmlFor="model-country">Country</Label>
+            <Field help={d.studio.models.helpCountry}>
+              <Label htmlFor="model-country">{d.studio.models.fieldCountry}</Label>
               <Input
                 id="model-country"
                 autoComplete="off"
@@ -271,7 +281,7 @@ export function ModelForm({
             </Field>
 
             <Field>
-              <Label htmlFor="model-start-date">Start date</Label>
+              <Label htmlFor="model-start-date">{d.studio.models.fieldStartDate}</Label>
               <Input
                 id="model-start-date"
                 type="date"
@@ -282,26 +292,26 @@ export function ModelForm({
           </div>
 
           {isCreate ? (
-            <Field help="Lifecycle state. Change it later from the model's page.">
+            <Field help={d.studio.models.helpStatus}>
               <Label htmlFor="model-status" required>
-                Status
+                {d.studio.models.fieldStatus}
               </Label>
               <Select
                 id="model-status"
-                options={MODEL_STATUS_OPTIONS}
+                options={modelStatusOptions(d)}
                 value={form.status}
                 onChange={(e) => field("status")(e.target.value as ModelStatus)}
               />
             </Field>
           ) : null}
 
-          <Field help="Internal only — never shown in self-service views.">
-            <Label htmlFor="model-notes">Notes</Label>
+          <Field help={d.studio.models.helpNotes}>
+            <Label htmlFor="model-notes">{d.studio.models.fieldNotes}</Label>
             <Textarea
               id="model-notes"
               value={form.notes}
               onChange={(e) => field("notes")(e.target.value)}
-              placeholder="Anything the team should know"
+              placeholder={d.studio.models.placeholderNotes}
             />
           </Field>
         </form>

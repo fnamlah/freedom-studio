@@ -4,9 +4,8 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 
 import { Select, type SelectOption } from "@/components/ui/select";
-import { MODEL_STATUS_OPTIONS } from "./status";
-
-const OPTIONS: SelectOption[] = [{ value: "all", label: "All statuses" }, ...MODEL_STATUS_OPTIONS];
+import { useDict } from "@/lib/i18n/client";
+import { modelStatusOptions } from "./status";
 
 /**
  * URL-driven status filter. Writes `?status=` so the selection is shareable and
@@ -15,14 +14,20 @@ const OPTIONS: SelectOption[] = [{ value: "all", label: "All statuses" }, ...MOD
 export function StatusFilter({ current }: { current: string }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const d = useDict();
+
+  const options: SelectOption[] = [
+    { value: "all", label: d.studio.models.allStatuses },
+    ...modelStatusOptions(d),
+  ];
 
   return (
     <label className="flex items-center gap-2 text-xs text-muted">
-      <span className="whitespace-nowrap">Filter</span>
+      <span className="whitespace-nowrap">{d.studio.models.filterLabel}</span>
       <Select
-        aria-label="Filter models by status"
+        aria-label={d.studio.models.filterAria}
         className="h-9 w-44"
-        options={OPTIONS}
+        options={options}
         value={current}
         disabled={isPending}
         onChange={(e) => {

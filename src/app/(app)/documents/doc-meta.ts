@@ -6,9 +6,13 @@
  * vocabulary, the upload allow-list (an app-layer UX check — storage RLS remains
  * the authority, docs/06 §3.1), and the two derivations that are never stored:
  * compliance status (docs/06 §4) and share-link status (docs/06 §5.7).
+ *
+ * The enum VALUES here are the database's own and stay English; their LABELS
+ * live in `d.documents.*` and are looked up by these helpers.
  */
 
 import type { Database } from "@/lib/database.types";
+import type { Dictionary } from "@/lib/i18n";
 
 /* --------------------------------------------------------------- doc types --- */
 
@@ -24,25 +28,16 @@ export const DOCUMENT_TYPES = [
 
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
-export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
-  government_id: "Government ID",
-  passport: "Passport",
-  contract: "Contract",
-  model_release: "Model release",
-  consent_form: "Consent form",
-  tax_form: "Tax form",
-  other: "Other",
-};
-
 /** `{ value, label }` pairs for the `Select` picker (assignable to SelectOption[]). */
-export const DOCUMENT_TYPE_OPTIONS: { value: DocumentType; label: string }[] =
-  DOCUMENT_TYPES.map((value) => ({ value, label: DOCUMENT_TYPE_LABELS[value] }));
+export function documentTypeOptions(d: Dictionary): { value: DocumentType; label: string }[] {
+  return DOCUMENT_TYPES.map((value) => ({ value, label: d.documents.docType[value] }));
+}
 
-export function documentTypeLabel(value: string | null | undefined): string {
-  if (value && value in DOCUMENT_TYPE_LABELS) {
-    return DOCUMENT_TYPE_LABELS[value as DocumentType];
+export function documentTypeLabel(d: Dictionary, value: string | null | undefined): string {
+  if (value && value in d.documents.docType) {
+    return d.documents.docType[value as DocumentType];
   }
-  return "Document";
+  return d.documents.docTypeFallback;
 }
 
 /* ------------------------------------------------------------- upload rules --- */
@@ -80,9 +75,11 @@ export function isAllowedMime(mime: string | null | undefined): mime is AllowedM
   return typeof mime === "string" && (ALLOWED_MIME_TYPES as readonly string[]).includes(mime);
 }
 
-/** Human-friendly accept summary for the file picker and hint text. */
-export const ALLOWED_MIME_LABEL =
-  "PDF, Word (.doc/.docx), Excel (.xls/.xlsx), PowerPoint (.pptx), CSV, or an image";
+/**
+ * Human-friendly accept summary for the file picker and hint text lives in the
+ * dictionary as `d.documents.allowedMimeLabel` — the extensions are universal
+ * but the sentence around them is not.
+ */
 
 /** The `accept` attribute for the `<input type="file">`. */
 export const FILE_ACCEPT_ATTR = ALLOWED_MIME_TYPES.join(",");
@@ -125,13 +122,14 @@ export function deriveComplianceStatus(
   return "valid";
 }
 
+/** Badge colour per compliance state; the labels are `d.documents.compliance`. */
 export const COMPLIANCE_META: Record<
   ComplianceStatus,
-  { label: string; variant: "success" | "warning" | "danger" }
+  { variant: "success" | "warning" | "danger" }
 > = {
-  valid: { label: "Valid", variant: "success" },
-  expiring: { label: "Expiring soon", variant: "warning" },
-  expired: { label: "Expired", variant: "danger" },
+  valid: { variant: "success" },
+  expiring: { variant: "warning" },
+  expired: { variant: "danger" },
 };
 
 /* ----------------------------------------------------------- share status --- */
@@ -159,12 +157,13 @@ export function deriveShareStatus(
   return "active";
 }
 
+/** Badge colour per share state; the labels are `d.documents.shareStatus`. */
 export const SHARE_STATUS_META: Record<
   ShareStatus,
-  { label: string; variant: "success" | "muted" | "warning" | "danger" }
+  { variant: "success" | "muted" | "warning" | "danger" }
 > = {
-  active: { label: "Active", variant: "success" },
-  expired: { label: "Expired", variant: "muted" },
-  exhausted: { label: "View limit reached", variant: "warning" },
-  revoked: { label: "Revoked", variant: "danger" },
+  active: { variant: "success" },
+  expired: { variant: "muted" },
+  exhausted: { variant: "warning" },
+  revoked: { variant: "danger" },
 };

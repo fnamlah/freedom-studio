@@ -8,7 +8,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { dateRange, money } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { deleteEarning } from "./actions";
 import {
@@ -45,11 +46,14 @@ export function EarningsTable({
   models: ModelOption[];
   accounts: AccountOption[];
 }) {
+  const d = useDict();
+  const fm = fmt(useLocale());
+
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No statements to show"
-        description="No earnings statements match this view. Record one, or clear the model filter to see the full list."
+        title={d.studio.earnings.emptyTitle}
+        description={d.studio.earnings.emptyDescription}
       />
     );
   }
@@ -58,13 +62,13 @@ export function EarningsTable({
     <Table containerClassName="rounded-lg border border-border">
       <THead>
         <TR>
-          <TH>Model</TH>
-          <TH>Account</TH>
-          <TH>Period</TH>
-          <TH align="right">Gross</TH>
-          <TH align="right">Platform fee</TH>
-          <TH align="right">Net</TH>
-          <TH align="right">Actions</TH>
+          <TH>{d.studio.earnings.colModel}</TH>
+          <TH>{d.studio.earnings.colAccount}</TH>
+          <TH>{d.studio.earnings.colPeriod}</TH>
+          <TH align="right">{d.studio.earnings.colGross}</TH>
+          <TH align="right">{d.studio.earnings.colFee}</TH>
+          <TH align="right">{d.studio.earnings.colNet}</TH>
+          <TH align="right">{d.common.actions}</TH>
         </TR>
       </THead>
       <TBody>
@@ -85,13 +89,13 @@ export function EarningsTable({
             <TR key={row.id}>
               <TD className="font-medium text-foreground">{row.model_name}</TD>
               <TD className="text-muted">{row.account_label}</TD>
-              <TD className="text-muted">{dateRange(row.period_start, row.period_end)}</TD>
-              <TD numeric>{money(row.gross_amount, row.currency)}</TD>
+              <TD className="text-muted">{fm.dateRange(row.period_start, row.period_end)}</TD>
+              <TD numeric>{fm.money(row.gross_amount, row.currency)}</TD>
               <TD numeric className="text-muted">
-                {money(row.platform_fee_amount, row.currency)}
+                {fm.money(row.platform_fee_amount, row.currency)}
               </TD>
               <TD numeric className="font-medium text-foreground">
-                {money(row.net_amount, row.currency)}
+                {fm.money(row.net_amount, row.currency)}
               </TD>
               <TD align="right">
                 <div className="flex items-center justify-end gap-2">
@@ -103,7 +107,7 @@ export function EarningsTable({
                   />
                   <DeleteEarningButton
                     id={row.id}
-                    label={`${row.model_name} · ${dateRange(row.period_start, row.period_end)}`}
+                    label={`${row.model_name} · ${fm.dateRange(row.period_start, row.period_end)}`}
                   />
                 </div>
               </TD>
@@ -121,16 +125,17 @@ function DeleteEarningButton({ id, label }: { id: string; label: string }) {
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
+  const d = useDict();
 
   function confirm() {
     startTransition(async () => {
       const result = await deleteEarning({ id });
       if (result.ok) {
-        success("Statement deleted", result.message);
+        success(d.studio.earnings.toastDeleted, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not delete statement", result.error);
+        error(d.studio.earnings.toastDeleteFailed, result.error);
       }
     });
   }
@@ -138,30 +143,27 @@ function DeleteEarningButton({ id, label }: { id: string; label: string }) {
   return (
     <>
       <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
-        Delete
+        {d.common.delete}
       </Button>
       <Dialog
         open={open}
         onClose={() => !isRunning && setOpen(false)}
         dismissible={!isRunning}
-        title="Delete statement?"
-        description={`This permanently removes the earnings statement for ${label}. This can't be undone.`}
+        title={d.studio.earnings.deleteTitle}
+        description={d.studio.earnings.deleteDescription(label)}
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button variant="danger" onClick={confirm} loading={isRunning}>
-              Delete statement
+              {d.studio.earnings.deleteConfirm}
             </Button>
           </>
         }
       >
-        <p className="text-sm text-muted">
-          Earnings are the money source of truth. Deleting a statement removes it from the split
-          inputs; already-posted ledger entries are unaffected.
-        </p>
+        <p className="text-sm text-muted">{d.studio.earnings.deleteBody}</p>
       </Dialog>
     </>
   );

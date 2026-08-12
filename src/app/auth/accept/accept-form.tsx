@@ -7,6 +7,8 @@ import { z } from "zod";
 import { AuthCard, AuthError } from "@/components/auth/auth-card";
 import { Button, Field, Input, Label, Spinner } from "@/components/ui";
 import { AUTH_ROUTES } from "@/lib/auth/routes";
+import type { Dictionary } from "@/lib/i18n";
+import { useDict } from "@/lib/i18n/client";
 import { createBrowserSupabase } from "@/lib/supabase/browser";
 
 /**
@@ -16,22 +18,25 @@ import { createBrowserSupabase } from "@/lib/supabase/browser";
  */
 const MIN_PASSWORD_LENGTH = 10;
 
-const schema = z
-  .object({
-    password: z
-      .string()
-      .min(MIN_PASSWORD_LENGTH, `Use at least ${MIN_PASSWORD_LENGTH} characters.`),
-    confirm: z.string(),
-  })
-  .refine((value) => value.password === value.confirm, {
-    path: ["confirm"],
-    message: "Passwords do not match.",
-  });
+/** A factory, so the validation messages are in the reader's language. */
+const makeSchema = (d: Dictionary) =>
+  z
+    .object({
+      password: z
+        .string()
+        .min(MIN_PASSWORD_LENGTH, d.authFlow.passwordTooShort(MIN_PASSWORD_LENGTH)),
+      confirm: z.string(),
+    })
+    .refine((value) => value.password === value.confirm, {
+      path: ["confirm"],
+      message: d.auth.passwordMismatch,
+    });
 
 type Phase = "checking" | "no_session" | "ready";
 
 export function AcceptForm() {
   const router = useRouter();
+  const d = useDict();
   const [phase, setPhase] = useState<Phase>("checking");
   const [email, setEmail] = useState<string | null>(null);
   const [password, setPassword] = useState("");
@@ -103,7 +108,7 @@ export function AcceptForm() {
     setError(null);
     setFieldError({});
 
-    const parsed = schema.safeParse({ password, confirm });
+    const parsed = makeSchema(d).safeParse({ password, confirm });
     if (!parsed.success) {
       const next: { password?: string; confirm?: string } = {};
       for (const issue of parsed.error.issues) {
@@ -132,9 +137,9 @@ export function AcceptForm() {
 
   if (phase === "checking") {
     return (
-      <AuthCard title="Preparing your invitation">
+      <AuthCard title={d.authFlow.preparingInvite}>
         <div className="flex items-center justify-center gap-3 py-6 text-sm text-muted">
-          <Spinner /> Verifying your invite link…
+          <Spinner /> {d.authFlow.verifyingInviteLink}
         </div>
       </AuthCard>
     );
@@ -143,29 +148,25 @@ export function AcceptForm() {
   if (phase === "no_session") {
     return (
       <AuthCard
-        title="Invite link is invalid or expired"
-        description="This invitation link could not be verified. Invite links are single-use and expire after 7 days."
+        title={d.authFlow.inviteInvalidTitle}
+        description={d.authFlow.inviteInvalidBody}
         footer={
           <a className="text-primary hover:underline" href={AUTH_ROUTES.login}>
-            Go to sign in
+            {d.authFlow.goToSignIn}
           </a>
         }
       >
         {error ? <AuthError>{error}</AuthError> : null}
-        <p className="text-sm text-muted">
-          Ask your administrator to send a fresh invitation, then open the new link.
-        </p>
+        <p className="text-sm text-muted">{d.authFlow.inviteAskAdmin}</p>
       </AuthCard>
     );
   }
 
   return (
     <AuthCard
-      title="Set your password"
+      title={d.auth.setPasswordTitle}
       description={
-        email
-          ? `Choose a password for ${email}. You'll set up two-factor authentication next.`
-          : "Choose a password. You'll set up two-factor authentication next."
+        email ? d.authFlow.setPasswordForEmail(email) : d.authFlow.setPasswordNoEmail
       }
     >
       {error ? <AuthError>{error}</AuthError> : null}
@@ -173,7 +174,7 @@ export function AcceptForm() {
       <form onSubmit={onSubmit} noValidate className="space-y-4">
         <Field error={fieldError.password}>
           <Label htmlFor="password" required>
-            New password
+            {d.authFlow.newPassword}
           </Label>
           <Input
             id="password"
@@ -191,10 +192,12 @@ export function AcceptForm() {
 
         <Field
           error={fieldError.confirm}
-          help={fieldError.confirm ? undefined : `At least ${MIN_PASSWORD_LENGTH} characters.`}
+          help={
+            fieldError.confirm ? undefined : d.authFlow.passwordMinHelp(MIN_PASSWORD_LENGTH)
+          }
         >
           <Label htmlFor="confirm" required>
-            Confirm password
+            {d.auth.confirmPassword}
           </Label>
           <Input
             id="confirm"
@@ -210,7 +213,7 @@ export function AcceptForm() {
         </Field>
 
         <Button type="submit" fullWidth loading={pending}>
-          Set password and continue
+          {d.auth.setPasswordCta}
         </Button>
       </form>
     </AuthCard>

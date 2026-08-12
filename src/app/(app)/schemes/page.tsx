@@ -5,13 +5,17 @@ import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import type { SelectOption } from "@/components/ui/select";
 import { requireRole } from "@/lib/auth/guard";
 import { isoDate } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { ResolutionExplainer } from "./resolution-explainer";
 import { SchemeForm } from "./scheme-form";
 import { SchemesTable } from "./schemes-table";
 import { deriveScope, deriveStatus, SCOPE_META, type SchemeRowView } from "./scheme-meta";
 
-export const metadata: Metadata = { title: "Commission schemes" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).money.schemes.metaTitle };
+}
 
 /**
  * Commission schemes — Super Admin writes, Manager reads (docs/03 §3: schemes are
@@ -26,7 +30,11 @@ export const metadata: Metadata = { title: "Commission schemes" };
  */
 export default async function SchemesPage() {
   const { supabase, role } = await requireRole("super_admin", "manager");
+  const d = await getDict();
+  const fm = fmt(await getLocale());
   const canWrite = role === "super_admin";
+  // ISO for the comparison (lexicographic on ISO dates is exact); the tile
+  // renders the same instant through the locale formatter.
   const todayIso = isoDate(new Date());
 
   const [schemesRes, modelsRes, accountsRes, platformsRes] = await Promise.all([
@@ -53,8 +61,8 @@ export default async function SchemesPage() {
   const platformName = new Map(platforms.map((p) => [p.id, p.name]));
   const accountLabel = new Map(
     accounts.map((a) => {
-      const model = modelName.get(a.model_id) ?? "Unknown model";
-      const platform = platformName.get(a.platform_id) ?? "Unknown platform";
+      const model = modelName.get(a.model_id) ?? d.money.schemes.unknownModel;
+      const platform = platformName.get(a.platform_id) ?? d.money.schemes.unknownPlatform;
       return [a.id, `${model} · ${platform} (@${a.username})`] as const;
     }),
   );
@@ -64,10 +72,10 @@ export default async function SchemesPage() {
       const scope = deriveScope(s);
       const scopeLabel =
         scope === "account"
-          ? accountLabel.get(s.platform_account_id ?? "") ?? "Unknown account"
+          ? accountLabel.get(s.platform_account_id ?? "") ?? d.money.schemes.unknownAccount
           : scope === "model"
-            ? modelName.get(s.model_id ?? "") ?? "Unknown model"
-            : "Studio default";
+            ? modelName.get(s.model_id ?? "") ?? d.money.schemes.unknownModel
+            : d.money.schemes.studioDefault;
 
       return {
         id: s.id,
@@ -110,9 +118,9 @@ export default async function SchemesPage() {
   return (
     <>
       <PageHeader
-        title="Commission schemes"
-        description="Three-way splits of studio net revenue — model, operator pool, and studio — scoped and effective-dated. The most specific effective scheme resolves per earning row."
-        breadcrumbs={[{ label: "Commission schemes" }]}
+        title={d.money.schemes.title}
+        description={d.money.schemes.description}
+        breadcrumbs={[{ label: d.money.schemes.title }]}
         actions={
           canWrite ? (
             <SchemeForm
@@ -125,10 +133,26 @@ export default async function SchemesPage() {
       />
 
       <StatTileRow className="mb-6" columns={4}>
-        <StatTile label="Total schemes" value={counts.total} hint="All scopes" />
-        <StatTile label="Active now" value={counts.active} hint={`As of ${todayIso}`} />
-        <StatTile label="Model-specific" value={counts.model} hint="Per-model overrides" />
-        <StatTile label="Account-specific" value={counts.account} hint="Per-account overrides" />
+        <StatTile
+          label={d.money.schemes.statTotal}
+          value={fm.number(counts.total)}
+          hint={d.money.schemes.statTotalHint}
+        />
+        <StatTile
+          label={d.money.schemes.statActive}
+          value={fm.number(counts.active)}
+          hint={d.money.schemes.statActiveHint(fm.date(todayIso))}
+        />
+        <StatTile
+          label={d.money.schemes.statModel}
+          value={fm.number(counts.model)}
+          hint={d.money.schemes.statModelHint}
+        />
+        <StatTile
+          label={d.money.schemes.statAccount}
+          value={fm.number(counts.account)}
+          hint={d.money.schemes.statAccountHint}
+        />
       </StatTileRow>
 
       <div className="mb-6">

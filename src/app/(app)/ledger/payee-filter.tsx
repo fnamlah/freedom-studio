@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 
 import { Select, type SelectOption } from "@/components/ui/select";
+import { useDict } from "@/lib/i18n/client";
 
 /** A payee choice, addressed by the polymorphic `type:id` pair (docs/09 §5.4). */
 export type PayeeOption = {
@@ -27,18 +28,19 @@ export function PayeeFilter({
   basePath?: string;
 }) {
   const router = useRouter();
+  const d = useDict();
   const [isPending, startTransition] = useTransition();
 
   const options: SelectOption[] = [
-    { value: "all", label: "All payees" },
+    { value: "all", label: d.money.ledger.allPayees },
     ...payees,
   ];
 
   return (
     <label className="flex items-center gap-2 text-xs text-muted">
-      <span className="whitespace-nowrap">Payee</span>
+      <span className="whitespace-nowrap">{d.money.ledger.payee}</span>
       <Select
-        aria-label="Filter ledger by payee"
+        aria-label={d.money.ledger.filterAria}
         className="h-9 w-64"
         options={options}
         value={current}

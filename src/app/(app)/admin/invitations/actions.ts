@@ -7,6 +7,8 @@ import { writeAudit } from "@/lib/audit";
 import { isRole, type Role } from "@/lib/auth/roles";
 import { AUTH_ROUTES } from "@/lib/auth/routes";
 import { appBaseUrl } from "@/lib/env";
+import type { Dictionary } from "@/lib/i18n";
+import { getDict } from "@/lib/i18n/server";
 import { guardedAdminClient, isAuthzError } from "@/lib/supabase/admin";
 
 /**
@@ -21,10 +23,18 @@ export type InviteResult =
   | { ok: true; message?: string }
   | { ok: false; error: string };
 
-const inviteSchema = z
+/**
+ * A FACTORY, not a constant: a module-scope schema is built at import time,
+ * before any request exists, so its messages could only ever be one language.
+ * Called inside the action, once the reader's dictionary is known.
+ */
+const inviteSchema = (d: Dictionary) =>
+  z
   .object({
-    email: z.string().trim().toLowerCase().email("Enter a valid email address."),
-    role: z.custom<Role>((value) => isRole(value), { message: "Select a valid role." }),
+    email: z.string().trim().toLowerCase().email(d.adminAi.invitations.errInvalidEmail),
+    role: z.custom<Role>((value) => isRole(value), {
+      message: d.adminAi.invitations.errInvalidRole,
+    }),
     modelId: z.string().uuid().nullish(),
     operatorId: z.string().uuid().nullish(),
   })
@@ -43,9 +53,12 @@ export async function inviteUser(input: {
   modelId?: string | null;
   operatorId?: string | null;
 }): Promise<InviteResult> {
-  const parsed = inviteSchema.safeParse(input);
+  const dictionary = await getDict();
+  const d = dictionary.adminAi.invitations;
+
+  const parsed = inviteSchema(dictionary).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid invitation." };
+    return { ok: false, error: parsed.error.issues[0]?.message ?? d.errInvalid };
   }
   const { email, role, modelId, operatorId } = parsed.data;
 
@@ -68,12 +81,7 @@ export async function inviteUser(input: {
 
     if (insertError || !invitation) {
       const duplicate = insertError?.code === "23505";
-      return {
-        ok: false,
-        error: duplicate
-          ? "A pending invitation already exists for this email."
-          : "Could not create the invitation. Please try again.",
-      };
+      return { ok: false, error: duplicate ? d.errDuplicate : d.errCreateFailed };
     }
 
     // 2. Send the Auth invite. `handle_new_user` will consume the pending row at
@@ -86,8 +94,8 @@ export async function inviteUser(input: {
       // Roll the intent back so it is never left un-emailed (docs/05 §3 note).
       await admin.from("invitations").delete().eq("id", invitation.id);
       const message = /already been registered|already exists/i.test(inviteError.message)
-        ? "An account with this email already exists."
-        : "Could not send the invite email. Please try again.";
+        ? d.errAccountExists
+        : d.errSendFailed;
       return { ok: false, error: message };
     }
 
@@ -100,11 +108,11 @@ export async function inviteUser(input: {
     });
 
     revalidatePath("/admin/invitations");
-    return { ok: true, message: `Invitation sent to ${email}.` };
+    return { ok: true, message: d.okSent(email) };
   } catch (error) {
     if (isAuthzError(error)) {
-      return { ok: false, error: "You are not authorized to invite users." };
+      return { ok: false, error: d.errNotAuthorized };
     }
-    return { ok: false, error: "Something went wrong. Please try again." };
+    return { ok: false, error: dictionary.common.unknownError };
   }
 }

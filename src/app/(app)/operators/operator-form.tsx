@@ -10,9 +10,10 @@ import { Field, Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { useDict } from "@/lib/i18n/client";
 
 import { createOperator, updateOperator } from "./actions";
-import { OPERATOR_STATUS_OPTIONS, type OperatorStatus } from "./status";
+import { operatorStatusOptions, type OperatorStatus } from "./status";
 
 /** The subset of columns the form reads/writes (sensitive `legal_name` included). */
 export type EditableOperator = {
@@ -70,6 +71,7 @@ export function OperatorForm({
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(() => initialState(operator));
+  const d = useDict();
 
   const isCreate = mode === "create";
 
@@ -114,11 +116,19 @@ export function OperatorForm({
           });
 
       if (result.ok) {
-        success(isCreate ? "Operator added" : "Operator updated", result.message);
+        success(
+          isCreate ? d.studio.operators.toastCreated : d.studio.operators.toastUpdated,
+          result.message,
+        );
         setOpen(false);
         router.refresh();
       } else {
-        error(isCreate ? "Could not add operator" : "Could not update operator", result.error);
+        error(
+          isCreate
+            ? d.studio.operators.toastCreateFailed
+            : d.studio.operators.toastUpdateFailed,
+          result.error,
+        );
       }
     });
   }
@@ -126,10 +136,10 @@ export function OperatorForm({
   return (
     <>
       {isCreate ? (
-        <Button onClick={openDialog}>New operator</Button>
+        <Button onClick={openDialog}>{d.studio.operators.newOperator}</Button>
       ) : (
         <Button variant="outline" size="sm" onClick={openDialog}>
-          Edit
+          {d.common.edit}
         </Button>
       )}
 
@@ -137,20 +147,22 @@ export function OperatorForm({
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title={isCreate ? "Add an operator" : "Edit operator"}
+        title={isCreate ? d.studio.operators.createTitle : d.studio.operators.editTitle}
         description={
           isCreate
-            ? "Create the business record. A self-service login can be linked later via an invite."
-            : "Update this operator's profile. Lifecycle status is changed from the header."
+            ? d.studio.operators.createDescription
+            : d.studio.operators.editDescription
         }
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="operator-form" loading={isRunning}>
-              {isCreate ? "Add operator" : "Save changes"}
+              {isCreate
+                ? d.studio.operators.submitCreate
+                : d.studio.operators.submitEdit}
             </Button>
           </>
         }
@@ -159,7 +171,7 @@ export function OperatorForm({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field>
               <Label htmlFor="operator-display-name" required>
-                Display name
+                {d.studio.operators.fieldDisplayName}
               </Label>
               <Input
                 id="operator-display-name"
@@ -167,13 +179,13 @@ export function OperatorForm({
                 autoComplete="off"
                 value={form.display_name}
                 onChange={(e) => field("display_name")(e.target.value)}
-                placeholder="Working name"
+                placeholder={d.studio.operators.placeholderDisplayName}
               />
             </Field>
 
-            <Field help="Sensitive — visible to Super Admin and Managers only.">
+            <Field help={d.studio.operators.helpLegalName}>
               <Label htmlFor="operator-legal-name" required>
-                Legal name
+                {d.studio.operators.fieldLegalName}
               </Label>
               <Input
                 id="operator-legal-name"
@@ -181,40 +193,40 @@ export function OperatorForm({
                 autoComplete="off"
                 value={form.legal_name}
                 onChange={(e) => field("legal_name")(e.target.value)}
-                placeholder="Full legal name"
+                placeholder={d.studio.operators.placeholderLegalName}
               />
             </Field>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field>
-              <Label htmlFor="operator-email">Email</Label>
+              <Label htmlFor="operator-email">{d.studio.operators.fieldEmail}</Label>
               <Input
                 id="operator-email"
                 type="email"
                 autoComplete="off"
                 value={form.email}
                 onChange={(e) => field("email")(e.target.value)}
-                placeholder="operator@example.com"
+                placeholder={d.studio.operators.placeholderEmail}
               />
             </Field>
 
             <Field>
-              <Label htmlFor="operator-phone">Phone</Label>
+              <Label htmlFor="operator-phone">{d.studio.operators.fieldPhone}</Label>
               <Input
                 id="operator-phone"
                 type="tel"
                 autoComplete="off"
                 value={form.phone}
                 onChange={(e) => field("phone")(e.target.value)}
-                placeholder="Optional"
+                placeholder={d.studio.operators.placeholderPhone}
               />
             </Field>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field help="ISO 3166-1 alpha-2, e.g. US, GB.">
-              <Label htmlFor="operator-country">Country</Label>
+            <Field help={d.studio.operators.helpCountry}>
+              <Label htmlFor="operator-country">{d.studio.operators.fieldCountry}</Label>
               <Input
                 id="operator-country"
                 autoComplete="off"
@@ -227,7 +239,9 @@ export function OperatorForm({
             </Field>
 
             <Field>
-              <Label htmlFor="operator-start-date">Start date</Label>
+              <Label htmlFor="operator-start-date">
+                {d.studio.operators.fieldStartDate}
+              </Label>
               <Input
                 id="operator-start-date"
                 type="date"
@@ -238,26 +252,26 @@ export function OperatorForm({
           </div>
 
           {isCreate ? (
-            <Field help="Lifecycle state. Change it later from the operator's page.">
+            <Field help={d.studio.operators.helpStatus}>
               <Label htmlFor="operator-status" required>
-                Status
+                {d.studio.operators.fieldStatus}
               </Label>
               <Select
                 id="operator-status"
-                options={OPERATOR_STATUS_OPTIONS}
+                options={operatorStatusOptions(d)}
                 value={form.status}
                 onChange={(e) => field("status")(e.target.value as OperatorStatus)}
               />
             </Field>
           ) : null}
 
-          <Field help="Internal only — never shown in self-service views.">
-            <Label htmlFor="operator-notes">Notes</Label>
+          <Field help={d.studio.operators.helpNotes}>
+            <Label htmlFor="operator-notes">{d.studio.operators.fieldNotes}</Label>
             <Textarea
               id="operator-notes"
               value={form.notes}
               onChange={(e) => field("notes")(e.target.value)}
-              placeholder="Anything the team should know"
+              placeholder={d.studio.operators.placeholderNotes}
             />
           </Field>
         </form>

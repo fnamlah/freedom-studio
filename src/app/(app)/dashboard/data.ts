@@ -20,6 +20,7 @@ import {
   type SliceDatum,
 } from "@/components/charts/theme";
 import type { Enums } from "@/lib/database.types";
+import type { Dictionary } from "@/lib/i18n";
 import type { ServerSupabaseClient } from "@/lib/supabase/server";
 
 /* ------------------------------------------------------------------ shared */
@@ -34,13 +35,6 @@ export const PAYOUT_STATUS_ORDER: readonly PayoutStatus[] = [
   "cancelled",
 ];
 
-export const PAYOUT_STATUS_LABEL: Record<PayoutStatus, string> = {
-  pending: "Pending",
-  approved: "Approved",
-  paid: "Paid",
-  cancelled: "Cancelled",
-};
-
 /**
  * Payout status is a good/bad signal, so status tokens are sanctioned here
  * (theme rule: status colours only where colour *means* status). "Approved" has
@@ -53,11 +47,18 @@ export const PAYOUT_STATUS_COLOR: Record<PayoutStatus, string> = {
   cancelled: STATUS_COLORS.danger,
 };
 
-const SPLIT_BUCKET_LABEL: Record<string, string> = {
-  studio: "Studio",
-  model: "Model pool",
-  operator: "Operator pool",
-};
+/**
+ * Split buckets are DB slugs; only their display names are translated. The map
+ * is rebuilt per request from the caller's dictionary rather than being a module
+ * constant, because a module constant can only ever hold one language.
+ */
+function splitBucketLabels(d: Dictionary): Record<string, string> {
+  return {
+    studio: d.money.dashboard.splitStudio,
+    model: d.money.dashboard.splitModelPool,
+    operator: d.money.dashboard.splitOperatorPool,
+  };
+}
 
 function num(value: unknown): number {
   const parsed = Number(value);
@@ -181,10 +182,11 @@ function hoursTrend(rows: HoursRow[]): ChartDatum[] {
 function shareSlices<T extends { net_amount: number | null }>(
   rows: T[],
   nameOf: (row: T) => string | null,
+  d: Dictionary,
 ): SliceDatum[] {
   const totals = new Map<string, number>();
   for (const r of rows) {
-    const name = (nameOf(r) ?? "").trim() || "Unattributed";
+    const name = (nameOf(r) ?? "").trim() || d.money.dashboard.unattributed;
     totals.set(name, (totals.get(name) ?? 0) + num(r.net_amount));
   }
   return [...totals.entries()]
@@ -193,11 +195,12 @@ function shareSlices<T extends { net_amount: number | null }>(
     .map(([name, value]) => ({ name, value }));
 }
 
-function splitSlices(rows: SplitRow[]): SliceDatum[] {
+function splitSlices(rows: SplitRow[], d: Dictionary): SliceDatum[] {
+  const labels = splitBucketLabels(d);
   const totals = new Map<string, number>();
   for (const r of rows) {
     const key = (r.bucket ?? "").toLowerCase();
-    const name = SPLIT_BUCKET_LABEL[key] ?? (r.bucket ?? "Other");
+    const name = labels[key] ?? (r.bucket ?? d.money.charts.other);
     totals.set(name, (totals.get(name) ?? 0) + num(r.amount));
   }
   return [...totals.entries()]
@@ -219,7 +222,10 @@ function ledgerShareTrend(rows: LedgerShareRow[]): ChartDatum[] {
 }
 
 /** Payout history → stacked-by-status columns over the months present. */
-function payoutStacks(rows: PayoutRow[]): { data: ChartDatum[]; series: ChartSeries[] } {
+function payoutStacks(
+  rows: PayoutRow[],
+  d: Dictionary,
+): { data: ChartDatum[]; series: ChartSeries[] } {
   const byMonth = new Map<string, Record<PayoutStatus, number>>();
   const present = new Set<PayoutStatus>();
   for (const r of rows) {
@@ -238,7 +244,7 @@ function payoutStacks(rows: PayoutRow[]): { data: ChartDatum[]; series: ChartSer
   const series: ChartSeries[] = PAYOUT_STATUS_ORDER.filter((s) => present.has(s)).map(
     (status) => ({
       key: status,
-      label: PAYOUT_STATUS_LABEL[status],
+      label: d.money.payouts.status[status],
       color: PAYOUT_STATUS_COLOR[status],
     }),
   );
@@ -277,6 +283,7 @@ function projectedVsActual(earn: EarnMonthRow[], forecast: ForecastRow[]): Chart
 function forecastBreakdown(
   forecast: ForecastRow[],
   modelNames: Map<string, string>,
+  d: Dictionary,
   topN = 5,
 ): { data: ChartDatum[]; series: ChartSeries[] } {
   const perModel = new Map<string, number>();
@@ -310,9 +317,9 @@ function forecastBreakdown(
 
   const series: ChartSeries[] = top.map((id) => ({
     key: id,
-    label: modelNames.get(id) ?? "Model",
+    label: modelNames.get(id) ?? d.money.dashboard.fallbackModel,
   }));
-  if (hasOther) series.push({ key: "__other", label: "Other", color: OTHER_COLOR });
+  if (hasOther) series.push({ key: "__other", label: d.money.charts.other, color: OTHER_COLOR });
   return { data, series };
 }
 
@@ -326,11 +333,11 @@ function accuracyBars(rows: AccuracyRow[]): ChartDatum[] {
     .slice(-3);
 }
 
-function balanceBars(rows: BalanceRow[]): HorizontalBarDatum[] {
+function balanceBars(rows: BalanceRow[], d: Dictionary): HorizontalBarDatum[] {
   return rows
     .filter((r) => r.payee_id)
     .map((r) => ({
-      name: (r.display_name ?? "").trim() || "Payee",
+      name: (r.display_name ?? "").trim() || d.money.dashboard.fallbackPayee,
       value: num(r.balance),
     }))
     .filter((r) => r.value !== 0)
@@ -342,12 +349,13 @@ function modelComparison(
   rows: ShareModelRow[],
   currentMonth: string,
   prevMonth: string,
+  d: Dictionary,
 ): { data: ChartDatum[]; series: ChartSeries[] } {
   const current = new Map<string, number>();
   const previous = new Map<string, number>();
   for (const r of rows) {
     const k = monthKey(r.month);
-    const name = (r.stage_name ?? "").trim() || "Model";
+    const name = (r.stage_name ?? "").trim() || d.money.dashboard.fallbackModel;
     if (k === currentMonth) current.set(name, (current.get(name) ?? 0) + num(r.net_amount));
     else if (k === prevMonth) previous.set(name, (previous.get(name) ?? 0) + num(r.net_amount));
   }
@@ -360,8 +368,8 @@ function modelComparison(
     previous: previous.get(name) ?? 0,
   }));
   const series: ChartSeries[] = [
-    { key: "current", label: "This month" },
-    { key: "previous", label: "Last month" },
+    { key: "current", label: d.money.dashboard.thisMonth },
+    { key: "previous", label: d.money.dashboard.lastMonth },
   ];
   return { data, series };
 }
@@ -384,6 +392,7 @@ export type LibraryCard = {
 function libraryCard(
   rows: LibraryLiteRow[],
   cats: Array<{ id: string; name: string }>,
+  d: Dictionary,
 ): LibraryCard {
   const byCat = new Map<string, number>();
   let analyzed = 0;
@@ -402,7 +411,7 @@ function libraryCard(
   }
   const names = new Map(cats.map((c) => [c.id, c.name] as const));
   const topCategories = [...byCat.entries()]
-    .map(([id, count]) => ({ name: names.get(id) ?? "Uncategorised", count }))
+    .map(([id, count]) => ({ name: names.get(id) ?? d.money.dashboard.libraryUncategorised, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 4);
   return { total: rows.length, analyzed, awaitingReview, unreadable, topCategories };
@@ -458,7 +467,7 @@ function firstCurrency(
  */
 export async function loadStudioDashboard(
   supabase: ServerSupabaseClient,
-  { governance }: { governance: boolean },
+  { governance, d }: { governance: boolean; d: Dictionary },
 ) {
   const { trendFrom, currentMonth, prevMonth } = dashboardWindow();
 
@@ -514,7 +523,7 @@ export async function loadStudioDashboard(
   const modelNames = new Map(
     ((modelDir.data ?? []) as { id: string | null; stage_name: string | null }[])
       .filter((m) => m.id)
-      .map((m) => [m.id as string, m.stage_name ?? "Model"]),
+      .map((m) => [m.id as string, m.stage_name ?? d.money.dashboard.fallbackModel]),
   );
 
   const period = monthTotal(earnRows, currentMonth);
@@ -531,28 +540,29 @@ export async function loadStudioDashboard(
     },
     earningsTrend: earningsTrend(earnRows),
     hoursTrend: hoursTrend((hours.data ?? []) as HoursRow[]),
-    shareByModel: shareSlices(shareModelRows, (r: ShareModelRow) => r.stage_name),
-    shareByPlatform: shareSlices((sharePlatform.data ?? []) as SharePlatRow[], (r: SharePlatRow) => r.platform_name),
-    modelComparison: modelComparison(shareModelRows, currentMonth, prevMonth),
-    payouts: payoutStacks(payoutRows),
+    shareByModel: shareSlices(shareModelRows, (r: ShareModelRow) => r.stage_name, d),
+    shareByPlatform: shareSlices((sharePlatform.data ?? []) as SharePlatRow[], (r: SharePlatRow) => r.platform_name, d),
+    modelComparison: modelComparison(shareModelRows, currentMonth, prevMonth, d),
+    payouts: payoutStacks(payoutRows, d),
     payoutRows,
     compliance: complianceRow ?? { valid_count: 0, expiring_count: 0, expired_count: 0 },
     library: libraryCard(
       (library.data ?? []) as LibraryLiteRow[],
       (libraryCats.data ?? []) as { id: string; name: string }[],
+      d,
     ),
     projectedVsActual: projectedVsActual(earnRows, forecastRows),
-    forecastBreakdown: forecastBreakdown(forecastRows, modelNames),
+    forecastBreakdown: forecastBreakdown(forecastRows, modelNames, d),
     // governance-only
-    split: splitSlices((split.data ?? []) as SplitRow[]),
+    split: splitSlices((split.data ?? []) as SplitRow[], d),
     accuracy: accuracyBars((accuracy.data ?? []) as AccuracyRow[]),
-    balances: balanceBars((balances.data ?? []) as BalanceRow[]),
+    balances: balanceBars((balances.data ?? []) as BalanceRow[], d),
     aiReport: ((aiReport.data ?? []) as AiReportRow[])[0] ?? null,
   };
 }
 
 /** Finance/Accountant (docs/07 §5): money only, studio-wide, no compliance. */
-export async function loadFinanceDashboard(supabase: ServerSupabaseClient) {
+export async function loadFinanceDashboard(supabase: ServerSupabaseClient, d: Dictionary) {
   const { trendFrom, currentMonth } = dashboardWindow();
 
   const [earnMonthly, forecast, modelDir, split, accuracy, payouts, balances, aiReport] =
@@ -574,7 +584,7 @@ export async function loadFinanceDashboard(supabase: ServerSupabaseClient) {
   const modelNames = new Map(
     ((modelDir.data ?? []) as { id: string | null; stage_name: string | null }[])
       .filter((m) => m.id)
-      .map((m) => [m.id as string, m.stage_name ?? "Model"]),
+      .map((m) => [m.id as string, m.stage_name ?? d.money.dashboard.fallbackModel]),
   );
 
   const period = monthTotal(earnRows, currentMonth);
@@ -592,18 +602,18 @@ export async function loadFinanceDashboard(supabase: ServerSupabaseClient) {
     },
     earningsTrend: earningsTrend(earnRows),
     projectedVsActual: projectedVsActual(earnRows, forecastRows),
-    forecastBreakdown: forecastBreakdown(forecastRows, modelNames),
-    split: splitSlices((split.data ?? []) as SplitRow[]),
+    forecastBreakdown: forecastBreakdown(forecastRows, modelNames, d),
+    split: splitSlices((split.data ?? []) as SplitRow[], d),
     accuracy: accuracyBars((accuracy.data ?? []) as AccuracyRow[]),
-    payouts: payoutStacks(payoutRows),
+    payouts: payoutStacks(payoutRows, d),
     payoutRows,
-    balances: balanceBars(balanceRows),
+    balances: balanceBars(balanceRows, d),
     aiReport: ((aiReport.data ?? []) as AiReportRow[])[0] ?? null,
   };
 }
 
 /** Model (docs/07 §5): own data only — earnings/hours/platform share/payouts/compliance. */
-export async function loadModelDashboard(supabase: ServerSupabaseClient) {
+export async function loadModelDashboard(supabase: ServerSupabaseClient, d: Dictionary) {
   const { trendFrom, currentMonth } = dashboardWindow();
 
   const [earnMonthly, sharePlatform, hours, payouts, compliance] = await Promise.all([
@@ -635,8 +645,8 @@ export async function loadModelDashboard(supabase: ServerSupabaseClient) {
     },
     earningsTrend: earningsTrend(earnRows),
     hoursTrend: hoursTrend(hoursRows),
-    shareByPlatform: shareSlices((sharePlatform.data ?? []) as SharePlatRow[], (r: SharePlatRow) => r.platform_name),
-    payouts: payoutStacks(payoutRows),
+    shareByPlatform: shareSlices((sharePlatform.data ?? []) as SharePlatRow[], (r: SharePlatRow) => r.platform_name, d),
+    payouts: payoutStacks(payoutRows, d),
     payoutRows,
     compliance: complianceRow ?? { valid_count: 0, expiring_count: 0, expired_count: 0 },
   };
@@ -647,7 +657,7 @@ export async function loadModelDashboard(supabase: ServerSupabaseClient) {
  * `work_sessions` — the share trend is built from this operator's own
  * `ledger_entries` `earning_share` credits, and the balance from `v_payee_balances`.
  */
-export async function loadOperatorDashboard(supabase: ServerSupabaseClient) {
+export async function loadOperatorDashboard(supabase: ServerSupabaseClient, d: Dictionary) {
   const { currentMonth } = dashboardWindow();
 
   const [ledger, payouts, balances] = await Promise.all([
@@ -674,7 +684,7 @@ export async function loadOperatorDashboard(supabase: ServerSupabaseClient) {
     currency: firstCurrency(balanceRows, payoutRows, ledgerRows),
     kpis: { balance, pendingCount: pending.count, pendingTotal: pending.total, periodShare },
     shareTrend: ledgerShareTrend(ledgerRows),
-    payouts: payoutStacks(payoutRows),
+    payouts: payoutStacks(payoutRows, d),
     payoutRows,
   };
 }

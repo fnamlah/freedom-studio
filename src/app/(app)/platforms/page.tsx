@@ -6,6 +6,7 @@ import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireRole } from "@/lib/auth/guard";
 import { EM_DASH } from "@/lib/format";
+import { getDict } from "@/lib/i18n/server";
 
 import { AccountForm, type ModelOption, type PlatformOption } from "./account-form";
 import { AccountsTable, type AccountRowView } from "./accounts-table";
@@ -13,7 +14,9 @@ import { PlatformForm } from "./platform-form";
 import { PlatformsTable, type PlatformRowView } from "./platforms-table";
 import type { AccountStatus } from "./status";
 
-export const metadata: Metadata = { title: "Platforms" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).studio.platforms.metaTitle };
+}
 
 /**
  * Platforms & accounts — Super Admin + Manager only (docs/03 §3, docs/04 §7.2:
@@ -26,6 +29,7 @@ export const metadata: Metadata = { title: "Platforms" };
  */
 export default async function PlatformsPage() {
   const { supabase } = await requireRole("super_admin", "manager");
+  const d = await getDict();
 
   const [platformsResult, accountsResult, modelsResult] = await Promise.all([
     supabase
@@ -92,9 +96,9 @@ export default async function PlatformsPage() {
   return (
     <>
       <PageHeader
-        title="Platforms"
-        description="The webcam platforms the studio works with, and each model's accounts on them."
-        breadcrumbs={[{ label: "Platforms" }]}
+        title={d.studio.platforms.title}
+        description={d.studio.platforms.description}
+        breadcrumbs={[{ label: d.studio.platforms.title }]}
         actions={
           <>
             <PlatformForm mode="create" />
@@ -108,27 +112,43 @@ export default async function PlatformsPage() {
       />
 
       <StatTileRow className="mb-6" columns={4}>
-        <StatTile label="Platforms" value={counts.platforms} hint="On record" />
-        <StatTile label="Active platforms" value={counts.activePlatforms} hint="Currently in use" />
-        <StatTile label="Accounts" value={counts.accounts} hint="Across all models" />
-        <StatTile label="Active accounts" value={counts.activeAccounts} hint="Currently working" />
+        <StatTile
+          label={d.studio.platforms.statPlatforms}
+          value={counts.platforms}
+          hint={d.studio.platforms.statPlatformsHint}
+        />
+        <StatTile
+          label={d.studio.platforms.statActivePlatforms}
+          value={counts.activePlatforms}
+          hint={d.studio.platforms.statActivePlatformsHint}
+        />
+        <StatTile
+          label={d.studio.platforms.statAccounts}
+          value={counts.accounts}
+          hint={d.studio.platforms.statAccountsHint}
+        />
+        <StatTile
+          label={d.studio.platforms.statActiveAccounts}
+          value={counts.activeAccounts}
+          hint={d.studio.platforms.statActiveAccountsHint}
+        />
       </StatTileRow>
 
       <Tabs defaultValue="platforms">
-        <TabsList ariaLabel="Platforms sections">
+        <TabsList ariaLabel={d.studio.platforms.tabsAria}>
           <TabsTrigger value="platforms" badge={<Count value={platformRows.length} />}>
-            Platforms
+            {d.studio.platforms.tabPlatforms}
           </TabsTrigger>
           <TabsTrigger value="accounts" badge={<Count value={accountRows.length} />}>
-            Accounts
+            {d.studio.platforms.tabAccounts}
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="platforms">
           <Card>
             <CardHeader
-              title="Platforms"
-              description="A platform can't be deleted once accounts reference it (docs/04 §4.5) — deactivate it instead."
+              title={d.studio.platforms.platformsCardTitle}
+              description={d.studio.platforms.platformsCardDescription}
             />
             <CardBody flush>
               <PlatformsTable rows={platformRows} />
@@ -139,8 +159,8 @@ export default async function PlatformsPage() {
         <TabsContent value="accounts">
           <Card>
             <CardHeader
-              title="Platform accounts"
-              description="Every model's account across the studio's platforms. Usernames are unique per model and platform."
+              title={d.studio.platforms.accountsCardTitle}
+              description={d.studio.platforms.accountsCardDescription}
             />
             <CardBody flush>
               <AccountsTable rows={accountRows} />

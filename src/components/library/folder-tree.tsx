@@ -1,5 +1,6 @@
 "use client";
 
+import { useDict } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 import type { FolderNode } from "./library-meta";
@@ -19,8 +20,10 @@ export function FolderTree({
   selected: string;
   onSelect: (path: string) => void;
 }) {
+  const d = useDict();
+
   return (
-    <nav aria-label="Folders" className="flex flex-col gap-0.5 text-sm">
+    <nav aria-label={d.library.folders} className="flex flex-col gap-0.5 text-sm">
       <FolderRow node={root} selected={selected} onSelect={onSelect} />
     </nav>
   );

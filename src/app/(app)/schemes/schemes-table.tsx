@@ -9,11 +9,13 @@ import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { date, EM_DASH, percent } from "@/lib/format";
+import { EM_DASH } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { deleteScheme } from "./actions";
 import { SchemeForm, type EditableScheme } from "./scheme-form";
-import { SCOPE_META, SCOPE_ORDER, STATUS_META, type SchemeRowView } from "./scheme-meta";
+import { SCOPE_META, SCOPE_ORDER, STATUS_VARIANT, type SchemeRowView } from "./scheme-meta";
 
 /**
  * Schemes grouped by scope, in resolution order (account → model → default, most
@@ -28,11 +30,14 @@ export function SchemesTable({
   rows: SchemeRowView[];
   canWrite: boolean;
 }) {
+  const d = useDict();
+  const fm = fmt(useLocale());
+
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No commission schemes yet"
-        description="At least the studio default scheme should exist. If this is empty, the schema seed may not have run."
+        title={d.money.schemes.tableEmptyTitle}
+        description={d.money.schemes.tableEmptyDesc}
       />
     );
   }
@@ -43,47 +48,47 @@ export function SchemesTable({
         const group = rows.filter((r) => r.scope === scope);
         if (group.length === 0) return null;
         const meta = SCOPE_META[scope];
+        const words = d.money.schemes.scope[scope];
 
         return (
           <section key={scope}>
             <div className="mb-3 flex items-center gap-3">
-              <Badge variant={meta.badge}>{meta.label}</Badge>
-              <p className="text-xs text-muted">{meta.description}</p>
+              <Badge variant={meta.badge}>{words.label}</Badge>
+              <p className="text-xs text-muted">{words.description}</p>
             </div>
 
             <Table containerClassName="rounded-lg border border-border">
               <THead>
                 <TR>
-                  <TH>{scope === "default" ? "Scope" : meta.short}</TH>
-                  <TH align="right">Model</TH>
-                  <TH align="right">Operator</TH>
-                  <TH align="right">Studio</TH>
-                  <TH>Effective</TH>
-                  <TH>Status</TH>
+                  <TH>{scope === "default" ? d.money.schemes.colScope : words.short}</TH>
+                  <TH align="right">{d.money.schemes.colModel}</TH>
+                  <TH align="right">{d.money.schemes.colOperator}</TH>
+                  <TH align="right">{d.money.schemes.colStudio}</TH>
+                  <TH>{d.money.schemes.colEffective}</TH>
+                  <TH>{d.common.status}</TH>
                   {canWrite ? (
                     <TH align="right">
-                      <span className="sr-only">Actions</span>
+                      <span className="sr-only">{d.common.actions}</span>
                     </TH>
                   ) : null}
                 </TR>
               </THead>
               <TBody>
                 {group.map((row) => {
-                  const status = STATUS_META[row.status];
                   return (
                     <TR key={row.id}>
                       <TD className="font-medium text-foreground">{row.scopeLabel}</TD>
-                      <TD numeric>{percent(row.model_percent)}</TD>
-                      <TD numeric>{percent(row.operator_percent)}</TD>
-                      <TD numeric>{percent(row.studio_percent)}</TD>
+                      <TD numeric>{fm.percent(row.model_percent)}</TD>
+                      <TD numeric>{fm.percent(row.operator_percent)}</TD>
+                      <TD numeric>{fm.percent(row.studio_percent)}</TD>
                       <TD className="text-muted whitespace-nowrap">
-                        {date(row.effective_from)}
+                        {fm.date(row.effective_from)}
                         {" – "}
-                        {row.effective_to ? date(row.effective_to) : "open"}
+                        {row.effective_to ? fm.date(row.effective_to) : d.money.schemes.openEnded}
                       </TD>
                       <TD>
-                        <Badge variant={status.variant} dot>
-                          {status.label}
+                        <Badge variant={STATUS_VARIANT[row.status]} dot>
+                          {d.money.schemes.status[row.status]}
                         </Badge>
                       </TD>
                       {canWrite ? (
@@ -95,9 +100,9 @@ export function SchemesTable({
                                 variant="ghost"
                                 size="sm"
                                 disabled
-                                title="The studio default scheme can't be deleted."
+                                title={d.money.schemes.defaultCantDelete}
                               >
-                                Delete
+                                {d.common.delete}
                               </Button>
                             ) : (
                               <DeleteSchemeButton row={row} />
@@ -138,6 +143,8 @@ function toEditable(row: SchemeRowView): EditableScheme {
  */
 function DeleteSchemeButton({ row }: { row: SchemeRowView }) {
   const router = useRouter();
+  const d = useDict();
+  const fm = fmt(useLocale());
   const { success, error } = useToast();
   const [open, setOpen] = useState(false);
   const [isRunning, startTransition] = useTransition();
@@ -151,11 +158,11 @@ function DeleteSchemeButton({ row }: { row: SchemeRowView }) {
     startTransition(async () => {
       const result = await deleteScheme({ id: row.id });
       if (result.ok) {
-        success("Scheme deleted", result.message);
+        success(d.money.schemes.deleteToastOk, result.message);
         setOpen(false);
         router.refresh();
       } else {
-        error("Could not delete scheme", result.error);
+        error(d.money.schemes.deleteToastErr, result.error);
       }
     });
   }
@@ -163,39 +170,40 @@ function DeleteSchemeButton({ row }: { row: SchemeRowView }) {
   return (
     <>
       <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
-        Delete
+        {d.common.delete}
       </Button>
 
       <Dialog
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title="Delete commission scheme"
-        description={`${SCOPE_META[row.scope].label} · ${row.scopeLabel}`}
+        title={d.money.schemes.deleteTitle}
+        description={`${d.money.schemes.scope[row.scope].label} · ${row.scopeLabel}`}
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button variant="danger" onClick={confirm} loading={isRunning}>
-              Delete scheme
+              {d.money.schemes.deleteConfirm}
             </Button>
           </>
         }
       >
+        {/* One sentence, one dictionary entry: the split and the effective
+            window are values inside it, not translated fragments glued around
+            emphasis spans. */}
         <p className="text-sm text-foreground">
-          This removes the split{" "}
-          <span className="font-medium">
-            {percent(row.model_percent)} / {percent(row.operator_percent)} /{" "}
-            {percent(row.studio_percent)}
-          </span>{" "}
-          effective {date(row.effective_from)}
-          {row.effective_to ? ` – ${date(row.effective_to)}` : " onward"}.
+          {d.money.schemes.deleteBody(
+            `${fm.percent(row.model_percent)} / ${fm.percent(row.operator_percent)} / ${fm.percent(row.studio_percent)}`,
+            row.effective_to
+              ? d.money.schemes.deleteRange(fm.date(row.effective_from), fm.date(row.effective_to))
+              : d.money.schemes.deleteOnward(fm.date(row.effective_from)),
+          )}
         </p>
         <p className="mt-2 text-xs text-muted">
-          If this scheme has already produced ledger entries it can't be deleted — close it with an
-          effective-to date instead so its history stays intact. {EM_DASH}
+          {d.money.schemes.deleteNote} {EM_DASH}
         </p>
       </Dialog>
     </>

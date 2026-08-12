@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Field, Label } from "@/components/ui/label";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { money } from "@/lib/format";
+import { useDict, useLocale } from "@/lib/i18n/client";
+import { fmt } from "@/lib/i18n/format";
 
 import { createEarning, updateEarning } from "./actions";
 
@@ -105,6 +106,8 @@ export function EarningForm({
   // Once the user hand-edits fee / net, stop auto-deriving that field.
   const [feeTouched, setFeeTouched] = useState(false);
   const [netTouched, setNetTouched] = useState(false);
+  const d = useDict();
+  const fm = fmt(useLocale());
 
   const isCreate = mode === "create";
   const noAccounts = accounts.length === 0;
@@ -200,11 +203,19 @@ export function EarningForm({
         : await updateEarning({ id: earning!.id, ...payload });
 
       if (result.ok) {
-        success(isCreate ? "Statement recorded" : "Statement updated", result.message);
+        success(
+          isCreate ? d.studio.earnings.toastCreated : d.studio.earnings.toastUpdated,
+          result.message,
+        );
         setOpen(false);
         router.refresh();
       } else {
-        error(isCreate ? "Could not record statement" : "Could not update statement", result.error);
+        error(
+          isCreate
+            ? d.studio.earnings.toastCreateFailed
+            : d.studio.earnings.toastUpdateFailed,
+          result.error,
+        );
       }
     });
   }
@@ -212,10 +223,10 @@ export function EarningForm({
   return (
     <>
       {isCreate ? (
-        <Button onClick={openDialog}>Record statement</Button>
+        <Button onClick={openDialog}>{d.studio.earnings.recordStatement}</Button>
       ) : (
         <Button variant="outline" size="sm" onClick={openDialog}>
-          Edit
+          {d.common.edit}
         </Button>
       )}
 
@@ -223,36 +234,33 @@ export function EarningForm({
         open={open}
         onClose={close}
         dismissible={!isRunning}
-        title={isCreate ? "Record an earnings statement" : "Edit statement"}
-        description="Earnings are the money source of truth (docs/04 §4.7): one row per account per statement period. Net is what the studio received — the input to the commission split."
+        title={isCreate ? d.studio.earnings.createTitle : d.studio.earnings.editTitle}
+        description={d.studio.earnings.dialogDescription}
         size="lg"
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={isRunning}>
-              Cancel
+              {d.common.cancel}
             </Button>
             <Button type="submit" form="earning-form" loading={isRunning} disabled={noAccounts}>
-              {isCreate ? "Record statement" : "Save changes"}
+              {isCreate ? d.studio.earnings.submitCreate : d.studio.earnings.submitEdit}
             </Button>
           </>
         }
       >
         {noAccounts ? (
-          <p className="text-sm text-muted">
-            No platform accounts exist yet. Add a model and a platform account first — every
-            statement belongs to an account.
-          </p>
+          <p className="text-sm text-muted">{d.studio.earnings.noAccounts}</p>
         ) : (
           <form id="earning-form" onSubmit={submit} className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field help="Scopes which accounts you can pick below.">
+              <Field help={d.studio.earnings.helpModel}>
                 <Label htmlFor="earning-model" required>
-                  Model
+                  {d.studio.earnings.fieldModel}
                 </Label>
                 <Select
                   id="earning-model"
                   required
-                  placeholder="Select a model…"
+                  placeholder={d.studio.earnings.selectModel}
                   options={modelOptions}
                   value={form.model_id}
                   onChange={(e) => selectModel(e.target.value)}
@@ -262,20 +270,26 @@ export function EarningForm({
               <Field
                 help={
                   selectedAccount && selectedAccount.platform_fee_percent !== null
-                    ? `Platform fee ${selectedAccount.platform_fee_percent}% — used to pre-fill the fee.`
+                    ? d.studio.earnings.helpFeePrefill(
+                        fm.percent(selectedAccount.platform_fee_percent),
+                      )
                     : form.model_id && accountOptions.length === 0
-                      ? "This model has no platform accounts yet."
+                      ? d.studio.earnings.helpNoAccounts
                       : undefined
                 }
               >
                 <Label htmlFor="earning-account" required>
-                  Platform account
+                  {d.studio.earnings.fieldAccount}
                 </Label>
                 <Select
                   id="earning-account"
                   required
                   disabled={!form.model_id || accountOptions.length === 0}
-                  placeholder={form.model_id ? "Select an account…" : "Choose a model first"}
+                  placeholder={
+                    form.model_id
+                      ? d.studio.earnings.selectAccount
+                      : d.studio.earnings.chooseModelFirst
+                  }
                   options={accountOptions}
                   value={form.platform_account_id}
                   onChange={(e) => onAccountChange(e.target.value)}
@@ -286,7 +300,7 @@ export function EarningForm({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field>
                 <Label htmlFor="earning-period-start" required>
-                  Period start
+                  {d.studio.earnings.fieldPeriodStart}
                 </Label>
                 <Input
                   id="earning-period-start"
@@ -299,7 +313,7 @@ export function EarningForm({
 
               <Field>
                 <Label htmlFor="earning-period-end" required>
-                  Period end
+                  {d.studio.earnings.fieldPeriodEnd}
                 </Label>
                 <Input
                   id="earning-period-end"
@@ -312,9 +326,9 @@ export function EarningForm({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field help="Total billed by the platform.">
-                <Label htmlFor="earning-gross" required hint="≥ 0">
-                  Gross
+              <Field help={d.studio.earnings.helpGross}>
+                <Label htmlFor="earning-gross" required hint={d.studio.earnings.hintAmount}>
+                  {d.studio.earnings.fieldGross}
                 </Label>
                 <Input
                   id="earning-gross"
@@ -328,9 +342,9 @@ export function EarningForm({
                 />
               </Field>
 
-              <Field help="The platform's cut.">
-                <Label htmlFor="earning-fee" hint="≥ 0">
-                  Platform fee
+              <Field help={d.studio.earnings.helpFee}>
+                <Label htmlFor="earning-fee" hint={d.studio.earnings.hintAmount}>
+                  {d.studio.earnings.fieldFee}
                 </Label>
                 <Input
                   id="earning-fee"
@@ -343,9 +357,9 @@ export function EarningForm({
                 />
               </Field>
 
-              <Field help="What the studio received.">
-                <Label htmlFor="earning-net" required hint="≥ 0">
-                  Net
+              <Field help={d.studio.earnings.helpNet}>
+                <Label htmlFor="earning-net" required hint={d.studio.earnings.hintAmount}>
+                  {d.studio.earnings.fieldNet}
                 </Label>
                 <Input
                   id="earning-net"
@@ -361,9 +375,9 @@ export function EarningForm({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field help="3-letter code, e.g. USD.">
+              <Field help={d.studio.earnings.helpCurrency}>
                 <Label htmlFor="earning-currency" required>
-                  Currency
+                  {d.studio.earnings.fieldCurrency}
                 </Label>
                 <Input
                   id="earning-currency"
@@ -379,9 +393,9 @@ export function EarningForm({
 
               <div className="flex items-end">
                 <p className="text-xs text-muted">
-                  Net received:{" "}
+                  {d.studio.earnings.netPreview}{" "}
                   <span className="font-medium text-foreground">
-                    {money(netPreview, form.currency || "USD")}
+                    {fm.money(netPreview, form.currency || "USD")}
                   </span>
                 </p>
               </div>

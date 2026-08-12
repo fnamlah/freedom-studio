@@ -3,13 +3,16 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { requireRole } from "@/lib/auth/guard";
+import { getDict } from "@/lib/i18n/server";
 
 import { ModelForm } from "./model-form";
 import { ModelsTable, type ModelListRow } from "./models-table";
 import { StatusFilter } from "./status-filter";
 import { MODEL_STATUSES, type ModelStatus } from "./status";
 
-export const metadata: Metadata = { title: "Models" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).studio.models.metaTitle };
+}
 
 function normalizeStatus(value: string | undefined): ModelStatus | "all" {
   return value && (MODEL_STATUSES as readonly string[]).includes(value)
@@ -33,6 +36,7 @@ export default async function ModelsPage({
   const { supabase } = await requireRole("super_admin", "manager");
   const { status } = await searchParams;
   const activeFilter = normalizeStatus(status);
+  const d = await getDict();
 
   const { data } = await supabase
     .from("models")
@@ -54,23 +58,39 @@ export default async function ModelsPage({
   return (
     <>
       <PageHeader
-        title="Models"
-        description="Every performer's business record. Add a model, then link platform accounts, earnings and compliance documents."
-        breadcrumbs={[{ label: "Models" }]}
+        title={d.studio.models.title}
+        description={d.studio.models.description}
+        breadcrumbs={[{ label: d.studio.models.title }]}
         actions={<ModelForm mode="create" />}
       />
 
       <StatTileRow className="mb-6" columns={4}>
-        <StatTile label="Total" value={counts.total} hint="All roster records" />
-        <StatTile label="Active" value={counts.active} hint="Currently working" />
-        <StatTile label="On leave" value={counts.on_leave} hint="Temporarily paused" />
-        <StatTile label="Terminated" value={counts.terminated} hint="Ended engagement" />
+        <StatTile
+          label={d.studio.models.statTotal}
+          value={counts.total}
+          hint={d.studio.models.statTotalHint}
+        />
+        <StatTile
+          label={d.studio.models.statActive}
+          value={counts.active}
+          hint={d.studio.models.statActiveHint}
+        />
+        <StatTile
+          label={d.studio.models.statOnLeave}
+          value={counts.on_leave}
+          hint={d.studio.models.statOnLeaveHint}
+        />
+        <StatTile
+          label={d.studio.models.statTerminated}
+          value={counts.terminated}
+          hint={d.studio.models.statTerminatedHint}
+        />
       </StatTileRow>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <StatusFilter current={activeFilter} />
         <span className="text-xs text-muted">
-          {visible.length} of {counts.total} shown
+          {d.studio.models.shown(visible.length, counts.total)}
         </span>
       </div>
 

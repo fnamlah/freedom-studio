@@ -3,6 +3,7 @@
 import { getSessionClaims, isAal2FromClaims } from "@/lib/auth/claims";
 import { listTotpFactors } from "@/lib/auth/mfa";
 import { writeAudit } from "@/lib/audit";
+import { getDict } from "@/lib/i18n/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service-internal";
 
@@ -37,24 +38,28 @@ type ActivateResult = { ok: true } | { ok: false; error: string };
 
 export async function activateProfileAfterEnrollment(): Promise<ActivateResult> {
   const supabase = await createServerSupabase();
+  // The caller's profile is still `invited`, so there is no loaded profile to
+  // read a language from — the locale comes from the cookie the login/accept
+  // screens wrote.
+  const d = await getDict();
 
   // 1. Identity — validated against the Auth server, not read from a cookie.
   const { data: userData, error: userError } = await supabase.auth.getUser();
   const user = userData?.user ?? null;
   if (userError || !user) {
-    return { ok: false, error: "No authenticated session." };
+    return { ok: false, error: d.authFlow.errors.unauthenticated };
   }
 
   // 2. Assurance — the caller must have reached AAL2 in this session.
   const claims = await getSessionClaims(supabase);
   if (!isAal2FromClaims(claims)) {
-    return { ok: false, error: "A verified two-factor session is required." };
+    return { ok: false, error: d.authFlow.errors.aal2_required };
   }
 
   // 3. Defence-in-depth: a verified TOTP factor must really exist.
   const factors = await listTotpFactors(supabase);
   if (!factors.some((factor) => factor.status === "verified")) {
-    return { ok: false, error: "No verified authenticator was found on this account." };
+    return { ok: false, error: d.authFlow.activate.noVerifiedFactor };
   }
 
   // 4. Elevated, self-scoped write. Never accepts a target id from the caller.
@@ -70,14 +75,14 @@ export async function activateProfileAfterEnrollment(): Promise<ActivateResult> 
     return { ok: false, error: profileError.message };
   }
   if (!profile) {
-    return { ok: false, error: "Profile not found for this account." };
+    return { ok: false, error: d.authFlow.errors.profile_missing };
   }
   if (profile.status === "active") {
     return { ok: true }; // Idempotent: a double-submit is not an error.
   }
   if (profile.status !== "invited") {
     // e.g. 'deactivated' — must not be self-reactivated through this path.
-    return { ok: false, error: "This account cannot be activated." };
+    return { ok: false, error: d.authFlow.activate.cannotActivate };
   }
 
   const { error: updateError } = await admin

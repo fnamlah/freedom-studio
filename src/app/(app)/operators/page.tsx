@@ -7,12 +7,16 @@ import { PageHeader } from "@/components/ui/page-header";
 import { StatTile, StatTileRow } from "@/components/ui/stat-tile";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/guard";
-import { date, EM_DASH } from "@/lib/format";
+import { EM_DASH } from "@/lib/format";
+import { fmt } from "@/lib/i18n/format";
+import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { OperatorForm } from "./operator-form";
-import { assignmentActivity, OPERATOR_STATUS_META, type OperatorStatus } from "./status";
+import { assignmentActivity, operatorStatusMeta, type OperatorStatus } from "./status";
 
-export const metadata: Metadata = { title: "Operators" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getDict()).studio.operators.metaTitle };
+}
 
 type OperatorListRow = {
   id: string;
@@ -39,6 +43,8 @@ type AssignmentLite = {
  */
 export default async function OperatorsPage() {
   const { supabase } = await requireRole("super_admin", "manager");
+  const d = await getDict();
+  const fm = fmt(await getLocale());
 
   const [operatorsResult, assignmentsResult] = await Promise.all([
     supabase
@@ -68,42 +74,50 @@ export default async function OperatorsPage() {
   return (
     <>
       <PageHeader
-        title="Operators"
-        description="Support staff who share in model revenue. Assign them to models with a pool share and period."
-        breadcrumbs={[{ label: "Operators" }]}
+        title={d.studio.operators.title}
+        description={d.studio.operators.description}
+        breadcrumbs={[{ label: d.studio.operators.title }]}
         actions={<OperatorForm mode="create" />}
       />
 
       <StatTileRow className="mb-6" columns={3}>
-        <StatTile label="Operators" value={operators.length} hint="Total business records" />
-        <StatTile label="Active" value={activeCount} hint="Current lifecycle status" />
         <StatTile
-          label="Assigned"
+          label={d.studio.operators.statOperators}
+          value={operators.length}
+          hint={d.studio.operators.statOperatorsHint}
+        />
+        <StatTile
+          label={d.studio.operators.statActive}
+          value={activeCount}
+          hint={d.studio.operators.statActiveHint}
+        />
+        <StatTile
+          label={d.studio.operators.statAssigned}
           value={assignedCount}
-          hint="With an active model assignment"
+          hint={d.studio.operators.statAssignedHint}
         />
       </StatTileRow>
 
       {operators.length === 0 ? (
         <EmptyState
-          title="No operators yet"
-          description="Add the first operator to start assigning them to models and crediting them a share of the operator pool."
+          title={d.studio.operators.emptyTitle}
+          description={d.studio.operators.emptyDescription}
           action={<OperatorForm mode="create" />}
         />
       ) : (
         <Table containerClassName="rounded-lg border border-border">
           <THead>
             <TR>
-              <TH>Operator</TH>
-              <TH>Status</TH>
-              <TH align="right">Assignments</TH>
-              <TH>Country</TH>
-              <TH>Started</TH>
+              <TH>{d.studio.operators.colOperator}</TH>
+              <TH>{d.studio.operators.colStatus}</TH>
+              <TH align="right">{d.studio.operators.colAssignments}</TH>
+              <TH>{d.studio.operators.colCountry}</TH>
+              <TH>{d.studio.operators.colStarted}</TH>
             </TR>
           </THead>
           <TBody>
             {operators.map((operator) => {
-              const statusMeta = OPERATOR_STATUS_META[operator.status];
+              const statusMeta = operatorStatusMeta(d, operator.status);
               const total = totalByOperator.get(operator.id) ?? 0;
               const active = activeByOperator.get(operator.id) ?? 0;
 
@@ -120,7 +134,7 @@ export default async function OperatorsPage() {
                       {operator.email ?? EM_DASH}
                       {operator.profile_id ? (
                         <Badge variant="primary" className="ml-2">
-                          Login linked
+                          {d.studio.operators.loginLinked}
                         </Badge>
                       ) : null}
                     </div>
@@ -137,14 +151,16 @@ export default async function OperatorsPage() {
                       <span>
                         {total}
                         {active > 0 ? (
-                          <span className="ml-1 text-xs text-success">({active} active)</span>
+                          <span className="ml-1 text-xs text-success">
+                            {d.studio.operators.activeCount(active)}
+                          </span>
                         ) : null}
                       </span>
                     )}
                   </TD>
                   <TD className="text-muted">{operator.country ?? EM_DASH}</TD>
                   <TD className="text-muted">
-                    {operator.start_date ? date(operator.start_date) : EM_DASH}
+                    {operator.start_date ? fm.date(operator.start_date) : EM_DASH}
                   </TD>
                 </TR>
               );

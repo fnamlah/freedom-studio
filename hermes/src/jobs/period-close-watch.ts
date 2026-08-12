@@ -2,6 +2,7 @@ import { enqueueApproval } from "../governance/approvals.js";
 import { resolvePolicy } from "../governance/policy.js";
 import { getAdminClient } from "../lib/supabase.js";
 import { channelsSatisfying } from "../lib/owner.js";
+import { hermesDict, hermesEn as hermesEnDict, hermesRu as hermesRuDict, money } from "../lib/i18n.js";
 import { sendApprovalCard } from "../telegram/api.js";
 
 /**
@@ -63,14 +64,23 @@ export async function runPeriodCloseWatch(now: Date = new Date()): Promise<strin
   const approvalId = await enqueueApproval({
     actionType: "close_period",
     payload: { period_start: start, period_end: end },
+    // The preview is written ONCE and read later by two surfaces in two
+    // languages, so both renderings are stored now rather than translated at
+    // display time. `summary` is kept as well: rows written before 019 have
+    // only that key, and the readers fall back to it.
     preview: {
-      summary: `Close ${start} → ${end}: ${open.length} earning(s) have no commission shares posted.`,
+      summary: hermesEnDict.closeSummary(start, end, open.length),
+      summary_en: hermesEnDict.closeSummary(start, end, open.length),
+      summary_ru: hermesRuDict.closeSummary(start, end, open.length),
       period: `${start} → ${end}`,
       unclosed_earnings: open.length,
       gross_in_period: total.toFixed(2),
+      // `hermes_approvals.risk_reason` is a single text column, so the Russian
+      // rendering rides along in the preview jsonb next to the summaries.
+      risk_en: hermesEnDict.closeRisk,
+      risk_ru: hermesRuDict.closeRisk,
     },
-    riskReason:
-      "Posts commission shares to the append-only ledger. Ledger entries cannot be edited or deleted once written — a mistake is corrected by posting an adjustment, not by undoing this.",
+    riskReason: hermesEnDict.closeRisk,
     jobName: "period_close_watch",
     idempotencyKey: `close_period:${start}:${end}`,
   });
@@ -78,15 +88,17 @@ export async function runPeriodCloseWatch(now: Date = new Date()): Promise<strin
   // Cards go to every paired chat whose role could decide this — with buttons
   // that decide_approval will re-authorize per tap regardless.
   const requiredRole = resolvePolicy("close_period").requiredRole ?? "super_admin";
-  for (const chatId of await channelsSatisfying(requiredRole)) {
+  for (const target of await channelsSatisfying(requiredRole)) {
+    const h = hermesDict(target.locale);
     await sendApprovalCard(
-      chatId,
+      target.chatId,
       approvalId,
       [
-        "<b>Period ready to close</b>",
+        `<b>${h.closeCardTitle}</b>`,
         `${start} → ${end}`,
-        `${open.length} earning(s) with no shares posted, ${total.toFixed(2)} gross.`,
+        h.closeCardBody(open.length, money(total, target.locale)),
       ].join("\n"),
+      target.locale,
     );
   }
 

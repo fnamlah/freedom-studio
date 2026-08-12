@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { NAV_ICONS } from "@/components/shell/icons";
 import { isNavItemActive, navSectionsForRole } from "@/components/shell/nav";
 import type { Role } from "@/lib/auth/roles";
+import { useDict } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 export type SideNavProps = {
@@ -24,6 +25,7 @@ export type SideNavProps = {
 export function SideNav({ role, onNavigate, className }: SideNavProps) {
   const pathname = usePathname() ?? "";
   const sections = navSectionsForRole(role);
+  const d = useDict();
 
   return (
     <nav aria-label="Primary" className={cn("flex flex-col gap-6 px-3 py-4", className)}>
@@ -31,7 +33,7 @@ export function SideNav({ role, onNavigate, className }: SideNavProps) {
         <div key={section.title ?? `section-${index}`}>
           {section.title ? (
             <p className="mb-1.5 px-2 text-[11px] font-medium tracking-wider text-muted/70 uppercase">
-              {section.title}
+              {d.nav[section.title]}
             </p>
           ) : null}
           <ul className="flex flex-col gap-0.5">
@@ -55,7 +57,7 @@ export function SideNav({ role, onNavigate, className }: SideNavProps) {
                     <span className={cn("shrink-0", active ? "text-primary" : "text-muted")}>
                       <IconComponent />
                     </span>
-                    <span className="truncate">{item.label}</span>
+                    <span className="truncate">{d.nav[item.label]}</span>
                   </Link>
                 </li>
               );

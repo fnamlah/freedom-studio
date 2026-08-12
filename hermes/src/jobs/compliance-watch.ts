@@ -1,5 +1,6 @@
 import { getAdminClient } from "../lib/supabase.js";
 import { broadcastStaff } from "../lib/owner.js";
+import { hermesDict, type Locale } from "../lib/i18n.js";
 import { escapeHtml } from "../telegram/api.js";
 
 /**
@@ -30,15 +31,28 @@ export async function runComplianceWatch(): Promise<string> {
 
   // Stage names only — legal names are on the redactor's blocklist and have no
   // business in a phone notification either.
-  const line = (r: (typeof rows)[number]) =>
-    `• ${escapeHtml((r.model_id ? nameOf.get(r.model_id) : null) ?? "Unknown")} — ${escapeHtml(String(r.doc_type))}` +
+  const line = (locale: Locale) => (r: (typeof rows)[number]) =>
+    `• ${escapeHtml(
+      (r.model_id ? nameOf.get(r.model_id) : null) ?? hermesDict(locale).complianceUnknownModel,
+    )} — ${escapeHtml(String(r.doc_type))}` +
     (r.expires_at ? ` (${String(r.expires_at).slice(0, 10)})` : "");
 
-  const parts = [`<b>Compliance watch</b>`];
-  if (expired.length) parts.push(`\n<b>Expired (${expired.length})</b>\n${expired.slice(0, 15).map(line).join("\n")}`);
-  if (expiring.length) parts.push(`\n<b>Expiring within 30 days (${expiring.length})</b>\n${expiring.slice(0, 15).map(line).join("\n")}`);
-
-  const sent = await broadcastStaff(parts.join("\n"), { html: true });
+  const sent = await broadcastStaff((locale) => {
+    const h = hermesDict(locale);
+    const render = line(locale);
+    const parts = [`<b>${h.complianceTitle}</b>`];
+    if (expired.length) {
+      parts.push(
+        `\n<b>${h.complianceExpired(expired.length)}</b>\n${expired.slice(0, 15).map(render).join("\n")}`,
+      );
+    }
+    if (expiring.length) {
+      parts.push(
+        `\n<b>${h.complianceExpiring(expiring.length)}</b>\n${expiring.slice(0, 15).map(render).join("\n")}`,
+      );
+    }
+    return parts.join("\n");
+  }, { html: true });
   if (sent === 0) {
     console.warn(
       `[compliance] no paired staff chat — ${expired.length} expired, ${expiring.length} expiring`,

@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
 
+import { LocaleProvider } from "@/lib/i18n/client";
+import { getLocale } from "@/lib/i18n/server";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,13 +22,22 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
+/**
+ * The locale is resolved once here and flows two ways: into `<html lang>` (so
+ * screen readers, hyphenation and the browser's own translate prompt agree with
+ * the content) and into the client provider, so every client component reads the
+ * same value the server rendered with. Both auth pages and the app sit under
+ * this layout, which is why the provider lives here rather than in `(app)/`.
+ */
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const locale = await getLocale();
+
   return (
-    <html lang="en" data-theme="dark">
+    <html lang={locale} data-theme="dark">
       <body className="min-h-dvh bg-background text-foreground antialiased">
-        {children}
+        <LocaleProvider locale={locale}>{children}</LocaleProvider>
       </body>
     </html>
   );

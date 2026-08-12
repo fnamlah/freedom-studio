@@ -1,4 +1,5 @@
 import type { Role } from "@/lib/auth/roles";
+import type { Dictionary } from "@/lib/i18n";
 
 /**
  * Role-aware navigation model.
@@ -34,7 +35,12 @@ export type NavIconName =
 
 export type NavItem = {
   href: string;
-  label: string;
+  /**
+   * A key into `Dictionary["nav"]`, not a rendered string. Nav labels are the
+   * one place every locale must agree on wording, and typing the key means a
+   * renamed dictionary entry breaks the build instead of blanking a link.
+   */
+  label: keyof Dictionary["nav"];
   icon: NavIconName;
   /** Roles allowed to SEE this link. */
   roles: readonly Role[];
@@ -44,7 +50,7 @@ export type NavItem = {
 
 export type NavSection = {
   /** `null` renders the section without a heading. */
-  title: string | null;
+  title: keyof Dictionary["nav"] | null;
   items: readonly NavItem[];
 };
 
@@ -64,51 +70,51 @@ const SA_ONLY: readonly Role[] = ["super_admin"];
 export const NAV_SECTIONS: readonly NavSection[] = [
   {
     title: null,
-    items: [{ href: "/dashboard", label: "Dashboard", icon: "dashboard", roles: ALL }],
+    items: [{ href: "/dashboard", label: "dashboard", icon: "dashboard", roles: ALL }],
   },
   {
-    title: "Studio",
+    title: "sectionStudio",
     items: [
-      { href: "/models", label: "Models", icon: "models", roles: SA_MGR },
-      { href: "/operators", label: "Operators", icon: "operators", roles: SA_MGR },
-      { href: "/platforms", label: "Platforms", icon: "platforms", roles: SA_MGR },
-      { href: "/sessions", label: "Work sessions", icon: "sessions", roles: SA_MGR },
-      { href: "/earnings", label: "Earnings", icon: "earnings", roles: SA_MGR },
-      { href: "/documents", label: "Documents", icon: "documents", roles: SA_MGR },
-      { href: "/library", label: "Library", icon: "library", roles: SA_MGR },
+      { href: "/models", label: "models", icon: "models", roles: SA_MGR },
+      { href: "/operators", label: "operators", icon: "operators", roles: SA_MGR },
+      { href: "/platforms", label: "platforms", icon: "platforms", roles: SA_MGR },
+      { href: "/sessions", label: "sessions", icon: "sessions", roles: SA_MGR },
+      { href: "/earnings", label: "earnings", icon: "earnings", roles: SA_MGR },
+      { href: "/documents", label: "documents", icon: "documents", roles: SA_MGR },
+      { href: "/library", label: "library", icon: "library", roles: SA_MGR },
     ],
   },
   {
-    title: "Money",
+    title: "sectionMoney",
     items: [
       // Schemes: Super Admin has CRUD, Manager reads (docs/03 §3).
-      { href: "/schemes", label: "Commission schemes", icon: "schemes", roles: SA_MGR },
+      { href: "/schemes", label: "schemes", icon: "schemes", roles: SA_MGR },
       // Own rows for model/operator; studio-wide for SA/MGR/FIN.
-      { href: "/ledger", label: "Ledger", icon: "ledger", roles: MONEY_AND_SELF },
-      { href: "/payouts", label: "Payouts", icon: "payouts", roles: MONEY_AND_SELF },
-      { href: "/statements", label: "Statements", icon: "statements", roles: MONEY_AND_SELF },
-      { href: "/forecasts", label: "Forecasts", icon: "forecasts", roles: SA_MGR_FIN },
+      { href: "/ledger", label: "ledger", icon: "ledger", roles: MONEY_AND_SELF },
+      { href: "/payouts", label: "payouts", icon: "payouts", roles: MONEY_AND_SELF },
+      { href: "/statements", label: "statements", icon: "statements", roles: MONEY_AND_SELF },
+      { href: "/forecasts", label: "forecasts", icon: "forecasts", roles: SA_MGR_FIN },
     ],
   },
   {
-    title: "Intelligence",
+    title: "sectionIntelligence",
     items: [
-      { href: "/ai", label: "AI assistant", icon: "ai", roles: SA_MGR_FIN, exact: true },
+      { href: "/ai", label: "ai", icon: "ai", roles: SA_MGR_FIN, exact: true },
       // Market reports are Super Admin + Finance only (docs/03 §3, "Generate /
       // read AI market reports": MGR = ❌). Do not widen without changing 03.
-      { href: "/ai/reports", label: "AI reports", icon: "reports", roles: SA_FIN },
+      { href: "/ai/reports", label: "aiReports", icon: "reports", roles: SA_FIN },
     ],
   },
   {
-    title: "Admin",
+    title: "sectionAdmin",
     items: [
       // Hermes proposes actions and waits for authorisation here. Super Admin
       // only: it is the surface where money-adjacent work gets approved.
-      { href: "/admin/hermes", label: "Hermes", icon: "ai", roles: SA_ONLY },
-      { href: "/admin/users", label: "Users", icon: "users", roles: SA_ONLY },
-      { href: "/admin/invitations", label: "Invitations", icon: "invitations", roles: SA_ONLY },
-      { href: "/admin/audit-log", label: "Audit log", icon: "audit", roles: SA_ONLY },
-      { href: "/admin/settings", label: "Settings", icon: "settings", roles: SA_ONLY },
+      { href: "/admin/hermes", label: "hermes", icon: "ai", roles: SA_ONLY },
+      { href: "/admin/users", label: "users", icon: "users", roles: SA_ONLY },
+      { href: "/admin/invitations", label: "invitations", icon: "invitations", roles: SA_ONLY },
+      { href: "/admin/audit-log", label: "auditLog", icon: "audit", roles: SA_ONLY },
+      { href: "/admin/settings", label: "settings", icon: "settings", roles: SA_ONLY },
     ],
   },
 ] as const;

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { Json } from "@studio/lib/database.types.js";
 import { alertOwner } from "../lib/owner.js";
+import { hermesDict, DEFAULT_LOCALE, type Locale } from "../lib/i18n.js";
 import { getPolicyValue } from "../lib/policy-kv.js";
 import { getAdminClient } from "../lib/supabase.js";
 import { EXECUTABLE_ACTIONS, resolvePolicy, roleSatisfies } from "./policy.js";
@@ -108,8 +109,13 @@ async function saveProgress(
 
 export async function executeApproval(
   approvalId: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<{ ok: boolean; message: string }> {
   const db = getAdminClient();
+  // The result is reported back to the human who approved, so it is written in
+  // THEIR language; the audit/alert text stays in one language for whoever
+  // debugs the worker.
+  const h = hermesDict(locale);
 
   // 1. Atomic claim. This single conditional UPDATE is the mutex: only the
   //    caller that flips executed_at from NULL gets a row back. The guard
@@ -129,9 +135,9 @@ export async function executeApproval(
       .select("state, executed_at")
       .eq("id", approvalId)
       .maybeSingle();
-    if (!row) return { ok: false, message: "Approval not found." };
-    if (row.executed_at) return { ok: true, message: "Already executed." };
-    return { ok: false, message: `Not approved (state=${row.state}).` };
+    if (!row) return { ok: false, message: h.approvalNotFound };
+    if (row.executed_at) return { ok: true, message: h.approvalAlreadyExecuted };
+    return { ok: false, message: h.approvalNotApproved(String(row.state)) };
   }
 
   // 2. Re-check the decider's CURRENT role. decide_approval checked it at
@@ -147,7 +153,7 @@ export async function executeApproval(
       .update({ state: "failed", executed_at: null, last_error: "approved with no decided_by" })
       .eq("id", approvalId);
     await alertOwner(`Approval ${approvalId} is approved but has no decider — refusing to execute.`);
-    return { ok: false, message: "Approval has no recorded decider." };
+    return { ok: false, message: h.approvalNoDecider };
   }
 
   const { data: decider } = await db
@@ -166,7 +172,7 @@ export async function executeApproval(
       .update({ state: "failed", executed_at: null, last_error: "approver no longer authorised" })
       .eq("id", approvalId);
     await alertOwner(`Approval ${approvalId} blocked: approver no longer authorised`);
-    return { ok: false, message: "Approver is no longer authorised." };
+    return { ok: false, message: h.approverNotAuthorised };
   }
 
   // 3. Refuse unwired actions BEFORE running anything.
@@ -176,7 +182,7 @@ export async function executeApproval(
       .update({ state: "failed", executed_at: null, last_error: "no executor" })
       .eq("id", approvalId);
     await alertOwner(`Approval ${approvalId}: no executor for ${claimed.action_type}`);
-    return { ok: false, message: `No executor for ${claimed.action_type}.` };
+    return { ok: false, message: h.approvalNoExecutor(String(claimed.action_type)) };
   }
 
   try {
@@ -188,6 +194,7 @@ export async function executeApproval(
       (claimed.execution_result ?? {}) as Record<string, unknown>,
       (patch) =>
         saveProgress(approvalId, (claimed.execution_result ?? {}) as Record<string, unknown>, patch),
+      locale,
     );
 
     await db
@@ -210,7 +217,7 @@ export async function executeApproval(
         .update({ state: "failed", executed_at: null, attempt_count: attempts, last_error: message })
         .eq("id", approvalId);
       await alertOwner(`Approval ${approvalId} failed permanently: ${message}`);
-      return { ok: false, message: `Failed after ${attempts} attempts: ${message}` };
+      return { ok: false, message: h.approvalFailedPermanently(attempts, message) };
     }
 
     // Release the claim so the sweep retries it later.
@@ -226,6 +233,6 @@ export async function executeApproval(
       })
       .eq("id", approvalId);
 
-    return { ok: false, message: `Attempt ${attempts} failed: ${message}` };
+    return { ok: false, message: h.approvalAttemptFailed(attempts, message) };
   }
 }

@@ -1,4 +1,5 @@
 import { env } from "../config/env.js";
+import { hermesDict, type Locale } from "../lib/i18n.js";
 
 /**
  * Raw Telegram Bot API over `fetch`. No framework: the surface we need is four
@@ -95,6 +96,7 @@ export function sendApprovalCard(
   chatId: number | string,
   approvalId: string,
   summary: string,
+  locale: Locale,
 ): Promise<unknown> {
   if (!/^[0-9a-fA-F-]{36}$/.test(approvalId)) {
     throw new Error(`sendApprovalCard: approvalId is not a uuid (got ${approvalId.slice(0, 40)})`);
@@ -107,8 +109,10 @@ export function sendApprovalCard(
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "✅ Approve", callback_data: `appr:${approvalId}:approve` },
-          { text: "✕ Reject", callback_data: `appr:${approvalId}:reject` },
+          // Button LABELS are localized; the callback payload is not — it is a
+          // machine contract parsed by APPR_RE in handler.ts.
+          { text: hermesDict(locale).approve, callback_data: `appr:${approvalId}:approve` },
+          { text: hermesDict(locale).reject, callback_data: `appr:${approvalId}:reject` },
         ],
       ],
     },
@@ -121,6 +125,13 @@ export function answerCallbackQuery(id: string, text?: string): Promise<unknown>
 
 export function setMyCommands(
   commands: Array<{ command: string; description: string }>,
+  languageCode?: string,
 ): Promise<unknown> {
-  return call("setMyCommands", { commands });
+  // Telegram scopes the command menu by the CLIENT's language, which is not the
+  // same thing as our profile locale — so we register both lists and let the
+  // app pick. Omitting language_code sets the default (English) list.
+  return call("setMyCommands", {
+    commands,
+    ...(languageCode ? { language_code: languageCode } : {}),
+  });
 }

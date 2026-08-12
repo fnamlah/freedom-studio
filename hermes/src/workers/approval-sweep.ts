@@ -2,6 +2,7 @@ import { executeApproval } from "../governance/approvals.js";
 import { env } from "../config/env.js";
 import { alertOwner } from "../lib/owner.js";
 import { getAdminClient } from "../lib/supabase.js";
+import { toLocale } from "../lib/i18n.js";
 import { runLoop } from "./loop.js";
 
 /**
@@ -47,7 +48,7 @@ async function sweepOnce(): Promise<void> {
   const nowIso = new Date().toISOString();
   const { data, error } = await getAdminClient()
     .from("hermes_approvals")
-    .select("id")
+    .select("id, decided_by, profiles:decided_by(locale)")
     .eq("state", "approved")
     .is("executed_at", null)
     .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
@@ -60,7 +61,10 @@ async function sweepOnce(): Promise<void> {
   // Sequential on purpose. These are money-adjacent writes; the atomic claim
   // makes concurrency safe, but it does not make it desirable.
   for (const row of data) {
-    const result = await executeApproval(row.id);
+    // The result message is written back to the person who approved, so it is
+    // rendered in THEIR language — not the worker's default.
+    const decider = row.profiles as unknown as { locale?: string } | null;
+    const result = await executeApproval(row.id, toLocale(decider?.locale));
     console.info(`[approval-sweep] ${row.id}: ${result.ok ? "ok" : "failed"} — ${result.message}`);
   }
 }

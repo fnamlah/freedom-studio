@@ -1,5 +1,6 @@
 import { roleSatisfies } from "../governance/policy.js";
 import { todaysCost } from "../lib/cost.js";
+import { hermesDict, money as fmtMoney, type Locale } from "../lib/i18n.js";
 import { getPolicyValue } from "../lib/policy-kv.js";
 import { getAdminClient } from "../lib/supabase.js";
 import { escapeHtml, sendApprovalCard, sendMessage } from "./api.js";
@@ -16,6 +17,9 @@ import { escapeHtml, sendApprovalCard, sendMessage } from "./api.js";
  * role decision made HERE is which approvals are worth showing — only the ones
  * this person could actually decide. `decide_approval` remains the authority.
  *
+ * Every reply is rendered in the ASKING PERSON's language (`ctx.locale`, read
+ * from their profile), not in a deployment-wide language.
+ *
  * Returns true when the command was recognised and answered.
  */
 
@@ -24,25 +28,25 @@ export interface CommandContext {
   chatId: number | string;
   profileId: string;
   role: string;
+  /** The asking person's language — every reply below is rendered in it. */
+  locale: Locale;
   text: string;
 }
 
-const HELP = [
-  "<b>Freedom Hermes</b>",
-  "",
-  "/brief — today's KPI digest",
-  "/compliance — documents expiring or expired",
-  "/balances — outstanding payee balances",
-  "/approvals — pending proposals awaiting your decision",
-  "/cost — AI spend today against the cap",
-  "/status — loop heartbeats and job health",
-  "/pause, /resume — the kill switch",
-  "/help — this message",
-].join("\n");
-
-function money(n: unknown): string {
-  const v = typeof n === "number" ? n : Number(n ?? 0);
-  return v.toLocaleString("en-US", { style: "currency", currency: "USD" });
+function help(locale: Locale): string {
+  const h = hermesDict(locale);
+  return [
+    `<b>${h.helpTitle}</b>`,
+    "",
+    `/brief — ${h.helpBrief}`,
+    `/compliance — ${h.helpCompliance}`,
+    `/balances — ${h.helpBalances}`,
+    `/approvals — ${h.helpApprovals}`,
+    `/cost — ${h.helpCost}`,
+    `/status — ${h.helpStatus}`,
+    `/pause, /resume — ${h.helpPause}`,
+    `/help — ${h.helpHelp}`,
+  ].join("\n");
 }
 
 function ageMinutes(iso: unknown): number | null {
@@ -51,7 +55,8 @@ function ageMinutes(iso: unknown): number | null {
   return Number.isNaN(t) ? null : Math.round((Date.now() - t) / 60_000);
 }
 
-async function showBalances(chatId: number | string): Promise<void> {
+async function showBalances(chatId: number | string, locale: Locale): Promise<void> {
+  const h = hermesDict(locale);
   const { data, error } = await getAdminClient()
     .from("v_payee_balances")
     .select("payee_type, display_name, balance")
@@ -60,22 +65,30 @@ async function showBalances(chatId: number | string): Promise<void> {
     .limit(15);
 
   if (error) {
-    await sendMessage(chatId, `Could not read balances: ${escapeHtml(error.message)}`);
+    await sendMessage(chatId, h.balancesError(escapeHtml(error.message)));
     return;
   }
   if (!data?.length) {
-    await sendMessage(chatId, "No outstanding balances.");
+    await sendMessage(chatId, h.balancesEmpty);
     return;
   }
 
-  const lines = data.map(
-    (r) =>
-      `• ${escapeHtml(String(r.display_name ?? "—"))} (${escapeHtml(String(r.payee_type ?? "—"))}) — <b>${money(r.balance)}</b>`,
-  );
-  await sendMessage(chatId, [`<b>Outstanding balances</b>`, ...lines].join("\n"));
+  const lines = data.map((r) => {
+    const type = r.payee_type ? (h.payee[r.payee_type] ?? String(r.payee_type)) : "—";
+    return `• ${escapeHtml(String(r.display_name ?? "—"))} (${escapeHtml(type)}) — <b>${fmtMoney(
+      r.balance,
+      locale,
+    )}</b>`;
+  });
+  await sendMessage(chatId, [`<b>${h.balancesTitle}</b>`, ...lines].join("\n"), { html: true });
 }
 
-async function showApprovals(chatId: number | string, role: string): Promise<void> {
+async function showApprovals(
+  chatId: number | string,
+  role: string,
+  locale: Locale,
+): Promise<void> {
+  const h = hermesDict(locale);
   const { data, error } = await getAdminClient()
     .from("hermes_approvals")
     .select("id, action_type, required_role, preview, created_at, expires_at")
@@ -84,7 +97,7 @@ async function showApprovals(chatId: number | string, role: string): Promise<voi
     .limit(10);
 
   if (error) {
-    await sendMessage(chatId, `Could not read approvals: ${escapeHtml(error.message)}`);
+    await sendMessage(chatId, h.approvalsError(escapeHtml(error.message)));
     return;
   }
 
@@ -96,45 +109,56 @@ async function showApprovals(chatId: number | string, role: string): Promise<voi
   if (decidable.length === 0) {
     await sendMessage(
       chatId,
-      otherCount > 0
-        ? `Nothing you can decide. ${otherCount} proposal(s) await a different role.`
-        : "Nothing awaiting approval.",
+      otherCount > 0 ? h.approvalsNoneForYou(otherCount) : h.approvalsEmpty,
     );
     return;
   }
 
   for (const row of decidable) {
     const preview = (row.preview ?? {}) as Record<string, unknown>;
+    // Proposals written since 019 carry both languages; older rows have only
+    // the original `summary`, so fall back to it rather than showing nothing.
+    const localized = preview[`summary_${locale}`];
     const summary =
-      typeof preview.summary === "string" ? preview.summary : JSON.stringify(preview).slice(0, 400);
+      typeof localized === "string"
+        ? localized
+        : typeof preview.summary === "string"
+          ? preview.summary
+          : JSON.stringify(preview).slice(0, 400);
+    const action = h.action[String(row.action_type)] ?? String(row.action_type);
+    const required = h.role[String(row.required_role)] ?? String(row.required_role);
     await sendApprovalCard(
       chatId,
       row.id,
       [
-        `<b>${escapeHtml(String(row.action_type))}</b>`,
+        `<b>${escapeHtml(action)}</b>`,
         escapeHtml(summary),
-        `<i>requires ${escapeHtml(String(row.required_role))}</i>`,
+        `<i>${escapeHtml(h.approvalRequires(required))}</i>`,
       ].join("\n"),
+      locale,
     );
   }
   if (otherCount > 0) {
-    await sendMessage(chatId, `${otherCount} more proposal(s) await a different role.`);
+    await sendMessage(chatId, h.approvalsMoreForOthers(otherCount));
   }
 }
 
-async function showCost(chatId: number | string): Promise<void> {
+async function showCost(chatId: number | string, locale: Locale): Promise<void> {
+  const h = hermesDict(locale);
   const spent = await todaysCost();
   const cap = (await getPolicyValue<number>("daily_cost_cap_usd")) ?? 0;
   const pct = cap > 0 ? Math.round((spent / cap) * 100) : 0;
   await sendMessage(
     chatId,
     cap > 0
-      ? `AI spend today: <b>$${spent.toFixed(4)}</b> of $${cap.toFixed(2)} (${pct}%).`
-      : `AI spend today: <b>$${spent.toFixed(4)}</b> (no cap configured).`,
+      ? h.costWithCap(fmtMoney(spent, locale), fmtMoney(cap, locale), pct)
+      : h.costNoCap(fmtMoney(spent, locale)),
+    { html: true },
   );
 }
 
-async function showStatus(chatId: number | string): Promise<void> {
+async function showStatus(chatId: number | string, locale: Locale): Promise<void> {
+  const h = hermesDict(locale);
   const db = getAdminClient();
 
   const { data: beats } = await db
@@ -150,78 +174,91 @@ async function showStatus(chatId: number | string): Promise<void> {
 
   const enabled = await getPolicyValue<boolean>("enabled");
 
-  const lines = [`<b>Status</b> — ${enabled === false ? "⏸ PAUSED" : "▶️ running"}`, "", "<b>Loops</b>"];
+  const lines = [
+    `<b>${h.statusTitle}</b> — ${enabled === false ? h.statusPaused : h.statusRunning}`,
+    "",
+    `<b>${h.statusLoops}</b>`,
+  ];
   if (!beats?.length) {
-    lines.push("• no heartbeats recorded yet");
+    lines.push(h.statusNoHeartbeats);
   } else {
     for (const b of beats) {
       const mins = ageMinutes(b.updated_at);
       const name = String(b.key).replace("heartbeat:", "");
-      lines.push(`• ${escapeHtml(name)} — ${mins === null ? "unknown" : `${mins}m ago`}`);
+      lines.push(
+        `• ${escapeHtml(name)} — ${mins === null ? h.statusUnknown : h.statusMinutesAgo(mins)}`,
+      );
     }
   }
 
-  lines.push("", "<b>Recent jobs</b>");
+  lines.push("", `<b>${h.statusRecentJobs}</b>`);
   if (!jobs?.length) {
-    lines.push("• none yet");
+    lines.push(h.statusNoJobs);
   } else {
     for (const j of jobs) {
       const icon = j.status === "success" ? "✅" : j.status === "running" ? "⏳" : "❌";
-      lines.push(`${icon} ${escapeHtml(String(j.job_name))} — ${escapeHtml(String(j.outcome ?? j.status))}`);
+      // `outcome` is the job's own diary line, written for whoever debugs the
+      // worker — it stays in the language the job wrote it in.
+      lines.push(
+        `${icon} ${escapeHtml(String(j.job_name))} — ${escapeHtml(String(j.outcome ?? j.status))}`,
+      );
     }
   }
 
-  await sendMessage(chatId, lines.join("\n"));
+  await sendMessage(chatId, lines.join("\n"), { html: true });
 }
 
 export async function handleCommand(ctx: CommandContext): Promise<boolean> {
-  const { command, chatId, role } = ctx;
+  const { command, chatId, role, locale } = ctx;
+  const h = hermesDict(locale);
 
   switch (command) {
     case "/help":
     case "/start":
-      await sendMessage(chatId, HELP);
+      await sendMessage(chatId, help(locale), { html: true });
       return true;
 
     case "/brief": {
+      // Runs the job, which broadcasts to every paired chat in each reader's
+      // own language; the return value is the log line, not the message.
       const { runMorningBrief } = await import("../jobs/morning-brief.js");
-      await sendMessage(chatId, await runMorningBrief());
+      await runMorningBrief();
       return true;
     }
 
     case "/compliance": {
       const { runComplianceWatch } = await import("../jobs/compliance-watch.js");
-      await sendMessage(chatId, await runComplianceWatch());
+      await runComplianceWatch();
       return true;
     }
 
     case "/balances":
-      await showBalances(chatId);
+      await showBalances(chatId, locale);
       return true;
 
     case "/approvals":
-      await showApprovals(chatId, role);
+      await showApprovals(chatId, role, locale);
       return true;
 
     case "/cost":
-      await showCost(chatId);
+      await showCost(chatId, locale);
       return true;
 
     case "/status":
-      await showStatus(chatId);
+      await showStatus(chatId, locale);
       return true;
 
     case "/pause": {
       const { setPolicyValue } = await import("../lib/policy-kv.js");
       await setPolicyValue("enabled", false, "kill switch, set from Telegram");
-      await sendMessage(chatId, "⏸ Paused. Scheduled jobs will not run until /resume.");
+      await sendMessage(chatId, h.paused);
       return true;
     }
 
     case "/resume": {
       const { setPolicyValue } = await import("../lib/policy-kv.js");
       await setPolicyValue("enabled", true, "kill switch, set from Telegram");
-      await sendMessage(chatId, "▶️ Resumed.");
+      await sendMessage(chatId, h.resumed);
       return true;
     }
 

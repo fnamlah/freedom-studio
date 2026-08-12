@@ -1,4 +1,5 @@
 import { getAdminClient } from "../lib/supabase.js";
+import { hermesDict, money, type Locale } from "../lib/i18n.js";
 
 /**
  * The only code in Hermes that writes business data.
@@ -22,6 +23,9 @@ export interface ExecutorResult {
 
 type SaveStep = (patch: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
+/** The locale of the person who approved — the message is written back to them. */
+type Reader = Locale;
+
 function str(payload: Record<string, unknown>, key: string): string {
   const v = payload[key];
   if (typeof v !== "string" || v.length === 0) throw new Error(`payload.${key} missing`);
@@ -39,10 +43,12 @@ async function closePeriod(
   approver: string,
   prior: Record<string, unknown>,
   saveStep: SaveStep,
+  locale: Reader,
 ): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
   if (prior.posted !== undefined) {
     return {
-      message: `Period already posted on an earlier attempt (${prior.posted} shares).`,
+      message: h.closedAlready(Number(prior.posted)),
       result: prior,
     };
   }
@@ -66,7 +72,7 @@ async function closePeriod(
 
   const result = await saveStep({ posted, skipped, period_start: periodStart, period_end: periodEnd });
   return {
-    message: `Closed ${periodStart} → ${periodEnd}: ${posted} share(s) posted, ${skipped} skipped.`,
+    message: h.closed(periodStart, periodEnd, posted, skipped),
     result,
   };
 }
@@ -76,9 +82,11 @@ async function snapshotForecast(
   approver: string,
   prior: Record<string, unknown>,
   saveStep: SaveStep,
+  locale: Reader,
 ): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
   if (prior.rows !== undefined) {
-    return { message: `Forecast already snapshotted (${prior.rows} rows).`, result: prior };
+    return { message: h.forecastAlready(Number(prior.rows)), result: prior };
   }
 
   const months = typeof payload.months_ahead === "number" ? payload.months_ahead : 3;
@@ -89,7 +97,7 @@ async function snapshotForecast(
   if (error) throw new Error(error.message);
 
   const result = await saveStep({ rows: data ?? 0, months_ahead: months });
-  return { message: `Forecast snapshot written: ${data ?? 0} row(s), ${months} month(s) ahead.`, result };
+  return { message: h.forecastWritten(Number(data ?? 0), months), result };
 }
 
 /**
@@ -102,9 +110,11 @@ async function createPayout(
   approver: string,
   prior: Record<string, unknown>,
   saveStep: SaveStep,
+  locale: Reader,
 ): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
   if (typeof prior.payout_id === "string") {
-    return { message: `Payout already created (${prior.payout_id}).`, result: prior };
+    return { message: h.payoutAlready(String(prior.payout_id)), result: prior };
   }
 
   const payeeType = str(payload, "payee_type");
@@ -133,7 +143,7 @@ async function createPayout(
 
   if (existing) {
     const result = await saveStep({ payout_id: existing.id, reused: true });
-    return { message: `An open payout already exists for this period (${existing.id}).`, result };
+    return { message: h.payoutOpenExists(String(existing.id)), result };
   }
 
   const gross = typeof payload.gross_amount === "number" ? payload.gross_amount : net;
@@ -151,7 +161,7 @@ async function createPayout(
       currency: typeof payload.currency === "string" ? payload.currency : "USD",
       status: "pending",
       created_by: approver,
-      notes: "Proposed by Freedom Hermes; approved in-app before creation.",
+      notes: h.payoutNote,
     })
     .select("id")
     .single();
@@ -160,7 +170,7 @@ async function createPayout(
 
   const result = await saveStep({ payout_id: data!.id, net_amount: net });
   return {
-    message: `Payout created as PENDING (${data!.id}, net ${net}). It still needs super-admin approval in the app.`,
+    message: h.payoutCreated(String(data!.id), money(net, locale)),
     result,
   };
 }
@@ -171,14 +181,15 @@ export async function runExecutor(
   approver: string,
   prior: Record<string, unknown>,
   saveStep: SaveStep,
+  locale: Reader,
 ): Promise<ExecutorResult> {
   switch (actionType) {
     case "close_period":
-      return closePeriod(payload, approver, prior, saveStep);
+      return closePeriod(payload, approver, prior, saveStep, locale);
     case "snapshot_forecast":
-      return snapshotForecast(payload, approver, prior, saveStep);
+      return snapshotForecast(payload, approver, prior, saveStep, locale);
     case "create_payout":
-      return createPayout(payload, approver, prior, saveStep);
+      return createPayout(payload, approver, prior, saveStep, locale);
     default:
       throw new Error(`no executor for ${actionType}`);
   }

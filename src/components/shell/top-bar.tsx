@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import { MenuIcon, ShieldIcon, SignOutIcon } from "@/components/shell/icons";
 import { Badge } from "@/components/ui/badge";
 import { AUTH_ROUTES } from "@/lib/auth/routes";
-import { ROLE_LABELS, type Role } from "@/lib/auth/roles";
+import { type Role } from "@/lib/auth/roles";
+import { LocaleSwitcher } from "@/components/shell/locale-switcher";
+import { useDict } from "@/lib/i18n/client";
 import { initials } from "@/lib/format";
 import { createBrowserSupabase } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
@@ -32,6 +34,7 @@ export function TopBar({ fullName, email, role, onOpenNav, children }: TopBarPro
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const d = useDict();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -68,7 +71,7 @@ export function TopBar({ fullName, email, role, onOpenNav, children }: TopBarPro
       <button
         type="button"
         onClick={onOpenNav}
-        aria-label="Open navigation"
+        aria-label={d.shell.openMenu}
         className="rounded-md p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-foreground lg:hidden"
       >
         <MenuIcon width={18} height={18} />
@@ -78,11 +81,10 @@ export function TopBar({ fullName, email, role, onOpenNav, children }: TopBarPro
         {children}
 
         <span
-          title="This session is verified with two-factor authentication (AAL2)."
           className="hidden items-center gap-1.5 text-xs text-muted sm:flex"
         >
           <ShieldIcon width={14} height={14} className="text-success" />
-          2FA verified
+          {d.shell.mfaVerified}
         </span>
 
         <div className="relative" ref={menuRef}>
@@ -114,8 +116,12 @@ export function TopBar({ fullName, email, role, onOpenNav, children }: TopBarPro
                 <p className="truncate text-sm font-medium text-foreground">{fullName}</p>
                 <p className="truncate text-xs text-muted">{email}</p>
                 <Badge variant="primary" className="mt-2">
-                  {ROLE_LABELS[role]}
+                  {d.roles[role]}
                 </Badge>
+              </div>
+              <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                <span className="text-xs text-muted">{d.locale.label}</span>
+                <LocaleSwitcher />
               </div>
               <button
                 type="button"
@@ -125,7 +131,7 @@ export function TopBar({ fullName, email, role, onOpenNav, children }: TopBarPro
                 className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-muted transition-colors hover:bg-surface-2 hover:text-foreground disabled:opacity-60"
               >
                 <SignOutIcon width={15} height={15} />
-                {signingOut ? "Signing out…" : "Sign out"}
+                {signingOut ? d.shell.signingOut : d.shell.signOut}
               </button>
             </div>
           ) : null}

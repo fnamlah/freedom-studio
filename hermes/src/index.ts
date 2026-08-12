@@ -32,6 +32,9 @@ async function main(): Promise<void> {
   loops.push(runApprovalSweep());
 
   if (env.TELEGRAM_BOT_TOKEN) {
+    const { registerBotCommands } = await import("./telegram/register-commands.js");
+    void registerBotCommands(); // fire-and-forget: cosmetic, must not delay boot
+
     const { runTelegramPoller } = await import("./workers/telegram-poller.js");
     registerLoop("telegram-poller");
     loops.push(runTelegramPoller());

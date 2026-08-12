@@ -1,4 +1,5 @@
 import { broadcastStaff } from "../lib/owner.js";
+import { hermesDict, money } from "../lib/i18n.js";
 import { getAdminClient } from "../lib/supabase.js";
 
 /**
@@ -23,14 +24,15 @@ export async function runMorningBrief(): Promise<string> {
   const expired = (compliance ?? []).filter((c) => c.status === "expired").length;
   const expiring = (compliance ?? []).filter((c) => c.status === "expiring").length;
 
-  const text = [
-    `<b>Freedom Studio — ${month}</b>`,
-    ``,
-    `Outstanding to payees: <b>$${owed.toFixed(2)}</b>`,
-    `Payouts: ${pending} pending · ${approved} approved awaiting settlement`,
-    `Compliance: ${expired} expired · ${expiring} expiring`,
-  ].join("\n");
-
-  await broadcastStaff(text, { html: true });
+  await broadcastStaff((locale) => {
+    const h = hermesDict(locale);
+    return [
+      `<b>${h.briefTitle(month)}</b>`,
+      ``,
+      h.briefOutstanding(money(owed, locale)),
+      h.briefPayouts(pending, approved),
+      h.briefCompliance(expired, expiring),
+    ].join("\n");
+  }, { html: true });
   return `owed=$${owed.toFixed(2)} pending=${pending} expired=${expired}`;
 }

@@ -1,4 +1,5 @@
 import { roleSatisfies } from "../governance/policy.js";
+import { toLocale, type Locale } from "./i18n.js";
 import { roleMayUseBot } from "../telegram/access.js";
 import { getPolicyValue, setPolicyValue } from "./policy-kv.js";
 import { getAdminClient } from "./supabase.js";
@@ -19,6 +20,8 @@ import { sendMessage } from "../telegram/api.js";
 interface StaffChannel {
   chatId: string;
   role: string;
+  /** The reader's language. The same broadcast reaches both languages. */
+  locale: Locale;
 }
 
 let cache: { at: number; channels: StaffChannel[] } | null = null;
@@ -31,7 +34,7 @@ export async function listStaffChannels(): Promise<StaffChannel[]> {
 
   const { data, error } = await getAdminClient()
     .from("hermes_channels")
-    .select("external_id, profiles:profile_id(role, status)")
+    .select("external_id, profiles:profile_id(role, status, locale)")
     .eq("channel_type", "telegram")
     .eq("verified", true)
     .eq("is_active", true)
@@ -43,9 +46,11 @@ export async function listStaffChannels(): Promise<StaffChannel[]> {
   }
 
   const channels = (data ?? []).flatMap((r) => {
-    const p = r.profiles as unknown as { role?: string; status?: string } | null;
+    const p = r.profiles as unknown as
+      | { role?: string; status?: string; locale?: string }
+      | null;
     if (p?.status !== "active" || !roleMayUseBot(p?.role)) return [];
-    return [{ chatId: String(r.external_id), role: p!.role! }];
+    return [{ chatId: String(r.external_id), role: p!.role!, locale: toLocale(p.locale) }];
   });
 
   cache = { at: Date.now(), channels };
@@ -53,20 +58,26 @@ export async function listStaffChannels(): Promise<StaffChannel[]> {
 }
 
 /** Channels allowed to DECIDE an approval requiring `requiredRole`. */
-export async function channelsSatisfying(requiredRole: string): Promise<string[]> {
+export async function channelsSatisfying(
+  requiredRole: string,
+): Promise<Array<{ chatId: string; locale: Locale }>> {
   const channels = await listStaffChannels();
-  return channels.filter((c) => roleSatisfies(c.role, requiredRole)).map((c) => c.chatId);
+  return channels
+    .filter((c) => roleSatisfies(c.role, requiredRole))
+    .map((c) => ({ chatId: c.chatId, locale: c.locale }));
 }
 
 /** Every paired staff channel — for daily digests and briefs. */
 export async function broadcastStaff(
-  text: string,
+  render: (locale: Locale) => string,
   opts: { html?: boolean } = {},
 ): Promise<number> {
   const channels = await listStaffChannels();
   for (const c of channels) {
     try {
-      await sendMessage(c.chatId, text, opts);
+      // Rendered per recipient, not once: a Russian-reading manager and an
+      // English-reading owner receive the same digest in their own language.
+      await sendMessage(c.chatId, render(c.locale), opts);
     } catch (e) {
       console.warn(`[broadcast] ${c.chatId} failed:`, e instanceof Error ? e.message : e);
     }
@@ -91,14 +102,16 @@ export async function alertOwner(
     const last = await getPolicyValue<string>(policyKey);
     if (last && Date.now() - Date.parse(last) < throttleMs) return;
 
-    const chatIds = await channelsSatisfying("super_admin");
-    if (chatIds.length === 0) {
+    const targets = await channelsSatisfying("super_admin");
+    if (targets.length === 0) {
       console.warn(`[alert:${key}] no paired super_admin chat — ${text}`);
       return;
     }
 
-    for (const chatId of chatIds) {
-      await sendMessage(chatId, `⚠️ ${text}`);
+    // Ops alerts stay in one language on purpose: they carry raw error text and
+    // identifiers meant for whoever debugs the worker, not end-user prose.
+    for (const target of targets) {
+      await sendMessage(target.chatId, `⚠️ ${text}`);
     }
     await setPolicyValue(policyKey, new Date().toISOString());
   } catch (e) {

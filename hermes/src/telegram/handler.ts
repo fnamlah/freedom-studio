@@ -1,4 +1,5 @@
 import { enqueueKeyed } from "../lib/keyed-queue.js";
+import { hermesDict, toLocale, DEFAULT_LOCALE, type Locale } from "../lib/i18n.js";
 import { getAdminClient } from "../lib/supabase.js";
 import { commandAllowed, roleMayUseBot } from "./access.js";
 import {
@@ -34,20 +35,28 @@ interface Channel {
   id: string;
   profileId: string;
   role: string;
+  locale: Locale;
 }
 
 async function findVerifiedChannel(chatId: number | string): Promise<Channel | null> {
   const { data } = await getAdminClient()
     .from("hermes_channels")
-    .select("id, profile_id, verified, is_active, profiles:profile_id(role, status)")
+    .select("id, profile_id, verified, is_active, profiles:profile_id(role, status, locale)")
     .eq("channel_type", "telegram")
     .eq("external_id", String(chatId))
     .maybeSingle();
 
   if (!data || !data.verified || !data.is_active) return null;
-  const p = data.profiles as unknown as { role?: string; status?: string } | null;
+  const p = data.profiles as unknown as
+    | { role?: string; status?: string; locale?: string }
+    | null;
   if (p?.status !== "active" || !roleMayUseBot(p?.role)) return null;
-  return { id: data.id as string, profileId: data.profile_id as string, role: p!.role! };
+  return {
+    id: data.id as string,
+    profileId: data.profile_id as string,
+    role: p!.role!,
+    locale: toLocale(p.locale),
+  };
 }
 
 /** Redeem a one-time pairing code. The only action an unpaired chat may take. */
@@ -62,12 +71,14 @@ async function tryPair(
   const db = getAdminClient();
   const { data: row } = await db
     .from("hermes_pairing_codes")
-    .select("code, profile_id, expires_at, used_at, expected_username, profiles:profile_id(role, status)")
+    .select("code, profile_id, expires_at, used_at, expected_username, profiles:profile_id(role, status, locale)")
     .eq("code", code)
     .maybeSingle();
 
   if (!row || row.used_at || Date.parse(String(row.expires_at)) < Date.now()) return false;
-  const p = row.profiles as unknown as { role?: string; status?: string } | null;
+  const p = row.profiles as unknown as
+    | { role?: string; status?: string; locale?: string }
+    | null;
   if (p?.status !== "active" || !roleMayUseBot(p?.role)) return false;
 
   // A code minted for a named person redeems only from that username. The
@@ -93,7 +104,9 @@ async function tryPair(
     );
   await db.from("hermes_pairing_codes").update({ used_at: new Date().toISOString() }).eq("code", code);
 
-  await sendMessage(chatId, "Paired. Freedom Hermes is now connected to this chat.");
+  // The confirmation is the first thing this person ever sees from the bot —
+  // it must already be in their language, not the deployment default.
+  await sendMessage(chatId, hermesDict(toLocale(p.locale)).paired);
   return true;
 }
 
@@ -132,20 +145,26 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
         if (await tryPair(chatId, text, update.message?.from?.username)) return;
       }
       if (text === "/start") {
-        await sendMessage(chatId, "Send your pairing code to connect this chat.");
+        await sendMessage(chatId, hermesDict(DEFAULT_LOCALE).sendPairingCode);
       }
       return;
     }
 
     if (isCallback && update.callback_query) {
-      await handleApprovalCallback(update.callback_query.id, text, channel.profileId, chatId);
+      await handleApprovalCallback(
+        update.callback_query.id,
+        text,
+        channel.profileId,
+        chatId,
+        channel.locale,
+      );
       return;
     }
 
     if (text.startsWith("/")) {
       const command = text.toLowerCase().split(/[\s@]/)[0] ?? "";
       if (!commandAllowed(channel.role, command)) {
-        await sendMessage(chatId, "That command needs a super admin.");
+        await sendMessage(chatId, hermesDict(channel.locale).needsSuperAdmin);
         return;
       }
       const handled = await handleCommand({
@@ -153,15 +172,13 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
         chatId,
         profileId: channel.profileId,
         role: channel.role,
+        locale: channel.locale,
         text,
       });
       if (handled) return;
     }
 
-    await sendMessage(
-      chatId,
-      "Commands: /brief /compliance /balances /approvals /cost /status /help",
-    );
+    await sendMessage(chatId, hermesDict(channel.locale).commandList);
   });
 }
 
@@ -175,12 +192,14 @@ async function handleApprovalCallback(
   data: string,
   profileId: string,
   chatId: number | string,
+  locale: Locale,
 ): Promise<void> {
+  const h = hermesDict(locale);
   const match = APPR_RE.exec(data);
   const approvalId = match?.[1];
   const verdict = match?.[2];
   if (!approvalId || !verdict) {
-    await answerCallbackQuery(callbackId, "Unrecognised action");
+    await answerCallbackQuery(callbackId, h.unrecognisedAction);
     return;
   }
 
@@ -192,18 +211,18 @@ async function handleApprovalCallback(
   });
 
   if (error) {
-    await answerCallbackQuery(callbackId, "Could not record decision");
-    await sendMessage(chatId, `Decision failed: ${escapeHtml(error.message)}`);
+    await answerCallbackQuery(callbackId, h.decisionNotRecorded);
+    await sendMessage(chatId, h.decisionFailed(escapeHtml(error.message)));
     return;
   }
 
-  await answerCallbackQuery(callbackId, verdict === "approve" ? "Approved" : "Rejected");
+  await answerCallbackQuery(callbackId, verdict === "approve" ? h.approved : h.rejected);
 
   if (verdict === "approve") {
     const { executeApproval } = await import("../governance/approvals.js");
-    const result = await executeApproval(approvalId);
+    const result = await executeApproval(approvalId, locale);
     await sendMessage(chatId, result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}`);
   } else {
-    await sendMessage(chatId, "Rejected — nothing was executed.");
+    await sendMessage(chatId, h.rejectedNothingRan);
   }
 }

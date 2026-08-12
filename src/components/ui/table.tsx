@@ -37,7 +37,12 @@ export function Table({
 
   if (!scrollable) return table;
   return (
-    <div className={cn("w-full max-w-full min-w-0 overflow-x-auto", containerClassName)}>
+    <div
+      className={cn(
+        "relative w-full max-w-full min-w-0 overflow-x-auto",
+        containerClassName,
+      )}
+    >
       {table}
     </div>
   );

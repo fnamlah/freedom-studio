@@ -878,6 +878,361 @@ export type Database = {
           },
         ]
       }
+      hermes_approvals: {
+        Row: {
+          action_type: string
+          attempt_count: number
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decided_via: string | null
+          decision_note: string | null
+          executed_at: string | null
+          execution_result: Json
+          expires_at: string | null
+          id: string
+          idempotency_key: string
+          job_name: string | null
+          last_error: string | null
+          next_attempt_at: string | null
+          payload: Json
+          preview: Json
+          required_role: Database["public"]["Enums"]["user_role"]
+          risk_reason: string | null
+          run_id: string | null
+          state: Database["public"]["Enums"]["hermes_approval_state"]
+          tier: Database["public"]["Enums"]["hermes_action_tier"]
+          updated_at: string
+        }
+        Insert: {
+          action_type: string
+          attempt_count?: number
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decided_via?: string | null
+          decision_note?: string | null
+          executed_at?: string | null
+          execution_result?: Json
+          expires_at?: string | null
+          id?: string
+          idempotency_key: string
+          job_name?: string | null
+          last_error?: string | null
+          next_attempt_at?: string | null
+          payload?: Json
+          preview?: Json
+          required_role: Database["public"]["Enums"]["user_role"]
+          risk_reason?: string | null
+          run_id?: string | null
+          state?: Database["public"]["Enums"]["hermes_approval_state"]
+          tier: Database["public"]["Enums"]["hermes_action_tier"]
+          updated_at?: string
+        }
+        Update: {
+          action_type?: string
+          attempt_count?: number
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decided_via?: string | null
+          decision_note?: string | null
+          executed_at?: string | null
+          execution_result?: Json
+          expires_at?: string | null
+          id?: string
+          idempotency_key?: string
+          job_name?: string | null
+          last_error?: string | null
+          next_attempt_at?: string | null
+          payload?: Json
+          preview?: Json
+          required_role?: Database["public"]["Enums"]["user_role"]
+          risk_reason?: string | null
+          run_id?: string | null
+          state?: Database["public"]["Enums"]["hermes_approval_state"]
+          tier?: Database["public"]["Enums"]["hermes_action_tier"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hermes_approvals_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hermes_channels: {
+        Row: {
+          channel_type: string
+          created_at: string
+          external_id: string
+          id: string
+          is_active: boolean
+          profile_id: string
+          verified: boolean
+        }
+        Insert: {
+          channel_type?: string
+          created_at?: string
+          external_id: string
+          id?: string
+          is_active?: boolean
+          profile_id: string
+          verified?: boolean
+        }
+        Update: {
+          channel_type?: string
+          created_at?: string
+          external_id?: string
+          id?: string
+          is_active?: boolean
+          profile_id?: string
+          verified?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hermes_channels_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hermes_job_runs: {
+        Row: {
+          duration_ms: number | null
+          error: string | null
+          finished_at: string | null
+          id: number
+          job_name: string
+          outcome: string | null
+          started_at: string
+          status: string
+        }
+        Insert: {
+          duration_ms?: number | null
+          error?: string | null
+          finished_at?: string | null
+          id?: never
+          job_name: string
+          outcome?: string | null
+          started_at?: string
+          status: string
+        }
+        Update: {
+          duration_ms?: number | null
+          error?: string | null
+          finished_at?: string | null
+          id?: never
+          job_name?: string
+          outcome?: string | null
+          started_at?: string
+          status?: string
+        }
+        Relationships: []
+      }
+      hermes_messages: {
+        Row: {
+          body: string | null
+          channel_type: string
+          created_at: string
+          direction: string
+          external_message_id: string | null
+          id: number
+          msg_type: string | null
+          update_id: number | null
+        }
+        Insert: {
+          body?: string | null
+          channel_type?: string
+          created_at?: string
+          direction: string
+          external_message_id?: string | null
+          id?: never
+          msg_type?: string | null
+          update_id?: number | null
+        }
+        Update: {
+          body?: string | null
+          channel_type?: string
+          created_at?: string
+          direction?: string
+          external_message_id?: string | null
+          id?: never
+          msg_type?: string | null
+          update_id?: number | null
+        }
+        Relationships: []
+      }
+      hermes_pairing_codes: {
+        Row: {
+          code: string
+          created_at: string
+          expires_at: string
+          profile_id: string
+          used_at: string | null
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          expires_at: string
+          profile_id: string
+          used_at?: string | null
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          expires_at?: string
+          profile_id?: string
+          used_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hermes_pairing_codes_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hermes_policy: {
+        Row: {
+          description: string | null
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          description?: string | null
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          description?: string | null
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
+      hermes_runs: {
+        Row: {
+          cost_usd: number
+          error: string | null
+          finished_at: string | null
+          id: string
+          iterations: number
+          job_name: string | null
+          model: string | null
+          started_at: string
+          status: string
+          tokens_in: number
+          tokens_out: number
+          trigger: string | null
+        }
+        Insert: {
+          cost_usd?: number
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          iterations?: number
+          job_name?: string | null
+          model?: string | null
+          started_at?: string
+          status?: string
+          tokens_in?: number
+          tokens_out?: number
+          trigger?: string | null
+        }
+        Update: {
+          cost_usd?: number
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          iterations?: number
+          job_name?: string | null
+          model?: string | null
+          started_at?: string
+          status?: string
+          tokens_in?: number
+          tokens_out?: number
+          trigger?: string | null
+        }
+        Relationships: []
+      }
+      hermes_sessions: {
+        Row: {
+          channel_id: string
+          conversation_state: Json
+          id: string
+          last_inbound_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          channel_id: string
+          conversation_state?: Json
+          id?: string
+          last_inbound_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          channel_id?: string
+          conversation_state?: Json
+          id?: string
+          last_inbound_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hermes_sessions_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: true
+            referencedRelation: "hermes_channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hermes_tool_calls: {
+        Row: {
+          args: Json | null
+          created_at: string
+          id: number
+          run_id: string | null
+          status: string
+          tool_name: string
+        }
+        Insert: {
+          args?: Json | null
+          created_at?: string
+          id?: never
+          run_id?: string | null
+          status?: string
+          tool_name: string
+        }
+        Update: {
+          args?: Json | null
+          created_at?: string
+          id?: never
+          run_id?: string | null
+          status?: string
+          tool_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hermes_tool_calls_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "hermes_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invitations: {
         Row: {
           accepted_at: string | null
@@ -2098,6 +2453,61 @@ export type Database = {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
       }
+      decide_approval: {
+        Args: {
+          p_actor?: string
+          p_id: string
+          p_note?: string
+          p_verdict: string
+          p_via?: string
+        }
+        Returns: {
+          action_type: string
+          attempt_count: number
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decided_via: string | null
+          decision_note: string | null
+          executed_at: string | null
+          execution_result: Json
+          expires_at: string | null
+          id: string
+          idempotency_key: string
+          job_name: string | null
+          last_error: string | null
+          next_attempt_at: string | null
+          payload: Json
+          preview: Json
+          required_role: Database["public"]["Enums"]["user_role"]
+          risk_reason: string | null
+          run_id: string | null
+          state: Database["public"]["Enums"]["hermes_approval_state"]
+          tier: Database["public"]["Enums"]["hermes_action_tier"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "hermes_approvals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_agent_generate_earning_shares: {
+        Args: {
+          p_approver: string
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: {
+          posted_count: number
+          skipped_count: number
+        }[]
+      }
+      fn_agent_snapshot_forecast: {
+        Args: { p_approver: string; p_months_ahead: number }
+        Returns: number
+      }
       fn_compliance_counts: {
         Args: never
         Returns: {
@@ -2184,6 +2594,21 @@ export type Database = {
         Args: { p_months_ahead?: number }
         Returns: number
       }
+      hermes_claim_job: {
+        Args: { p_day: string; p_job: string }
+        Returns: boolean
+      }
+      hermes_incr_policy_number: {
+        Args: { p_delta: number; p_description?: string; p_key: string }
+        Returns: number
+      }
+      hermes_role_satisfies: {
+        Args: {
+          p_actor: Database["public"]["Enums"]["user_role"]
+          p_required: Database["public"]["Enums"]["user_role"]
+        }
+        Returns: boolean
+      }
       is_aal2: { Args: never; Returns: boolean }
       is_active_profile: { Args: never; Returns: boolean }
       my_model_id: { Args: never; Returns: string }
@@ -2205,12 +2630,28 @@ export type Database = {
         }
         Returns: undefined
       }
+      write_audit_as: {
+        Args: {
+          p_action: string
+          p_actor: string
+          p_entity_id: string
+          p_entity_type: string
+          p_metadata?: Json
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       account_status: "active" | "suspended" | "closed"
       ai_message_role: "user" | "assistant" | "tool"
       ai_provider: "moonshot" | "zhipu"
-      ai_request_kind: "chat" | "embedding" | "report" | "classify" | "analyse"
+      ai_request_kind:
+        | "chat"
+        | "embedding"
+        | "report"
+        | "classify"
+        | "analyse"
+        | "agent"
       ai_review_status:
         | "pending"
         | "suggested"
@@ -2232,6 +2673,15 @@ export type Database = {
         | "platform"
         | "document_meta"
       entry_source: "manual" | "import"
+      hermes_action_tier: "automatic" | "approval" | "human_only"
+      hermes_approval_state:
+        | "pending"
+        | "approved"
+        | "rejected"
+        | "executed"
+        | "failed"
+        | "expired"
+        | "cancelled"
       invitation_status: "pending" | "accepted" | "expired" | "revoked"
       ledger_entry_type:
         | "earning_share"
@@ -2373,7 +2823,14 @@ export const Constants = {
       account_status: ["active", "suspended", "closed"],
       ai_message_role: ["user", "assistant", "tool"],
       ai_provider: ["moonshot", "zhipu"],
-      ai_request_kind: ["chat", "embedding", "report", "classify", "analyse"],
+      ai_request_kind: [
+        "chat",
+        "embedding",
+        "report",
+        "classify",
+        "analyse",
+        "agent",
+      ],
       ai_review_status: [
         "pending",
         "suggested",
@@ -2398,6 +2855,16 @@ export const Constants = {
         "document_meta",
       ],
       entry_source: ["manual", "import"],
+      hermes_action_tier: ["automatic", "approval", "human_only"],
+      hermes_approval_state: [
+        "pending",
+        "approved",
+        "rejected",
+        "executed",
+        "failed",
+        "expired",
+        "cancelled",
+      ],
       invitation_status: ["pending", "accepted", "expired", "revoked"],
       ledger_entry_type: [
         "earning_share",
@@ -2414,13 +2881,6 @@ export const Constants = {
   },
 } as const
 
-/* ---------------------------------------------------------------------------
- * Freedom Studio compatibility appendix
- * Re-exports the convenience aliases and helpers the app foundation contract
- * promised, defined via indexed-access so they do not depend on the generated
- * helper signatures. (This block is re-appended after every `supabase gen
- * types` regeneration.)
- * ------------------------------------------------------------------------- */
 type PublicSchema = Database["public"];
 
 export type DbFunctions = PublicSchema["Functions"];
@@ -2453,3 +2913,8 @@ export type AiMessageRow = PublicSchema["Tables"]["ai_messages"]["Row"];
 export type AiUsageRow = PublicSchema["Tables"]["ai_usage"]["Row"];
 export type AiReportRow = PublicSchema["Tables"]["ai_reports"]["Row"];
 export type EmbeddingRow = PublicSchema["Tables"]["embeddings"]["Row"];
+
+export type HermesApprovalRow = PublicSchema["Tables"]["hermes_approvals"]["Row"];
+export type HermesRunRow = PublicSchema["Tables"]["hermes_runs"]["Row"];
+export type HermesJobRunRow = PublicSchema["Tables"]["hermes_job_runs"]["Row"];
+export type HermesChannelRow = PublicSchema["Tables"]["hermes_channels"]["Row"];

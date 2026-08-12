@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    // NOT NodeNext. NodeNext decides each file's module format from the nearest
+    // package.json to the SOURCE file, and the app root is not `type: module`,
+    // so it emitted ../src/lib/ai/redactor.ts as CommonJS while the worker's own
+    // files were ESM — Node then failed to see its named exports at runtime.
+    // ESNext forces one format for the whole emitted tree.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "outDir": "dist",
+    "rootDir": "..",
+    "baseUrl": ".",
+    "paths": { "@studio/*": ["../src/*"] }
+  },
+  "include": [
+    "src/**/*.ts",
+    "../src/lib/ai/redactor.ts",
+    "../src/lib/database.types.ts"
+  ]
+}

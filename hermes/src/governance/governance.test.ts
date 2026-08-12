@@ -18,6 +18,7 @@ import {
   resolvePolicy,
   roleSatisfies,
 } from "./policy.js";
+import { BOT_ROLES, commandAllowed, roleMayUseBot } from "../telegram/access.js";
 
 test("unknown actions fail safe to approval, never automatic", () => {
   for (const unknown of ["", "wire_funds", "drop_table", "../../etc/passwd", "SEND_BRIEF"]) {
@@ -93,6 +94,34 @@ test("a tool with no projection fails closed", () => {
     /projection|unregistered|unknown/i,
     "an unregistered tool must throw, not pass data through",
   );
+});
+
+test("models and operators can never hold a bot channel", () => {
+  // The bot answers from a service-role client that sees every row; the app
+  // shows these roles only their own. A channel would be privilege escalation.
+  assert.ok(!BOT_ROLES.has("model"));
+  assert.ok(!BOT_ROLES.has("operator"));
+  assert.ok(!roleMayUseBot("model"));
+  assert.ok(!roleMayUseBot("operator"));
+  assert.ok(!roleMayUseBot(null));
+  assert.ok(!roleMayUseBot(""));
+
+  assert.deepEqual([...BOT_ROLES].sort(), ["finance", "manager", "super_admin"]);
+});
+
+test("the kill switch answers only to a super admin", () => {
+  for (const cmd of ["/pause", "/resume"]) {
+    assert.ok(commandAllowed("super_admin", cmd), `${cmd} must work for super_admin`);
+    assert.ok(!commandAllowed("manager", cmd), `${cmd} must refuse manager`);
+    assert.ok(!commandAllowed("finance", cmd), `${cmd} must refuse finance`);
+  }
+  // Ordinary commands stay open to every bot role, and closed to everyone else.
+  for (const role of ["super_admin", "manager", "finance"]) {
+    assert.ok(commandAllowed(role, "/brief"));
+    assert.ok(commandAllowed(role, "/approvals"));
+  }
+  assert.ok(!commandAllowed("model", "/brief"));
+  assert.ok(!commandAllowed("operator", "/status"));
 });
 
 test("scrubText masks contact details in free text", () => {

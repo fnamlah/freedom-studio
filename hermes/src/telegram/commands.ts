@@ -1,3 +1,4 @@
+import { roleSatisfies } from "../governance/policy.js";
 import { todaysCost } from "../lib/cost.js";
 import { getPolicyValue } from "../lib/policy-kv.js";
 import { getAdminClient } from "../lib/supabase.js";
@@ -6,10 +7,14 @@ import { escapeHtml, sendApprovalCard, sendMessage } from "./api.js";
 /**
  * Deterministic slash commands.
  *
- * These deliberately do NOT go through the LLM. The owner asking "what is my
- * cost today" should get a number read from the database, not a number a model
+ * These deliberately do NOT go through the LLM. Staff asking "what is my cost
+ * today" should get a number read from the database, not a number a model
  * chose to say — and a command that never reaches a provider cannot leak
  * anything to one. Free-text messages are what the model is for.
+ *
+ * Role gating happened in the handler (access.ts) before this runs; the one
+ * role decision made HERE is which approvals are worth showing — only the ones
+ * this person could actually decide. `decide_approval` remains the authority.
  *
  * Returns true when the command was recognised and answered.
  */
@@ -18,6 +23,7 @@ export interface CommandContext {
   command: string;
   chatId: number | string;
   profileId: string;
+  role: string;
   text: string;
 }
 
@@ -69,7 +75,7 @@ async function showBalances(chatId: number | string): Promise<void> {
   await sendMessage(chatId, [`<b>Outstanding balances</b>`, ...lines].join("\n"));
 }
 
-async function showApprovals(chatId: number | string): Promise<void> {
+async function showApprovals(chatId: number | string, role: string): Promise<void> {
   const { data, error } = await getAdminClient()
     .from("hermes_approvals")
     .select("id, action_type, required_role, preview, created_at, expires_at")
@@ -81,24 +87,38 @@ async function showApprovals(chatId: number | string): Promise<void> {
     await sendMessage(chatId, `Could not read approvals: ${escapeHtml(error.message)}`);
     return;
   }
-  if (!data?.length) {
-    await sendMessage(chatId, "Nothing awaiting approval.");
+
+  // Cards only for proposals this person could actually decide. Sending a
+  // manager a finance approval card would render buttons that can only fail.
+  const decidable = (data ?? []).filter((row) => roleSatisfies(role, String(row.required_role)));
+  const otherCount = (data ?? []).length - decidable.length;
+
+  if (decidable.length === 0) {
+    await sendMessage(
+      chatId,
+      otherCount > 0
+        ? `Nothing you can decide. ${otherCount} proposal(s) await a different role.`
+        : "Nothing awaiting approval.",
+    );
     return;
   }
 
-  for (const row of data) {
+  for (const row of decidable) {
     const preview = (row.preview ?? {}) as Record<string, unknown>;
     const summary =
       typeof preview.summary === "string" ? preview.summary : JSON.stringify(preview).slice(0, 400);
     await sendApprovalCard(
       chatId,
-      row.id as string,
+      row.id,
       [
         `<b>${escapeHtml(String(row.action_type))}</b>`,
         escapeHtml(summary),
         `<i>requires ${escapeHtml(String(row.required_role))}</i>`,
       ].join("\n"),
     );
+  }
+  if (otherCount > 0) {
+    await sendMessage(chatId, `${otherCount} more proposal(s) await a different role.`);
   }
 }
 
@@ -155,7 +175,7 @@ async function showStatus(chatId: number | string): Promise<void> {
 }
 
 export async function handleCommand(ctx: CommandContext): Promise<boolean> {
-  const { command, chatId } = ctx;
+  const { command, chatId, role } = ctx;
 
   switch (command) {
     case "/help":
@@ -180,7 +200,7 @@ export async function handleCommand(ctx: CommandContext): Promise<boolean> {
       return true;
 
     case "/approvals":
-      await showApprovals(chatId);
+      await showApprovals(chatId, role);
       return true;
 
     case "/cost":

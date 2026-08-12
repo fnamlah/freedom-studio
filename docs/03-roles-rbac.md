@@ -44,13 +44,22 @@ A fallback helper, `public.current_user_role()`, reads the role from `profiles` 
 
 ### 2.2 Exactly one Super Admin
 
-The invariant "there is exactly one Super Admin" is enforced in the database, not in application code, with a partial unique index over a constant expression:
-
-```sql
-CREATE UNIQUE INDEX one_super_admin ON profiles ((true)) WHERE role = 'super_admin';
-```
-
-The index covers only rows where `role = 'super_admin'`, and every such row indexes the same constant value `true` — so a second row with that role violates uniqueness and the `INSERT`/`UPDATE` fails at the database layer, regardless of which code path attempted it. This is a deliberate documented trick: it turns a business rule that is normally "checked in the app" into a constraint no service-role bug or console mistake can bypass. Because there is exactly one Super Admin, [05 — Auth, Invites & Mandatory 2FA](05-auth-2fa.md) documents the Super Admin's own MFA-lockout recovery path explicitly.
+> ⚠ **This section changed on 2026-08-13 by owner decision.** It originally enforced "there is exactly one Super Admin" with a partial unique index:
+>
+> ```sql
+> CREATE UNIQUE INDEX one_super_admin ON profiles ((true)) WHERE role = 'super_admin';
+> ```
+>
+> The trick was that every `super_admin` row indexed the same constant, so a second one collided at the database layer regardless of which code path attempted it — a business rule no service-role bug or console mistake could bypass.
+>
+> The owner has since decided the studio is run by **two named people with full Super Admin authority** — Faisal and Alina — and migration 017 dropped the index. The protection changes shape rather than disappearing:
+>
+> 1. **Every Super Admin is a named person** who arrives only through the staged invitation flow ([05](05-auth-2fa.md)) behind mandatory TOTP; there is still no code path that mints the role silently — role changes travel only the guarded service-role server path.
+> 2. **Neither can remove the other silently.** The app refuses to deactivate any `super_admin` account, and every use of admin power lands in the append-only `audit_log` with the actor's id.
+> 3. **Maker-checker is unchanged** ([09](09-accounting.md)): payout approval still demands the `super_admin` role — there are simply two people who can be the checker.
+> 4. **The MFA-lockout recovery path in [05](05-auth-2fa.md)** was written for a sole Super Admin; with two, the surviving admin re-inviting the locked-out one is the primary recovery route, and the documented break-glass path is the fallback.
+>
+> What is deliberately accepted: two root accounts mean two credentials whose compromise is equally total. That is the owner's trade, made knowingly.
 
 ## 3. Authoritative capability matrix
 

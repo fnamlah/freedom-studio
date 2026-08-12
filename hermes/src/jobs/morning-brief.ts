@@ -1,6 +1,5 @@
-import { ownerChatId } from "../lib/owner.js";
+import { broadcastStaff } from "../lib/owner.js";
 import { getAdminClient } from "../lib/supabase.js";
-import { sendMessage } from "../telegram/api.js";
 
 /**
  * Morning brief. Deliberately NOT an LLM call yet — the numbers are exact
@@ -32,7 +31,6 @@ export async function runMorningBrief(): Promise<string> {
     `Compliance: ${expired} expired · ${expiring} expiring`,
   ].join("\n");
 
-  const chatId = await ownerChatId();
-  if (chatId) await sendMessage(chatId, text, { html: true });
+  await broadcastStaff(text, { html: true });
   return `owed=$${owed.toFixed(2)} pending=${pending} expired=${expired}`;
 }

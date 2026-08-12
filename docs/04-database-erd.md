@@ -63,7 +63,7 @@ Application-facing identity row for every authenticated user, created by the `ha
 | `created_at` | `timestamptz` | no | `now()` | |
 | `updated_at` | `timestamptz` | no | `now()` | Trigger-maintained |
 
-Table-level: partial unique index `one_super_admin` on `((true)) WHERE role = 'super_admin'` guarantees **exactly one** Super Admin row can exist. The rationale and the full DDL for this trick are documented in [03 — Roles & RBAC](03-roles-rbac.md).
+Table-level: the partial unique index `one_super_admin` (which guaranteed **exactly one** Super Admin row) was **dropped by migration 017 on 2026-08-13** — an owner decision to run the studio with two named Super Admins. The original rationale and the replacing controls are documented in [03 — Roles & RBAC](03-roles-rbac.md) §2.2.
 
 ### 4.2 `models` — model business records
 
@@ -839,7 +839,7 @@ Every FK column gets an index (Postgres does not create these automatically); th
 
 | Index | Table / Definition | Purpose |
 |---|---|---|
-| `one_super_admin` | `profiles ((true)) WHERE role='super_admin'` — partial UNIQUE | Guarantees exactly one Super Admin (trick documented in [03](03-roles-rbac.md)) |
+| ~~`one_super_admin`~~ | ~~`profiles ((true)) WHERE role='super_admin'` — partial UNIQUE~~ | **Dropped by 017 (2026-08-13, owner decision):** two named Super Admins now permitted; see [03](03-roles-rbac.md) §2.2 |
 | `profiles_email_key` | `profiles (email)` UNIQUE | Login/email lookups |
 | FK indexes | every FK column on every table | Join and cascade performance |
 | `earnings_model_period` | `earnings (model_id, period_start)` | Per-model earnings timelines (dashboards, [07](07-analytics.md)) |

@@ -83,12 +83,22 @@ export function sendMessage(
  * An approval card. The callback payload is `appr:<uuid>:approve|reject` — the
  * same scheme the in-app page decides through, so both surfaces converge on
  * one `decide_approval` call.
+ *
+ * Argument order is (id, summary): both are strings, so a swapped call site
+ * typechecks and then ships a card whose Approve button carries the message
+ * text as its callback payload — Telegram rejects it (64-byte limit) and the
+ * card never renders. Both existing callers pass the id second; the signature
+ * now matches them, and the UUID check below catches any future swap at run
+ * time instead of in production silence.
  */
 export function sendApprovalCard(
   chatId: number | string,
-  summary: string,
   approvalId: string,
+  summary: string,
 ): Promise<unknown> {
+  if (!/^[0-9a-fA-F-]{36}$/.test(approvalId)) {
+    throw new Error(`sendApprovalCard: approvalId is not a uuid (got ${approvalId.slice(0, 40)})`);
+  }
   return call("sendMessage", {
     chat_id: chatId,
     text: summary.slice(0, 3800),

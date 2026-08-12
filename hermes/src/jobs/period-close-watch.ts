@@ -1,6 +1,7 @@
 import { enqueueApproval } from "../governance/approvals.js";
+import { resolvePolicy } from "../governance/policy.js";
 import { getAdminClient } from "../lib/supabase.js";
-import { ownerChatId } from "../lib/owner.js";
+import { channelsSatisfying } from "../lib/owner.js";
 import { sendApprovalCard } from "../telegram/api.js";
 
 /**
@@ -74,8 +75,10 @@ export async function runPeriodCloseWatch(now: Date = new Date()): Promise<strin
     idempotencyKey: `close_period:${start}:${end}`,
   });
 
-  const chatId = await ownerChatId();
-  if (chatId) {
+  // Cards go to every paired chat whose role could decide this — with buttons
+  // that decide_approval will re-authorize per tap regardless.
+  const requiredRole = resolvePolicy("close_period").requiredRole ?? "super_admin";
+  for (const chatId of await channelsSatisfying(requiredRole)) {
     await sendApprovalCard(
       chatId,
       approvalId,

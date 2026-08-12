@@ -1,7 +1,6 @@
 import { getAdminClient } from "../lib/supabase.js";
-import { alertOwner } from "../lib/owner.js";
-import { escapeHtml, sendMessage } from "../telegram/api.js";
-import { ownerChatId } from "../lib/owner.js";
+import { broadcastStaff } from "../lib/owner.js";
+import { escapeHtml } from "../telegram/api.js";
 
 /**
  * Compliance watch — the cheapest useful thing the agent does: no LLM, no
@@ -39,9 +38,12 @@ export async function runComplianceWatch(): Promise<string> {
   if (expired.length) parts.push(`\n<b>Expired (${expired.length})</b>\n${expired.slice(0, 15).map(line).join("\n")}`);
   if (expiring.length) parts.push(`\n<b>Expiring within 30 days (${expiring.length})</b>\n${expiring.slice(0, 15).map(line).join("\n")}`);
 
-  const chatId = await ownerChatId();
-  if (chatId) await sendMessage(chatId, parts.join("\n"), { html: true });
-  else await alertOwner(`Compliance: ${expired.length} expired, ${expiring.length} expiring`);
+  const sent = await broadcastStaff(parts.join("\n"), { html: true });
+  if (sent === 0) {
+    console.warn(
+      `[compliance] no paired staff chat — ${expired.length} expired, ${expiring.length} expiring`,
+    );
+  }
 
   return `${expired.length} expired, ${expiring.length} expiring`;
 }

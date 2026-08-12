@@ -1,5 +1,6 @@
 import { enqueueKeyed } from "../lib/keyed-queue.js";
 import { getAdminClient } from "../lib/supabase.js";
+import { commandAllowed, roleMayUseBot } from "./access.js";
 import {
   answerCallbackQuery,
   escapeHtml,
@@ -12,13 +13,19 @@ import { handleCommand } from "./commands.js";
  * Telegram update dispatch.
  *
  * Three properties matter here, in order:
- *  1. ACCESS — a chat is ignored entirely unless it is verified AND bound to a
- *     super_admin profile. Unpaired chats can do exactly one thing: redeem a
- *     pairing code. Everything else is met with silence, not an error message
- *     (an error message confirms the bot exists to whoever found it).
+ *  1. ACCESS — a chat is ignored entirely unless it is verified AND bound to an
+ *     active staff profile whose role may use the bot (access.ts). Unpaired
+ *     chats can do exactly one thing: redeem a pairing code — and a code minted
+ *     for a named person redeems only from that person's Telegram username.
+ *     Everything else is met with silence, not an error message (an error
+ *     message confirms the bot exists to whoever found it).
  *  2. IDEMPOTENCE — Telegram re-delivers on network hiccups. The update_id is
  *     inserted first and a unique violation short-circuits the turn.
  *  3. ORDERING — updates for one chat are serialized.
+ *
+ * Deciding an approval is deliberately NOT gated in this file: the callback
+ * relays to `decide_approval`, which re-reads the actor's role in the database
+ * per decision. The role checks here choose what to show, never what to allow.
  */
 
 const APPR_RE = /^appr:([0-9a-fA-F-]{36}):(approve|reject)$/;
@@ -26,9 +33,10 @@ const APPR_RE = /^appr:([0-9a-fA-F-]{36}):(approve|reject)$/;
 interface Channel {
   id: string;
   profileId: string;
+  role: string;
 }
 
-async function findVerifiedSuperAdminChannel(chatId: number | string): Promise<Channel | null> {
+async function findVerifiedChannel(chatId: number | string): Promise<Channel | null> {
   const { data } = await getAdminClient()
     .from("hermes_channels")
     .select("id, profile_id, verified, is_active, profiles:profile_id(role, status)")
@@ -38,25 +46,38 @@ async function findVerifiedSuperAdminChannel(chatId: number | string): Promise<C
 
   if (!data || !data.verified || !data.is_active) return null;
   const p = data.profiles as unknown as { role?: string; status?: string } | null;
-  if (p?.role !== "super_admin" || p?.status !== "active") return null;
-  return { id: data.id as string, profileId: data.profile_id as string };
+  if (p?.status !== "active" || !roleMayUseBot(p?.role)) return null;
+  return { id: data.id as string, profileId: data.profile_id as string, role: p!.role! };
 }
 
 /** Redeem a one-time pairing code. The only action an unpaired chat may take. */
-async function tryPair(chatId: number | string, text: string): Promise<boolean> {
+async function tryPair(
+  chatId: number | string,
+  text: string,
+  senderUsername: string | undefined,
+): Promise<boolean> {
   const code = text.trim();
   if (!/^[A-Za-z0-9-]{6,64}$/.test(code)) return false;
 
   const db = getAdminClient();
   const { data: row } = await db
     .from("hermes_pairing_codes")
-    .select("code, profile_id, expires_at, used_at, profiles:profile_id(role, status)")
+    .select("code, profile_id, expires_at, used_at, expected_username, profiles:profile_id(role, status)")
     .eq("code", code)
     .maybeSingle();
 
   if (!row || row.used_at || Date.parse(String(row.expires_at)) < Date.now()) return false;
   const p = row.profiles as unknown as { role?: string; status?: string } | null;
-  if (p?.role !== "super_admin" || p?.status !== "active") return false;
+  if (p?.status !== "active" || !roleMayUseBot(p?.role)) return false;
+
+  // A code minted for a named person redeems only from that username. The
+  // comparison is silent on mismatch: telling a stranger "wrong account" tells
+  // them the code is real.
+  if (row.expected_username) {
+    const want = String(row.expected_username).replace(/^@/, "").toLowerCase();
+    const got = (senderUsername ?? "").replace(/^@/, "").toLowerCase();
+    if (!got || got !== want) return false;
+  }
 
   await db
     .from("hermes_channels")
@@ -102,13 +123,13 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
   if (!(await markSeen(update, text, isCallback ? "callback" : "text"))) return;
 
   await enqueueKeyed(`chat:${chatId}`, async () => {
-    const channel = await findVerifiedSuperAdminChannel(chatId);
+    const channel = await findVerifiedChannel(chatId);
 
     if (!channel) {
       // Unpaired: only a pairing code is accepted. /start gets a hint; anything
       // else is met with silence.
       if (!isCallback && text && !text.startsWith("/")) {
-        if (await tryPair(chatId, text)) return;
+        if (await tryPair(chatId, text, update.message?.from?.username)) return;
       }
       if (text === "/start") {
         await sendMessage(chatId, "Send your pairing code to connect this chat.");
@@ -123,7 +144,17 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
 
     if (text.startsWith("/")) {
       const command = text.toLowerCase().split(/[\s@]/)[0] ?? "";
-      const handled = await handleCommand({ command, chatId, profileId: channel.profileId, text });
+      if (!commandAllowed(channel.role, command)) {
+        await sendMessage(chatId, "That command needs a super admin.");
+        return;
+      }
+      const handled = await handleCommand({
+        command,
+        chatId,
+        profileId: channel.profileId,
+        role: channel.role,
+        text,
+      });
       if (handled) return;
     }
 

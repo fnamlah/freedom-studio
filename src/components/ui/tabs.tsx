@@ -68,7 +68,7 @@ export function Tabs({
 
   return (
     <TabsContext.Provider value={{ value, setValue, baseId }}>
-      <div className={cn("flex flex-col gap-4", className)}>{children}</div>
+      <div className={cn("flex min-w-0 flex-col gap-4", className)}>{children}</div>
     </TabsContext.Provider>
   );
 }
@@ -170,7 +170,7 @@ export function TabsContent({
       aria-labelledby={`${baseId}-tab-${value}`}
       hidden={!selected}
       tabIndex={0}
-      className={cn("outline-none", className)}
+      className={cn("min-w-0 outline-none", className)}
     >
       {children}
     </div>

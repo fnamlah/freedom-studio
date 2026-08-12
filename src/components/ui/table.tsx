@@ -36,7 +36,11 @@ export function Table({
   );
 
   if (!scrollable) return table;
-  return <div className={cn("w-full overflow-x-auto", containerClassName)}>{table}</div>;
+  return (
+    <div className={cn("w-full max-w-full min-w-0 overflow-x-auto", containerClassName)}>
+      {table}
+    </div>
+  );
 }
 
 export function THead({ className, ...props }: ComponentPropsWithRef<"thead">) {

@@ -12,7 +12,9 @@ export function Card({ className, bare = false, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        "rounded-lg border border-border",
+        // `overflow-hidden` keeps wide children (scrollable tables) inside the
+        // rounded frame and stops them inflating the mobile layout viewport.
+        "min-w-0 overflow-hidden rounded-lg border border-border",
         bare ? "bg-transparent" : "bg-surface",
         className,
       )}

@@ -38,3 +38,13 @@ body {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/*
+ * Wide content (data tables, charts) scrolls inside its own container; the page
+ * itself must never scroll sideways, or phones get a draggable viewport and a
+ * mis-anchored fixed toast layer.
+ */
+html,
+body {
+  overflow-x: clip;
+}

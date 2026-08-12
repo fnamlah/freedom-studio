@@ -218,9 +218,9 @@ export function AiWorkspace({
   const bannerProvider = notConfigured ? downProvider : providerId;
 
   return (
-    <div className="grid gap-4 md:grid-cols-[minmax(0,240px)_minmax(0,1fr)] h-[calc(100vh-13rem)] min-h-[520px]">
+    <div className="grid h-[calc(100dvh-13rem)] min-h-[520px] gap-4 md:grid-cols-[minmax(0,240px)_minmax(0,1fr)]">
       {/* Sidebar */}
-      <aside className="flex min-h-0 flex-col rounded-lg border border-border bg-surface">
+      <aside className="flex max-h-48 min-h-0 min-w-0 flex-col rounded-lg border border-border bg-surface md:max-h-none">
         <div className="border-b border-border p-3">
           <Button fullWidth size="sm" variant="secondary" onClick={startNewChat}>
             New chat
@@ -256,7 +256,7 @@ export function AiWorkspace({
       </aside>
 
       {/* Chat pane */}
-      <section className="flex min-h-0 flex-col rounded-lg border border-border bg-surface">
+      <section className="flex min-h-0 min-w-0 flex-col rounded-lg border border-border bg-surface">
         {notConfigured ? (
           <div className="border-b border-border bg-warning/10 px-4 py-2.5 text-xs text-foreground">
             <span className="font-medium text-warning">AI provider not configured</span>{" "}

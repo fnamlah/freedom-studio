@@ -156,7 +156,7 @@ export function Toaster({
     <div
       role="region"
       aria-label="Notifications"
-      className="pointer-events-none fixed right-4 bottom-4 z-[100] flex w-full max-w-sm flex-col gap-2"
+      className="pointer-events-none fixed right-4 bottom-4 left-4 z-[100] flex flex-col gap-2 sm:left-auto sm:w-full sm:max-w-sm"
     >
       {toasts.map((item) => {
         const variant = item.variant ?? "info";

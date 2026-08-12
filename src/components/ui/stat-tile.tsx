@@ -42,16 +42,18 @@ export function StatTile({
   const negative = trend ? (trend.invert ? trend.value > 0 : trend.value < 0) : false;
 
   return (
-    <div className={cn("rounded-lg border border-border bg-surface p-4", className)}>
+    <div className={cn("min-w-0 rounded-lg border border-border bg-surface p-3 sm:p-4", className)}>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-xs font-medium tracking-wide text-muted uppercase">{label}</p>
+        <p className="text-[11px] font-medium tracking-wide text-muted uppercase sm:text-xs">{label}</p>
         {icon ? <span className="shrink-0 text-muted">{icon}</span> : null}
       </div>
 
       {loading ? (
         <div className="mt-2 h-7 w-24 animate-pulse rounded bg-surface-2" />
       ) : (
-        <p className="mt-2 text-2xl font-semibold tabular-nums text-foreground">{value}</p>
+        <p className="mt-1.5 truncate text-xl font-semibold tabular-nums text-foreground sm:mt-2 sm:text-2xl">
+          {value}
+        </p>
       )}
 
       {(hint || trend) && !loading ? (
@@ -87,13 +89,15 @@ export function StatTileRow({
   className?: string;
   columns?: 2 | 3 | 4 | 5;
 }) {
+  // Phones show tiles 2-up: one-per-row turned a 4-tile header into four
+  // screens of scrolling before any actual content.
   const COLUMNS: Record<2 | 3 | 4 | 5, string> = {
-    2: "sm:grid-cols-2",
-    3: "sm:grid-cols-2 lg:grid-cols-3",
-    4: "sm:grid-cols-2 lg:grid-cols-4",
-    5: "sm:grid-cols-2 lg:grid-cols-5",
+    2: "grid-cols-2",
+    3: "grid-cols-2 lg:grid-cols-3",
+    4: "grid-cols-2 lg:grid-cols-4",
+    5: "grid-cols-2 lg:grid-cols-5",
   };
   return (
-    <div className={cn("grid grid-cols-1 gap-4", COLUMNS[columns], className)}>{children}</div>
+    <div className={cn("grid gap-3 sm:gap-4", COLUMNS[columns], className)}>{children}</div>
   );
 }

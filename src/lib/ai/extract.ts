@@ -22,21 +22,31 @@ const WORD_MIMES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
 ]);
 
+/**
+ * Spreadsheet formats, ALL parsed by SheetJS — including the legacy BIFF
+ * `.xls`, which is an OLE compound file and a genuinely different format from
+ * the OOXML `.xlsx`. The studio holds many legacy `.xls` files, so this is a
+ * first-class input, not a fallback.
+ *
+ * SheetJS is installed from the vendor's own CDN rather than the npm registry:
+ * the registry copy is deprecated and carries known CVEs.
+ */
 const SHEET_MIMES = new Set([
+  "application/vnd.ms-excel", // .xls (legacy BIFF)
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
   "application/vnd.ms-excel.sheet.macroenabled.12", // .xlsm
-  "application/vnd.oasis.opendocument.spreadsheet", // .ods (exceljs reads many)
+  "application/vnd.ms-excel.sheet.binary.macroenabled.12", // .xlsb
+  "application/vnd.oasis.opendocument.spreadsheet", // .ods
 ]);
 
 /**
- * Legacy binary Office formats. These are NOT the same file format as their
- * modern namesakes — `.doc` and `.xls` are OLE compound files that the modern
- * parsers cannot read. Recognised explicitly so the UI can say "convert this
- * to .docx/.xlsx" instead of the useless "unsupported type".
+ * Legacy binary formats we still cannot read. `.doc` and `.ppt` are OLE
+ * compound files that the modern parsers do not handle; recognised explicitly
+ * so the UI can say "convert this to .docx" instead of a bare "unsupported
+ * type". Legacy `.xls` is NOT in this list — SheetJS reads it.
  */
 const LEGACY_OFFICE_MIMES = new Set([
   "application/msword", // .doc
-  "application/vnd.ms-excel", // .xls
   "application/vnd.ms-powerpoint", // .ppt
 ]);
 
@@ -107,48 +117,43 @@ export async function extractTextFromBytes(
  * their cached result — the number on the page is what the document says.
  */
 async function extractSheetText(bytes: Uint8Array): Promise<string> {
-  // exceljs is CommonJS: under ESM the namespace object carries the real
-  // exports on `.default`, so `new ns.Workbook()` throws.
-  const mod = await import("exceljs");
-  const ExcelJS = (mod as unknown as { default?: typeof mod }).default ?? mod;
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(Buffer.from(bytes) as unknown as ArrayBuffer);
+  // SheetJS is CommonJS: under ESM the real exports sit on `.default`.
+  const mod = await import("xlsx");
+  const XLSX = (mod as unknown as { default?: typeof mod }).default ?? mod;
+
+  // `cellDates` renders date cells as Dates rather than serial numbers, so the
+  // model sees "2026-07-31" instead of "46234". Formula cells read as their
+  // cached result — the number on the page is what the document says.
+  const wb = XLSX.read(bytes, { type: "array", cellDates: true });
 
   const out: string[] = [];
-  wb.eachSheet((sheet) => {
-    out.push(`# Sheet: ${sheet.name}`);
-    let rows = 0;
-    sheet.eachRow({ includeEmpty: false }, (row) => {
-      if (rows >= MAX_SHEET_ROWS) return;
-      const cells: string[] = [];
-      row.eachCell({ includeEmpty: true }, (cell) => cells.push(cellToText(cell.value)));
-      const line = cells.join(" | ").trim();
-      if (line.replace(/\|/g, "").trim()) {
-        out.push(line);
-        rows += 1;
-      }
+  for (const name of wb.SheetNames) {
+    const sheet = wb.Sheets[name];
+    if (!sheet) continue;
+    out.push(`# Sheet: ${name}`);
+    // sheet_to_json (header:1) rather than sheet_to_csv: CSV would wrap every
+    // value containing a space in quotes, which is pure noise once the
+    // separator is " | ".
+    const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      blankrows: false,
+      raw: false,
+      dateNF: "yyyy-mm-dd",
+      defval: "",
     });
-    if (rows >= MAX_SHEET_ROWS) out.push(`… (truncated at ${MAX_SHEET_ROWS} rows)`);
-  });
-  return out.join("\n").trim();
-}
-
-/** Render one ExcelJS cell value as plain text. */
-function cellToText(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  if (typeof value === "object") {
-    const v = value as Record<string, unknown>;
-    // Formula cells carry {formula, result}; hyperlinks {text, hyperlink};
-    // rich text {richText:[{text}]}. Prefer the displayed value in each case.
-    if ("result" in v) return cellToText(v.result);
-    if ("text" in v) return String(v.text);
-    if ("richText" in v && Array.isArray(v.richText)) {
-      return (v.richText as Array<{ text?: string }>).map((r) => r.text ?? "").join("");
+    let emitted = 0;
+    for (const row of grid) {
+      if (emitted >= MAX_SHEET_ROWS) break;
+      const line = row.map((c) => (c == null ? "" : String(c).trim())).join(" | ").trim();
+      if (line.replace(/[|\s]/g, "").length === 0) continue;
+      out.push(line);
+      emitted += 1;
     }
-    return "";
+    if (grid.length > emitted) {
+      out.push(`… (truncated at ${emitted} of ${grid.length} rows)`);
+    }
   }
-  return String(value);
+  return out.join("\n").trim();
 }
 
 /** Encode raw bytes as a `data:` URL for the OpenAI-compatible vision branch. */

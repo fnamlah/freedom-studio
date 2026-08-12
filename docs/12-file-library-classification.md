@@ -249,4 +249,8 @@ Both channels now return more than a filing decision. Each analysed file carries
 
 For library files these ride along with the existing category suggestion in the same crossing — the analyser reads the document once and returns filing plus substance together, so richer output costs no additional egress. Compliance documents have no category vocabulary (they already carry a `doc_type`), so `complianceAnalysisChannel` returns summary and figures only.
 
-**Supported formats.** PDF (text layer), Word `.docx`, Excel `.xlsx`/`.ods`, CSV, plain text and JSON go down the text branch; images go to the vision model. Legacy binary Office formats (`.doc`, `.xls`, `.ppt`) are a different file format that the modern parsers cannot read — they are recognised explicitly and skipped with `legacy_office` so the UI can tell the user to convert rather than reporting a bare "unsupported type".
+**Supported formats.** PDF (text layer), Word `.docx`, Excel `.xls`/`.xlsx`/`.xlsm`/`.xlsb`/`.ods`, CSV, plain text and JSON go down the text branch; images go to the vision model.
+
+Legacy `.xls` is **first-class**, not a fallback: the studio holds many of them. It is BIFF — an OLE compound file, a genuinely different format from the OOXML `.xlsx` — and is parsed by SheetJS, which reads both. SheetJS is installed from the vendor's own CDN rather than the npm registry, because the registry copy is deprecated and carries known CVEs; that single parser also replaced `exceljs`, removing a vulnerable transitive dependency.
+
+Still unreadable: `.doc` and `.ppt` (legacy binary Word/PowerPoint). They are recognised explicitly and skipped with `legacy_office`, so the UI can tell the user to convert rather than reporting a bare "unsupported type".

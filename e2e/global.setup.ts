@@ -11,6 +11,7 @@ import {
   insertInvitation,
   resetUserForReseed,
   setProfileLocale,
+  setProfileRole,
   setProfileStatus,
 } from "./helpers/admin";
 import { loadEnv } from "./helpers/env";
@@ -93,6 +94,7 @@ async function seedRole(
     userId = existing.id;
     await resetUserForReseed(userId, password);
     await setProfileStatus(userId, "active");
+    await setProfileRole(userId, role);
     await setProfileLocale(userId, "en");
     // Factors were wiped → login lands on forced re-enrollment. The admin
     // password reset can lag GoTrue's token endpoint by a moment, so a

@@ -100,6 +100,20 @@ export async function setProfileStatus(
  * the `pinEnglish` cookie's braces, and the thing that makes the suite correct
  * on a fresh database rather than only where migration 019 already pinned them.
  */
+
+/**
+ * Pin a seeded account's role. seedRole asserts the role only for NEW users;
+ * an existing fixture account can drift (e.g. a super_admin demoted during
+ * unrelated work) and silently seed the wrong nav/capabilities. This makes the
+ * fixture self-healing — since migration 017 lifted the single-super_admin
+ * limit, restoring e2e-sa to super_admin no longer collides with the real one.
+ */
+export async function setProfileRole(userId: string, role: E2ERole): Promise<void> {
+  const db = serviceDb();
+  const { error } = await db.from("profiles").update({ role }).eq("id", userId);
+  if (error) throw new Error(`setProfileRole(${userId}, ${role}): ${error.message}`);
+}
+
 export async function setProfileLocale(userId: string, locale: "en" | "ru"): Promise<void> {
   const db = serviceDb();
   const { error } = await db.from("profiles").update({ locale }).eq("id", userId);

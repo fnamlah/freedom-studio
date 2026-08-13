@@ -404,6 +404,7 @@ async function converse_(
       role: channel.role,
       locale: channel.locale,
       profileId: channel.profileId,
+      chatId,
       history,
       onProgress: (stage) => {
         if (stage.kind === "thinking") return show(h.chatStillWorking);

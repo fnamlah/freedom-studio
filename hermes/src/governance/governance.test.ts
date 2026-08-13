@@ -19,7 +19,7 @@ import {
   roleSatisfies,
 } from "./policy.js";
 import { BOT_ROLES, commandAllowed, roleMayUseBot } from "../telegram/access.js";
-import { specsForRole, TOOL_COMMAND } from "../llm/tool-catalog.js";
+import { PROPOSE_ACTION, specsForRole, TOOL_COMMAND, TOOL_SPECS } from "../llm/tool-catalog.js";
 import { isIdleExpired, parseState, toMessages, withinBudget } from "../llm/history.js";
 import { hermesEn, hermesRu } from "../lib/i18n.js";
 
@@ -144,7 +144,14 @@ test("every conversational tool is registered in the redactor, fail-closed", () 
     // `hermes_balances` deliberately reuses the app's `payee_balances`
     // projection: it is the same view, so it must not get a second, drifting
     // definition of what may leave.
-    const projected = tool === "hermes_balances" ? "payee_balances" : tool;
+    // `hermes_balances` reuses the app's `payee_balances` projection (same
+    // view, so no second drifting definition); every propose_* tool returns
+    // the shared proposal ack.
+    const projected = PROPOSE_ACTION[tool]
+      ? "hermes_proposal"
+      : tool === "hermes_balances"
+        ? "payee_balances"
+        : tool;
     assert.ok(
       PROJECTIONS[projected],
       `${tool} has no egress projection — it would throw at run time`,
@@ -155,7 +162,11 @@ test("every conversational tool is registered in the redactor, fail-closed", () 
 test("conversational tools carry no identity fields into a projection", () => {
   const blocked = Array.isArray(BLOCKED_KEYS) ? BLOCKED_KEYS : [...BLOCKED_KEYS];
   for (const tool of Object.keys(TOOL_COMMAND)) {
-    const projected = tool === "hermes_balances" ? "payee_balances" : tool;
+    const projected = PROPOSE_ACTION[tool]
+      ? "hermes_proposal"
+      : tool === "hermes_balances"
+        ? "payee_balances"
+        : tool;
     for (const field of PROJECTIONS[projected] ?? []) {
       assert.ok(
         !blocked.includes(field),
@@ -180,17 +191,64 @@ test("a role is never offered a tool it may not run", () => {
   }
 });
 
-test("the conversational surface exposes no write tool", () => {
-  // Approving stays a button press routed through `decide_approval`, which
-  // re-checks the actor's role in the database. Nothing the model can call
-  // may mutate; the names are asserted rather than the behaviour because a
-  // write tool would most likely arrive as a new, plausibly-named entry.
+test("no tool writes directly — every mutation is a proposal a human approves", () => {
+  // The owner opened the bot up to creating, changing and deleting records
+  // (029/030). "Read-only" is therefore no longer the invariant; THIS is:
+  // anything that can change data goes through an approval card, and the
+  // executor runs only after `decide_approval` re-checks the approver's role
+  // in the database. A new mutating tool that skipped the proposal step would
+  // fail here rather than ship.
   for (const tool of Object.keys(TOOL_COMMAND)) {
-    assert.doesNotMatch(
-      tool,
-      /create|update|delete|approve|reject|close|post|pay|set_|write/i,
-      `${tool} reads as a mutation — the chat surface is read-only`,
+    const mutating = /create|update|delete|record|upsert|set_|write|propose/i.test(tool);
+    if (!mutating) continue;
+    assert.ok(
+      PROPOSE_ACTION[tool],
+      `${tool} looks like a mutation but is not a propose_* tool`,
     );
+  }
+});
+
+test("every proposal maps to an approval-tier action with a real executor", () => {
+  for (const [tool, action] of Object.entries(PROPOSE_ACTION)) {
+    const policy = resolvePolicy(action);
+    // `automatic` would let the model's own tool call execute itself, which is
+    // the entire thing the governance layer exists to prevent.
+    assert.equal(policy.tier, "approval", `${tool} -> ${action} must be approval tier`);
+    assert.ok(policy.requiredRole, `${action} must name a required role`);
+    assert.ok(
+      EXECUTABLE_ACTIONS.has(action),
+      `${action} has no executor — an approved proposal would report success and do nothing`,
+    );
+  }
+});
+
+test("a role is never offered a proposal it could not itself approve", () => {
+  // Offering a finance user a card only a manager can decide is a dead end;
+  // worse, it invites the model to promise something that cannot happen.
+  for (const role of ["super_admin", "manager", "finance"]) {
+    for (const spec of specsForRole(role, commandAllowed)) {
+      const action = PROPOSE_ACTION[spec.function.name];
+      if (!action) continue;
+      assert.ok(
+        roleSatisfies(role, resolvePolicy(action).requiredRole ?? "super_admin"),
+        `${role} was offered ${spec.function.name} but could not approve it`,
+      );
+    }
+  }
+});
+
+test("deleting cannot reach financial history", () => {
+  // `fn_agent_delete_record` whitelists three kinds; audit_log and
+  // ledger_entries are absent AND refused by the 013 triggers for every role.
+  // This pins the tool-side half of that promise.
+  const deleteSpec = TOOL_SPECS.find((s) => s.function.name === "hermes_propose_delete");
+  assert.ok(deleteSpec, "the delete proposal tool is missing");
+  const kinds = (deleteSpec!.function.parameters as {
+    properties?: { kind?: { enum?: string[] } };
+  }).properties?.kind?.enum;
+  assert.deepEqual(kinds, ["earning", "work_session", "expense"]);
+  for (const forbidden of ["ledger_entry", "audit_log", "payout", "document"]) {
+    assert.ok(!kinds?.includes(forbidden), `${forbidden} must not be deletable by the bot`);
   }
 });
 

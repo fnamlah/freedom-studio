@@ -175,6 +175,224 @@ async function createPayout(
   };
 }
 
+/**
+ * The day-to-day record executors (029).
+ *
+ * Each is a thin call onto an `fn_agent_*` wrapper that re-verifies the
+ * approver and impersonates them, so the row lands under THEIR row-level
+ * security and carries their id — indistinguishable from one they typed,
+ * which is correct, because they authorised it.
+ *
+ * `saveStep` is used the same way the money executors use it: the marker is
+ * written before the irreversible call, so a retry after a crash skips
+ * forward instead of inserting a second time.
+ */
+async function recordEarning(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (typeof prior.earning_id === "string") {
+    return { message: h.execAlreadyRecorded, result: prior };
+  }
+
+  const { data, error } = await getAdminClient().rpc("fn_agent_record_earning", {
+    p_approver: approver,
+    p_platform_account_id: str(payload, "platform_account_id"),
+    p_period_start: str(payload, "period_start"),
+    p_period_end: str(payload, "period_end"),
+    p_gross: num(payload, "gross_amount"),
+    p_fee: typeof payload.fee_amount === "number" ? payload.fee_amount : 0,
+    p_net: num(payload, "net_amount"),
+    p_currency: typeof payload.currency === "string" ? payload.currency : "USD",
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ earning_id: data });
+  return { message: h.execEarningRecorded(money(num(payload, "net_amount"), locale)), result };
+}
+
+async function recordSession(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (typeof prior.session_id === "string") {
+    return { message: h.execAlreadyRecorded, result: prior };
+  }
+
+  // An OPEN session has no end time, so `p_ended_at` is omitted rather than
+  // passed as null — PostgREST types a defaulted argument as optional. Built
+  // as an object so the key is genuinely absent, not present-and-undefined.
+  const args: Record<string, unknown> = {
+    p_approver: approver,
+    p_platform_account_id: str(payload, "platform_account_id"),
+    p_started_at: str(payload, "started_at"),
+    p_gross: typeof payload.gross_earnings === "number" ? payload.gross_earnings : 0,
+    p_currency: typeof payload.currency === "string" ? payload.currency : "USD",
+  };
+  if (typeof payload.ended_at === "string") args.p_ended_at = payload.ended_at;
+  if (typeof payload.notes === "string") args.p_notes = payload.notes;
+
+  const { data, error } = await getAdminClient().rpc(
+    "fn_agent_record_session",
+    args as never,
+  );
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ session_id: data });
+  return { message: h.execSessionRecorded, result };
+}
+
+async function recordExpense(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (typeof prior.expense_id === "string") {
+    return { message: h.execAlreadyRecorded, result: prior };
+  }
+
+  const { data, error } = await getAdminClient().rpc("fn_agent_record_expense", {
+    p_approver: approver,
+    p_incurred_on: str(payload, "incurred_on"),
+    p_vendor: str(payload, "vendor"),
+    p_amount: num(payload, "amount"),
+    p_description: typeof payload.description === "string" ? payload.description : undefined,
+    p_category: typeof payload.category === "string" ? payload.category : undefined,
+    p_currency: typeof payload.currency === "string" ? payload.currency : "USD",
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ expense_id: data });
+  return { message: h.execExpenseRecorded(money(num(payload, "amount"), locale)), result };
+}
+
+async function updateDocument(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (prior.updated === true) return { message: h.execAlreadyRecorded, result: prior };
+
+  const { error } = await getAdminClient().rpc("fn_agent_update_document", {
+    p_approver: approver,
+    p_document_id: str(payload, "document_id"),
+    p_title: typeof payload.title === "string" ? payload.title : undefined,
+    p_doc_type: typeof payload.doc_type === "string" ? (payload.doc_type as never) : undefined,
+    p_issued_date: typeof payload.issued_date === "string" ? payload.issued_date : undefined,
+    p_expires_at: typeof payload.expires_at === "string" ? payload.expires_at : undefined,
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ updated: true });
+  return { message: h.execDocumentUpdated, result };
+}
+
+async function deleteRecord(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (prior.deleted !== undefined) return { message: h.execAlreadyRecorded, result: prior };
+
+  const { data, error } = await getAdminClient().rpc("fn_agent_delete_record", {
+    p_approver: approver,
+    p_kind: str(payload, "kind"),
+    p_id: str(payload, "record_id"),
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ deleted: data === true });
+  // `false` means the row was already gone — worth saying, not worth failing.
+  return { message: data === true ? h.execDeleted : h.execAlreadyGone, result };
+}
+
+async function upsertModel(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (typeof prior.model_id === "string") {
+    return { message: h.execAlreadyRecorded, result: prior };
+  }
+
+  const args: Record<string, unknown> = { p_approver: approver };
+  const map: Record<string, string> = {
+    model_id: "p_model_id",
+    stage_name: "p_stage_name",
+    legal_name: "p_legal_name",
+    date_of_birth: "p_date_of_birth",
+    commission_percent: "p_commission_percent",
+    status: "p_status",
+    country: "p_country",
+  };
+  for (const [from, to] of Object.entries(map)) {
+    if (payload[from] !== undefined) args[to] = payload[from];
+  }
+
+  const { data, error } = await getAdminClient().rpc("fn_agent_upsert_model", args as never);
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ model_id: data });
+  return { message: payload.model_id ? h.execModelUpdated : h.execModelCreated, result };
+}
+
+/**
+ * Send one compliance document to the provider, now that a human has consented.
+ *
+ * Two steps in a deliberate order: record the consent FIRST (030), then cross.
+ * `analyseDocument` re-reads `ai_analysis_opt_in` at crossing time — that is
+ * migration 014's guarantee — so writing consent first is what makes the
+ * crossing permissible rather than a bypass of it.
+ */
+async function readComplianceDocument(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (prior.analysed === true) return { message: h.execAlreadyRecorded, result: prior };
+
+  const documentId = str(payload, "document_id");
+  const db = getAdminClient();
+
+  const { error: consentError } = await db.rpc("fn_agent_set_document_optin", {
+    p_approver: approver,
+    p_document_id: documentId,
+    p_opt_in: true,
+  });
+  if (consentError) throw new Error(consentError.message);
+
+  await saveStep({ consented: true });
+
+  // The analyser lives in the app and needs a request context, so the crossing
+  // itself is left to the portal's own route: consent is recorded here, and
+  // the document becomes readable from the next analysis onward. Telling the
+  // person that plainly beats pretending the read already happened.
+  return { message: h.execDocumentReadable, result: await saveStep({ analysed: true }) };
+}
+
 export async function runExecutor(
   actionType: string,
   payload: Record<string, unknown>,
@@ -190,6 +408,20 @@ export async function runExecutor(
       return snapshotForecast(payload, approver, prior, saveStep, locale);
     case "create_payout":
       return createPayout(payload, approver, prior, saveStep, locale);
+    case "record_earning":
+      return recordEarning(payload, approver, prior, saveStep, locale);
+    case "record_session":
+      return recordSession(payload, approver, prior, saveStep, locale);
+    case "record_expense":
+      return recordExpense(payload, approver, prior, saveStep, locale);
+    case "update_document":
+      return updateDocument(payload, approver, prior, saveStep, locale);
+    case "delete_record":
+      return deleteRecord(payload, approver, prior, saveStep, locale);
+    case "upsert_model":
+      return upsertModel(payload, approver, prior, saveStep, locale);
+    case "read_compliance_document":
+      return readComplianceDocument(payload, approver, prior, saveStep, locale);
     default:
       throw new Error(`no executor for ${actionType}`);
   }

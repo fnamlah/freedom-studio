@@ -35,6 +35,30 @@ export const ACTION_POLICIES: Record<string, ActionPolicy> = {
   send_brief: { tier: "automatic" },
   send_compliance_alert: { tier: "automatic" },
 
+  // Day-to-day records the bot may propose on request (029). All `approval`
+  // tier by owner decision: every write shows a card first, so the row is
+  // attributed to the person who tapped it and a misheard or injected
+  // instruction cannot write on its own.
+  record_earning: { tier: "approval", requiredRole: "manager" },
+  record_session: { tier: "approval", requiredRole: "manager" },
+  record_expense: { tier: "approval", requiredRole: "manager" },
+  update_document: { tier: "approval", requiredRole: "manager" },
+  upsert_model: { tier: "approval", requiredRole: "manager" },
+
+  // Deletion is a write like any other here, with the same single tap — but
+  // note what it can reach: `fn_agent_delete_record` whitelists earnings,
+  // sessions and expenses only. `audit_log` and `ledger_entries` are refused
+  // by the append-only triggers (013) for every role including the service
+  // role, so no approval can remove financial history. A wrong ledger entry is
+  // corrected with a reversing adjustment, which stays a deliberate human act.
+  delete_record: { tier: "approval", requiredRole: "manager" },
+
+  // Sending a compliance document's CONTENTS to the AI provider. Approval
+  // tier because it is third parties' identity data (passports, IDs, dates of
+  // birth) crossing to a semi-trusted processor: the tap IS the consent record
+  // migration 014 requires, and it is what gets written to `ai_analysis_opt_in`.
+  read_compliance_document: { tier: "approval", requiredRole: "manager" },
+
   // Things a human must do personally, with no agent-assisted path at all.
   approve_payout: { tier: "human_only", requiredRole: "super_admin" },
   mark_payout_paid: { tier: "human_only", requiredRole: "super_admin" },
@@ -54,6 +78,13 @@ export const EXECUTABLE_ACTIONS: ReadonlySet<string> = new Set([
   "close_period",
   "snapshot_forecast",
   "create_payout",
+  "record_earning",
+  "record_session",
+  "record_expense",
+  "update_document",
+  "upsert_model",
+  "delete_record",
+  "read_compliance_document",
 ]);
 
 /** Unknown actions fail safe. This is the whole point of the function. */

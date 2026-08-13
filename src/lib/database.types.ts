@@ -2696,6 +2696,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      fn_agent_approver_role: {
+        Args: {
+          p_allowed: Database["public"]["Enums"]["user_role"][]
+          p_approver: string
+        }
+        Returns: Database["public"]["Enums"]["user_role"]
+      }
+      fn_agent_delete_record: {
+        Args: { p_approver: string; p_id: string; p_kind: string }
+        Returns: boolean
+      }
       fn_agent_generate_earning_shares: {
         Args: {
           p_approver: string
@@ -2707,9 +2718,83 @@ export type Database = {
           skipped_count: number
         }[]
       }
+      fn_agent_impersonate: {
+        Args: {
+          p_approver: string
+          p_role: Database["public"]["Enums"]["user_role"]
+        }
+        Returns: undefined
+      }
+      fn_agent_record_earning: {
+        Args: {
+          p_approver: string
+          p_currency?: string
+          p_fee: number
+          p_gross: number
+          p_net: number
+          p_period_end: string
+          p_period_start: string
+          p_platform_account_id: string
+        }
+        Returns: string
+      }
+      fn_agent_record_expense: {
+        Args: {
+          p_amount: number
+          p_approver: string
+          p_category?: string
+          p_currency?: string
+          p_description?: string
+          p_incurred_on: string
+          p_vendor: string
+        }
+        Returns: string
+      }
+      fn_agent_record_session: {
+        Args: {
+          p_approver: string
+          p_currency?: string
+          p_ended_at?: string
+          p_gross?: number
+          p_notes?: string
+          p_platform_account_id: string
+          p_started_at: string
+        }
+        Returns: string
+      }
+      fn_agent_set_document_optin: {
+        Args: { p_approver: string; p_document_id: string; p_opt_in: boolean }
+        Returns: string
+      }
       fn_agent_snapshot_forecast: {
         Args: { p_approver: string; p_months_ahead: number }
         Returns: number
+      }
+      fn_agent_update_document: {
+        Args: {
+          p_approver: string
+          p_doc_type?: Database["public"]["Enums"]["document_type"]
+          p_document_id: string
+          p_expires_at?: string
+          p_issued_date?: string
+          p_title?: string
+        }
+        Returns: string
+      }
+      fn_agent_upsert_model: {
+        Args: {
+          p_approver: string
+          p_commission_percent?: number
+          p_country?: string
+          p_date_of_birth?: string
+          p_email?: string
+          p_legal_name?: string
+          p_model_id?: string
+          p_phone?: string
+          p_stage_name?: string
+          p_status?: Database["public"]["Enums"]["model_status"]
+        }
+        Returns: string
       }
       fn_compliance_counts: {
         Args: never

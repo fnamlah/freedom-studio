@@ -29,6 +29,18 @@ export const hermesEn = {
 
   /* ------------------------------------------------------- conversation --- */
   /** Free-text replies. Every failure says something — silence reads as broken. */
+  /* Executor outcomes — written back to whoever tapped Approve. */
+  execAlreadyRecorded: "Already done — nothing was recorded twice.",
+  execEarningRecorded: (amount: string) => `Earning recorded: ${amount} net.`,
+  execSessionRecorded: "Work session recorded.",
+  execExpenseRecorded: (amount: string) => `Expense recorded: ${amount}.`,
+  execDocumentUpdated: "Document details updated.",
+  execModelCreated: "Model added.",
+  execModelUpdated: "Model updated.",
+  execDocumentReadable: "Consent recorded — that document can now be read, and the decision is in the audit trail.",
+  execDeleted: "Deleted.",
+  execAlreadyGone: "That record was already gone — nothing to delete.",
+
   chatThinking: "Thinking…",
   chatLookingUp: "Looking that up…",
   chatStillWorking: "Still working on it…",
@@ -39,6 +51,16 @@ export const hermesEn = {
     hermes_compliance: "Checking documents…",
     hermes_cost: "Checking AI spend…",
     hermes_status: "Checking system status…",
+    hermes_model_earnings: "Looking up her figures…",
+    hermes_model_terms: "Checking her terms…",
+    hermes_documents: "Looking through the documents…",
+    hermes_propose_earning: "Preparing an earning to confirm…",
+    hermes_propose_session: "Preparing a session to confirm…",
+    hermes_propose_expense: "Preparing an expense to confirm…",
+    hermes_propose_model: "Preparing the model details to confirm…",
+    hermes_propose_document_update: "Preparing the document change to confirm…",
+    hermes_propose_delete: "Preparing a deletion to confirm…",
+    hermes_propose_read_document: "Preparing a consent request…",
   } as Record<string, string>,
   chatNotConfigured:
     "I can't think right now — no AI provider key is configured. The commands still work: /brief /balances /approvals /compliance /cost /status",
@@ -176,6 +198,17 @@ export const hermesRu: typeof hermesEn = {
   commandList: "Команды: /brief /compliance /balances /approvals /cost /status /help",
 
   /* --------------------------------------------------------- разговор --- */
+  execAlreadyRecorded: "Уже сделано — повторно ничего не записано.",
+  execEarningRecorded: (amount: string) => `Доход записан: ${amount} нетто.`,
+  execSessionRecorded: "Рабочая сессия записана.",
+  execExpenseRecorded: (amount: string) => `Расход записан: ${amount}.`,
+  execDocumentUpdated: "Данные документа обновлены.",
+  execModelCreated: "Модель добавлена.",
+  execModelUpdated: "Данные модели обновлены.",
+  execDocumentReadable: "Согласие записано — теперь этот документ можно читать, решение зафиксировано в журнале.",
+  execDeleted: "Удалено.",
+  execAlreadyGone: "Этой записи уже не было — удалять нечего.",
+
   chatThinking: "Думаю…",
   chatLookingUp: "Смотрю данные…",
   chatStillWorking: "Ещё работаю…",
@@ -185,6 +218,16 @@ export const hermesRu: typeof hermesEn = {
     hermes_compliance: "Смотрю документы…",
     hermes_cost: "Смотрю расходы на ИИ…",
     hermes_status: "Проверяю состояние…",
+    hermes_model_earnings: "Смотрю её показатели…",
+    hermes_model_terms: "Смотрю её условия…",
+    hermes_documents: "Просматриваю документы…",
+    hermes_propose_earning: "Готовлю доход на подтверждение…",
+    hermes_propose_session: "Готовлю смену на подтверждение…",
+    hermes_propose_expense: "Готовлю расход на подтверждение…",
+    hermes_propose_model: "Готовлю данные модели на подтверждение…",
+    hermes_propose_document_update: "Готовлю изменение документа на подтверждение…",
+    hermes_propose_delete: "Готовлю удаление на подтверждение…",
+    hermes_propose_read_document: "Готовлю запрос согласия…",
   } as Record<string, string>,
   chatNotConfigured:
     "Сейчас я не могу думать — не настроен ключ ИИ-провайдера. Команды по-прежнему работают: /brief /balances /approvals /compliance /cost /status",

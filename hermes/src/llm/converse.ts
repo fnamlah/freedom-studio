@@ -111,6 +111,8 @@ export async function converse(input: {
   role: string;
   locale: Locale;
   profileId: string;
+  /** Where to put an approval card, when a tool proposes one. */
+  chatId: number | string;
   /** Prior turns to replay. Already scrubbed; never contains tool stubs. */
   history?: ChatMessage[];
   onProgress?: (stage: ConverseStage) => void;
@@ -208,7 +210,30 @@ export async function converse(input: {
       const payloads = await Promise.all(
         result.toolCalls.map(async (call) => {
           try {
-            const rows = await runTool(call.function.name, input.role, commandAllowed);
+            // Arguments are the model's, so they are parsed defensively: a
+            // malformed blob becomes an empty object and the tool's own
+            // resolvers reject it, rather than throwing mid-turn.
+            let args: Record<string, unknown> = {};
+            try {
+              const parsed: unknown = JSON.parse(call.function.arguments || "{}");
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                args = parsed as Record<string, unknown>;
+              }
+            } catch {
+              args = {};
+            }
+            const rows = await runTool(
+              call.function.name,
+              input.role,
+              commandAllowed,
+              {
+                role: input.role,
+                profileId: input.profileId,
+                chatId: input.chatId,
+                locale: input.locale,
+              },
+              args,
+            );
             return JSON.stringify(rows);
           } catch (e) {
             // A refused or unknown tool is reported back to the model as a

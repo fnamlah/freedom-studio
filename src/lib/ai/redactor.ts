@@ -150,6 +150,53 @@ export const PROJECTIONS: Record<string, readonly string[]> = {
    * the summary line the worker wrote for a human to read.
    */
   hermes_approvals: ["action_type", "required_role", "summary", "created_at", "expires_at"],
+
+  /* The owner widened the bot's reach (029/030): per-model detail, the terms
+   * a model works under, and the document shelf. Each projection is still
+   * narrower than the query behind it — `hermes_model_terms` in particular
+   * exposes the RATES a model is paid at, never her legal name, date of birth
+   * or contact details, which the blocklist strips regardless. */
+  hermes_model_earnings: [
+    "stage_name",
+    "platform",
+    "period_start",
+    "period_end",
+    "gross_amount",
+    "net_amount",
+    "hours",
+    "session_count",
+  ],
+  hermes_model_terms: [
+    "stage_name",
+    "scope",
+    "party",
+    "min_amount",
+    "percent",
+    "effective_from",
+    "effective_to",
+    "team_member",
+    "staff_role",
+    "pool_share_percent",
+  ],
+  hermes_documents: [
+    "kind",
+    "title",
+    "stage_name",
+    "doc_type",
+    "issued_date",
+    "expires_at",
+    "compliance",
+    "summary",
+    "key_figures",
+    "readable",
+    "category",
+    "folder",
+    "uploaded_on",
+  ],
+  // What a propose_* tool tells the MODEL it did. Not studio data, but still
+  // provider-bound, so it is projected like everything else — the invariant is
+  // "nothing reaches a provider unprojected", with no convenience exceptions.
+  hermes_proposal: ["status", "action"],
   hermes_compliance: ["valid_count", "expiring_count", "expired_count"],
   hermes_cost: ["spent_usd", "cap_usd", "currency"],
   hermes_status: ["kind", "name", "state", "minutes_ago", "outcome"],

@@ -128,17 +128,6 @@ export async function writeAudit(input: WriteAuditInput): Promise<WriteAuditResu
   }
 }
 
-/**
- * System/bootstrap variant: writes with `actor_id = null` (docs/04 §4.16 allows
- * NULL for anonymous or system actions). Use for scheduled jobs and the
- * bootstrap-admin path, never to hide a real user's action.
- */
-export async function writeSystemAudit(
-  input: Omit<WriteAuditInput, "actor">,
-): Promise<WriteAuditResult> {
-  return writeAudit({ ...input, actor: { id: null, role: null } });
-}
-
 /** Resolves the acting user from the current session; `null` when anonymous. */
 async function resolveActor(): Promise<{ id: string | null; role: Role | null } | null> {
   try {

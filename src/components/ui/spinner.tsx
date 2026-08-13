@@ -33,12 +33,3 @@ export function Spinner({ size = "md", className, label = "Loading" }: SpinnerPr
     </span>
   );
 }
-
-/** Full-panel loading state, for `loading.tsx` route files and suspense fallbacks. */
-export function LoadingPanel({ label = "Loading" }: { label?: string }) {
-  return (
-    <div className="flex min-h-40 w-full items-center justify-center rounded-lg border border-border bg-surface">
-      <Spinner size="md" label={label} />
-    </div>
-  );
-}

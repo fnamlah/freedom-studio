@@ -109,20 +109,6 @@ export async function guardedAdminClient(
   };
 }
 
-/**
- * Same guard, but returns `null` instead of throwing — for optional elevation
- * paths (e.g. "show admin extras if the caller happens to be Super Admin").
- */
-export async function tryGuardedAdminClient(
-  allowedRoles: Role[],
-): Promise<GuardedAdminContext | null> {
-  try {
-    return await guardedAdminClient(allowedRoles);
-  } catch {
-    return null;
-  }
-}
-
 async function readClaims(
   supabase: Awaited<ReturnType<typeof createServerSupabase>>,
   user: User,

@@ -32,11 +32,6 @@ export function optionalEnv(name: string, fallback?: string): string | undefined
   return value && value.length > 0 ? value : fallback;
 }
 
-/** True when both public Supabase variables are configured. */
-export function hasSupabaseEnv(): boolean {
-  return SUPABASE_URL.length > 0 && SUPABASE_ANON_KEY.length > 0;
-}
-
 /**
  * Absolute origin of this deployment, e.g. `https://studio.example.com`.
  * Order: APP_BASE_URL -> VERCEL_PROJECT_PRODUCTION_URL -> VERCEL_URL -> localhost.
@@ -55,17 +50,3 @@ export function appBaseUrl(): string {
   return "http://localhost:3000";
 }
 
-/**
- * Origin of the Supabase project, used to pin `connect-src` in the CSP.
- * Returns an empty string when the URL is unset/unparseable.
- */
-export function supabaseOrigin(): string {
-  if (!SUPABASE_URL) return "";
-  try {
-    return new URL(SUPABASE_URL).origin;
-  } catch {
-    return "";
-  }
-}
-
-export const IS_PRODUCTION: boolean = process.env.NODE_ENV === "production";

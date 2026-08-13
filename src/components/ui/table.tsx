@@ -61,15 +61,6 @@ export function TBody({ className, ...props }: ComponentPropsWithRef<"tbody">) {
   return <tbody className={cn("divide-y divide-border", className)} {...props} />;
 }
 
-export function TFoot({ className, ...props }: ComponentPropsWithRef<"tfoot">) {
-  return (
-    <tfoot
-      className={cn("border-t border-border bg-surface-2/40 font-medium", className)}
-      {...props}
-    />
-  );
-}
-
 export type TRProps = ComponentPropsWithRef<"tr"> & {
   /** Adds hover feedback for rows that navigate somewhere. */
   interactive?: boolean;
@@ -126,8 +117,4 @@ export function TD({ className, align, numeric = false, ...props }: TDProps) {
       {...props}
     />
   );
-}
-
-export function TableCaption({ className, ...props }: ComponentPropsWithRef<"caption">) {
-  return <caption className={cn("px-4 py-2 text-left text-xs text-muted", className)} {...props} />;
 }

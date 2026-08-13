@@ -90,11 +90,6 @@ export async function getVerifiedTotpFactor(
   return factors.find((factor) => factor.status === "verified") ?? null;
 }
 
-/** True when at least one verified TOTP factor exists. */
-export async function hasVerifiedFactor(supabase: AnySupabase): Promise<boolean> {
-  return (await getVerifiedTotpFactor(supabase)) !== null;
-}
-
 export type TotpEnrollment = {
   factorId: string;
   /** SVG markup of the provisioning QR code. Shown exactly once. */
@@ -168,11 +163,3 @@ export async function challengeAndVerifyTotp(
   }
 }
 
-/** Removes a factor from the CURRENT user's account (self-service only). */
-export async function unenrollFactor(
-  supabase: AnySupabase,
-  factorId: string,
-): Promise<void> {
-  const { error } = await supabase.auth.mfa.unenroll({ factorId });
-  if (error) throw new Error(error.message);
-}

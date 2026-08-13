@@ -140,9 +140,6 @@ export const PROJECTIONS: Record<string, readonly string[]> = {
   ],
 };
 
-/** The 13 canonical tool names that have a registered projection. */
-export const PROJECTED_TOOLS = Object.keys(PROJECTIONS);
-
 /** Raised when redaction cannot proceed safely — the caller must NOT send. */
 export class RedactionError extends Error {
   readonly code = "redaction_error" as const;

@@ -66,12 +66,3 @@ export function plural(
       return forms.other ?? forms.many ?? forms.few ?? forms.one;
   }
 }
-
-/** `5 файлов` — the count together with its correctly-inflected noun. */
-export function pluralize(
-  locale: Locale,
-  count: number,
-  forms: { one: string; few?: string; many?: string; other?: string },
-): string {
-  return `${count} ${plural(locale, count, forms)}`;
-}

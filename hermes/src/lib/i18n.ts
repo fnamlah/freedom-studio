@@ -14,7 +14,6 @@ export {
   DEFAULT_LOCALE,
   INTL_LOCALE,
   plural,
-  pluralize,
   toLocale,
   type Locale,
 } from "../../../src/lib/i18n/locales.js";

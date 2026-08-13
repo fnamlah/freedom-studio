@@ -18,13 +18,7 @@ import { createServerSupabase, type ServerSupabaseClient } from "@/lib/supabase/
  * here so server code has one import site. CLIENT components must import from
  * `@/lib/auth/roles` — this module pulls in `next/headers`.
  */
-export {
-  ROLES,
-  ROLE_LABELS,
-  ROLE_DESCRIPTIONS,
-  isRole,
-  type Role,
-} from "@/lib/auth/roles";
+export { ROLES, isRole, type Role } from "@/lib/auth/roles";
 
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
@@ -214,12 +208,6 @@ export async function requireApiRole(...roles: Role[]): Promise<AuthContext> {
 
   const { supabase, user, profile, role, claims } = state;
   return { supabase, user, profile, role, claims };
-}
-
-/** Non-throwing role probe for conditional UI (never a security boundary). */
-export async function hasRole(...roles: Role[]): Promise<boolean> {
-  const context = await getSessionProfile();
-  return context !== null && roles.includes(context.role);
 }
 
 /* ------------------------------------------------------------- forbidden */

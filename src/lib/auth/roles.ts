@@ -38,17 +38,6 @@ export function roleDescription(locale: Locale, role: Role): string {
   return dict(locale).authFlow.roleDescriptions[role];
 }
 
-/**
- * English-only compatibility views over the dictionary, kept because several
- * surfaces still index them directly. Derived rather than duplicated, so the
- * dictionary stays the single source of truth; prefer `roleLabel()` /
- * `roleDescription()` in anything user-facing.
- */
-export const ROLE_LABELS: Record<Role, string> = dict("en").roles;
-
-/** Short descriptions, for admin surfaces that assign roles. */
-export const ROLE_DESCRIPTIONS: Record<Role, string> = dict("en").authFlow.roleDescriptions;
-
 /** Runtime narrowing for values arriving from query strings or forms. */
 export function isRole(value: unknown): value is Role {
   return typeof value === "string" && (ROLES as readonly string[]).includes(value);

@@ -159,4 +159,3 @@ yarn-error.log*
 e2e/.state/
 playwright-report/
 test-results/
-.vercel

@@ -43,11 +43,6 @@ function coerceProvider(value: unknown, fallback: ProviderId): ProviderId {
   return value === "moonshot" || value === "zhipu" ? value : fallback;
 }
 
-/** The adapter for a specific provider id. Does NOT check the key. */
-export function adapterFor(id: ProviderId): ProviderAdapter {
-  return ADAPTERS[id];
-}
-
 /** True when this provider's API key is present in the server environment. */
 export function providerHasKey(id: ProviderId): boolean {
   const v = process.env[KEY_ENV[id]];
@@ -116,11 +111,6 @@ export async function getEmbeddingAdapter(): Promise<ProviderAdapter> {
   const id = await getEmbeddingProvider();
   if (!providerHasKey(id)) throw new NotConfiguredError(id);
   return ADAPTERS[id];
-}
-
-/** Configured embedding dimension (`ai.embedding.dim`, default 2048). */
-export async function getEmbeddingDim(): Promise<number> {
-  return getSetting("ai.embedding.dim", 2048);
 }
 
 /**

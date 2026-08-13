@@ -1,7 +1,8 @@
 /**
  * Local content extraction for classification and analysis (docs/12 §4.1–4.2).
  *
- * SERVER-ONLY (uses `node:Buffer`, `unpdf`, `mammoth`, `exceljs`). Text is
+ * SERVER-ONLY (uses `node:Buffer`, `unpdf`, `mammoth`, `word-extractor`,
+ * `fflate` and SheetJS — all lazily imported). Text is
  * capped at a leading excerpt — a category is decided by a document's first
  * page, not its last. Nothing here crosses a provider boundary; it only
  * prepares the payload the analysis channel will (or will not) let through.
@@ -93,7 +94,10 @@ export function truncateText(s: string, max = MAX_EXTRACT_CHARS): string {
  * Extract text from file bytes, by format:
  *   PDF          → `unpdf` text layer, pages merged
  *   .docx        → `mammoth` raw text
- *   .xlsx/.ods   → `exceljs`, flattened as `Sheet | a | b | c` rows
+ *   .xls/.xlsx/  → SheetJS, flattened as `Sheet | a | b | c` rows
+ *   .xlsm/.xlsb/.ods
+ *   .doc         → `word-extractor` (OLE)
+ *   .pptx        → `fflate` unzip + slide/notes text runs
  *   text/csv/json→ UTF-8 passthrough
  *
  * The result is truncated to `MAX_EXTRACT_CHARS`. A PDF with no text layer

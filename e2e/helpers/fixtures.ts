@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { STATE_DIR } from "./state";
@@ -7,6 +7,23 @@ import { STATE_DIR } from "./state";
  * Tiny valid files for upload tests, generated at runtime so no binary
  * fixtures live in the repo.
  */
+
+/**
+ * Generated fixtures go in a run-scoped subdirectory that is emptied the first
+ * time it is used in a process. Previously they were written straight into
+ * `.state/` with a timestamped name and never removed, so every interrupted run
+ * left four more behind — 59 of them had accumulated.
+ */
+let fixtureDirReady = false;
+function fixtureDir(): string {
+  const dir = join(STATE_DIR, "fixtures");
+  if (!fixtureDirReady) {
+    rmSync(dir, { recursive: true, force: true });
+    fixtureDirReady = true;
+  }
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 /** Minimal single-page PDF with a line of text. */
 export function makePdf(text: string): string {
@@ -29,8 +46,8 @@ export function makePdf(text: string): string {
   for (const off of offsets) pdf += `${String(off).padStart(10, "0")} 00000 n \n`;
   pdf += `trailer<</Size ${objects.length + 1}/Root 1 0 R>>\nstartxref\n${xrefStart}\n%%EOF`;
 
-  mkdirSync(STATE_DIR, { recursive: true });
-  const path = join(STATE_DIR, `fixture-${Date.now()}.pdf`);
+  const dir = fixtureDir();
+  const path = join(dir, `fixture-${Date.now()}.pdf`);
   writeFileSync(path, Buffer.from(pdf, "latin1"));
   return path;
 }
@@ -39,8 +56,8 @@ export function makePdf(text: string): string {
 export function makePng(): string {
   const base64 =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-  mkdirSync(STATE_DIR, { recursive: true });
-  const path = join(STATE_DIR, `fixture-${Date.now()}.png`);
+  const dir = fixtureDir();
+  const path = join(dir, `fixture-${Date.now()}.png`);
   writeFileSync(path, Buffer.from(base64, "base64"));
   return path;
 }

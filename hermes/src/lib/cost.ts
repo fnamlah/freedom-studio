@@ -5,9 +5,20 @@ import { getAdminClient } from "./supabase.js";
 /**
  * Spend metering and the circuit breaker.
  *
- * Every LLM call the worker makes goes through `assertUnderCostCap()` first and
- * `recordCost()` after — an unattended agent with no cap is an unbounded bill,
- * and the failure mode of a runaway loop is financial, not functional.
+ * ⚠ NOT YET WIRED. The intent is that every LLM call the worker makes passes
+ * `assertUnderCostCap()` first and `recordCost()` after — an unattended agent
+ * with no cap is an unbounded bill. Today the worker makes NO provider calls at
+ * all (see jobs/morning-brief.ts: the digest is exact aggregates, not prose), so
+ * nothing calls either function. The consequences, stated plainly so nobody
+ * mistakes this for a live control:
+ *
+ *   - `todaysCost()` always reads 0, so `overCap()` is permanently false and the
+ *     `usesLlm` gate in scheduler/run.ts never trips.
+ *   - the `/cost` Telegram command always reports $0 spent.
+ *   - `CostCapError` is currently unthrowable.
+ *
+ * Wire both calls in with the FIRST provider call added to the worker — that is
+ * the change that makes this file load-bearing.
  */
 
 export class CostCapError extends Error {

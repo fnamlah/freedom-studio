@@ -27,4 +27,5 @@ export function dict(locale: Locale): Dictionary {
 }
 
 /** Re-exported from ./locales so `import { plural } from "@/lib/i18n"` keeps working. */
-export { plural, pluralize } from "./locales";
+export { plural } from "./locales";
+

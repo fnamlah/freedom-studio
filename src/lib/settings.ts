@@ -92,13 +92,6 @@ export function invalidateSettingsCache(): void {
   inFlight = null;
 }
 
-/** Age of the cached snapshot in ms, or `null` when nothing is cached. Diagnostics only. */
-export function settingsCacheAgeMs(): number | null {
-  const cached = cache.get(CACHE_KEY);
-  if (!cached) return null;
-  return TTL_MS - (cached.expiresAt - Date.now());
-}
-
 async function fetchSettings(): Promise<Record<string, unknown>> {
   const client = hasServiceRoleKey()
     ? createServiceRoleClient()

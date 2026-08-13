@@ -27,10 +27,8 @@ export { Select, type SelectOption, type SelectProps } from "./select";
 export { Label, Field, type FieldProps, type LabelProps } from "./label";
 export {
   Table,
-  TableCaption,
   TBody,
   TD,
-  TFoot,
   TH,
   THead,
   TR,
@@ -55,5 +53,5 @@ export {
 export { EmptyState, type EmptyStateProps } from "./empty-state";
 export { StatTile, StatTileRow, type StatTileProps, type StatTileTrend } from "./stat-tile";
 export { PageHeader, type Breadcrumb, type PageHeaderProps } from "./page-header";
-export { LoadingPanel, Spinner, type SpinnerProps } from "./spinner";
+export { Spinner, type SpinnerProps } from "./spinner";
 export { ForbiddenView, type ForbiddenViewProps } from "./forbidden";

@@ -40,11 +40,3 @@ export function cn(...inputs: ClassValue[]): string {
   return out.join(" ");
 }
 
-/** Stable, SSR-safe id helper for label/aria wiring when React's useId is unavailable. */
-export function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}

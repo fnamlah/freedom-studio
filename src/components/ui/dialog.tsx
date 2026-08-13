@@ -90,6 +90,11 @@ export function Dialog({
       aria-labelledby={title ? "dialog-title" : undefined}
       className={cn(
         "m-auto w-[calc(100vw-2rem)] rounded-lg border border-border bg-surface p-0 text-foreground",
+        // A dialog renders in the top layer but still INHERITS from its DOM
+        // parent — and several of ours are mounted inside a right-aligned
+        // action cell, which was quietly right-aligning their prose. Alignment
+        // starts fresh here; anything that wants otherwise says so locally.
+        "text-start",
         "backdrop:bg-black/60 backdrop:backdrop-blur-sm",
         SIZES[size],
         className,

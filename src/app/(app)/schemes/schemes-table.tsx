@@ -15,7 +15,13 @@ import { fmt } from "@/lib/i18n/format";
 
 import { deleteScheme } from "./actions";
 import { SchemeForm, type EditableScheme } from "./scheme-form";
-import { SCOPE_META, SCOPE_ORDER, STATUS_VARIANT, type SchemeRowView } from "./scheme-meta";
+import {
+  SCOPE_META,
+  SCOPE_ORDER,
+  schemeHeading,
+  STATUS_VARIANT,
+  type SchemeRowView,
+} from "./scheme-meta";
 import { TierDialog } from "./tier-dialog";
 
 /**
@@ -111,7 +117,10 @@ export function SchemesTable({
                           <div className="flex items-center justify-end gap-2">
                             <TierDialog
                               schemeId={row.id}
-                              scopeLabel={`${d.money.schemes.scope[row.scope].label} · ${row.scopeLabel}`}
+                              scopeLabel={schemeHeading(
+                                d.money.schemes.scope[row.scope].label,
+                                row.scopeLabel,
+                              )}
                               base={{
                                 model_percent: row.model_percent,
                                 operator_percent: row.operator_percent,
@@ -203,7 +212,7 @@ function DeleteSchemeButton({ row }: { row: SchemeRowView }) {
         onClose={close}
         dismissible={!isRunning}
         title={d.money.schemes.deleteTitle}
-        description={`${d.money.schemes.scope[row.scope].label} · ${row.scopeLabel}`}
+        description={schemeHeading(d.money.schemes.scope[row.scope].label, row.scopeLabel)}
         size="sm"
         footer={
           <>

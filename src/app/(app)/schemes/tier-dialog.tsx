@@ -178,26 +178,30 @@ export function TierDialog({
             <p className="mt-1">{t.cliff}</p>
           </div>
 
-          {/* Column headings, carried once for the base row and every rung. */}
-          <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr_auto] items-center gap-2 px-1 text-xs font-medium text-muted">
+          {/* Column headings, carried once for the base row and every rung.
+              `text-center` on the three percentage columns, not `text-right`:
+              the rungs below are inputs whose text starts on the LEFT, so a
+              right-aligned heading points at nothing. */}
+          <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr_5rem] items-center gap-2 text-xs font-medium text-muted">
             <span>{t.colFrom}</span>
-            <span className="text-right">{t.colModel}</span>
-            <span className="text-right">{t.colTeam}</span>
-            <span className="text-right">{t.colStudio}</span>
-            <span className="w-16" />
+            <span className="text-center">{t.colModel}</span>
+            <span className="text-center">{t.colTeam}</span>
+            <span className="text-center">{t.colStudio}</span>
+            <span />
           </div>
 
           {/* The scheme's own split, shown as the ladder's floor — read-only,
-              because it is edited on the scheme itself, not here. */}
-          <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr_auto] items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted">
-            <span>
-              {t.baseRow}
-              <span className="ml-2 text-xs">{t.baseHint}</span>
+              because it is edited on the scheme itself, not here. Same grid and
+              the same gap as a rung, so the figures sit in their columns. */}
+          <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr_5rem] items-center gap-2 rounded-md border border-dashed border-border py-2 text-sm text-muted">
+            <span className="flex flex-col pl-3">
+              <span>{t.baseRow}</span>
+              <span className="text-xs opacity-80">{t.baseHint}</span>
             </span>
-            <span className="text-right tabular-nums">{fm.percent(base.model_percent)}</span>
-            <span className="text-right tabular-nums">{fm.percent(base.operator_percent)}</span>
-            <span className="text-right tabular-nums">{fm.percent(base.studio_percent)}</span>
-            <span className="w-16" />
+            <span className="text-center tabular-nums">{fm.percent(base.model_percent)}</span>
+            <span className="text-center tabular-nums">{fm.percent(base.operator_percent)}</span>
+            <span className="text-center tabular-nums">{fm.percent(base.studio_percent)}</span>
+            <span />
           </div>
 
           {rows.length === 0 ? (
@@ -211,7 +215,7 @@ export function TierDialog({
               const ok = sum === 100;
               return (
                 <div key={row.key} className="flex flex-col gap-1">
-                  <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr_auto] items-center gap-2">
+                  <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr_5rem] items-center gap-2">
                     <Input
                       type="number"
                       inputMode="decimal"

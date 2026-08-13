@@ -61,6 +61,15 @@ export const STATUS_VARIANT: Record<SchemeStatus, BadgeVariant> = {
 /** Resolution order for the scope sections: most specific first. */
 export const SCOPE_ORDER: SchemeScope[] = ["account", "model", "default"];
 
+/**
+ * "Per model · Aria", but just "Studio default" for the default scheme — whose
+ * scope label and target label are the same words, and printing both reads as a
+ * mistake. Used by every dialog that names a scheme in its header.
+ */
+export function schemeHeading(scopeLabel: string, targetLabel: string): string {
+  return scopeLabel === targetLabel ? scopeLabel : `${scopeLabel} · ${targetLabel}`;
+}
+
 export function deriveScope(row: {
   model_id: string | null;
   platform_account_id: string | null;

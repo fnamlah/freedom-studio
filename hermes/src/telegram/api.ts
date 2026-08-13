@@ -81,6 +81,19 @@ export function sendMessage(
 }
 
 /**
+ * The "typing…" indicator. A conversational turn can take several seconds
+ * while a tool round trip runs, and without this the chat looks dead. Telegram
+ * clears it automatically after ~5s or when the next message arrives, so it is
+ * fired once per turn and never cancelled.
+ */
+export function sendChatAction(
+  chatId: number | string,
+  action: "typing" = "typing",
+): Promise<unknown> {
+  return call("sendChatAction", { chat_id: chatId, action });
+}
+
+/**
  * An approval card. The callback payload is `appr:<uuid>:approve|reject` — the
  * same scheme the in-app page decides through, so both surfaces converge on
  * one `decide_approval` call.

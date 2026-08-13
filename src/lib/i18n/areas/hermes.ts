@@ -27,6 +27,15 @@ export const hermesEn = {
   helpHelp: "this message",
   commandList: "Commands: /brief /compliance /balances /approvals /cost /status /help",
 
+  /* ------------------------------------------------------- conversation --- */
+  /** Free-text replies. Every failure says something — silence reads as broken. */
+  chatNotConfigured:
+    "I can't think right now — no AI provider key is configured. The commands still work: /brief /balances /approvals /compliance /cost /status",
+  chatOverCap:
+    "I've hit today's AI spending cap, so I can't answer freely until it resets. The commands still work: /brief /balances /approvals /compliance /cost /status",
+  chatFailed:
+    "Something went wrong working that out. Try again, or use a command: /brief /balances /approvals /compliance /cost /status",
+
   // --- Telegram: pairing and access --------------------------------------
   paired: "Paired. Freedom Hermes is now connected to this chat.",
   sendPairingCode: "Send your pairing code to connect this chat.",
@@ -154,6 +163,14 @@ export const hermesRu: typeof hermesEn = {
   helpPause: "аварийный выключатель",
   helpHelp: "это сообщение",
   commandList: "Команды: /brief /compliance /balances /approvals /cost /status /help",
+
+  /* --------------------------------------------------------- разговор --- */
+  chatNotConfigured:
+    "Сейчас я не могу думать — не настроен ключ ИИ-провайдера. Команды по-прежнему работают: /brief /balances /approvals /compliance /cost /status",
+  chatOverCap:
+    "Достигнут дневной лимит расходов на ИИ, поэтому свободно отвечать пока не могу. Команды работают: /brief /balances /approvals /compliance /cost /status",
+  chatFailed:
+    "Что-то пошло не так при обработке. Попробуйте ещё раз или используйте команду: /brief /balances /approvals /compliance /cost /status",
 
   paired: "Готово. Freedom Hermes подключён к этому чату.",
   sendPairingCode: "Отправьте код привязки, чтобы подключить этот чат.",

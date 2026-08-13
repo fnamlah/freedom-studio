@@ -138,6 +138,21 @@ export const PROJECTIONS: Record<string, readonly string[]> = {
     "key_figures",
     "uploaded_on",
   ],
+
+  /* ------------------------------------------------- Hermes conversation ---
+   * The worker's Telegram tools (hermes/src/llm/tools.ts). Registered here
+   * because this map is fail-closed: an unprojected tool throws instead of
+   * serializing, so a new reader cannot reach a provider by being forgotten.
+   *
+   * Each one mirrors a slash command the bot already answers, and the
+   * projection is narrower than the query behind it — `hermes_approvals` in
+   * particular drops the free-form `preview` object entirely and keeps only
+   * the summary line the worker wrote for a human to read.
+   */
+  hermes_approvals: ["action_type", "required_role", "summary", "created_at", "expires_at"],
+  hermes_compliance: ["valid_count", "expiring_count", "expired_count"],
+  hermes_cost: ["spent_usd", "cap_usd", "currency"],
+  hermes_status: ["kind", "name", "state", "minutes_ago", "outcome"],
 };
 
 /** Raised when redaction cannot proceed safely — the caller must NOT send. */

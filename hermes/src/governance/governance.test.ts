@@ -19,6 +19,7 @@ import {
   roleSatisfies,
 } from "./policy.js";
 import { BOT_ROLES, commandAllowed, roleMayUseBot } from "../telegram/access.js";
+import { specsForRole, TOOL_COMMAND } from "../llm/tool-catalog.js";
 
 test("unknown actions fail safe to approval, never automatic", () => {
   for (const unknown of ["", "wire_funds", "drop_table", "../../etc/passwd", "SEND_BRIEF"]) {
@@ -128,4 +129,65 @@ test("scrubText masks contact details in free text", () => {
   const out = scrubText("reach me at jane.doe@example.com or +1 415 555 0199");
   assert.ok(!out.includes("jane.doe@example.com"), "email survived scrubbing");
   assert.ok(!out.includes("5550199"), "phone survived scrubbing");
+});
+
+/* --------------------------------------------------- conversational tools --- */
+
+test("every conversational tool is registered in the redactor, fail-closed", () => {
+  // The one property that keeps a new reader from reaching a provider by
+  // being forgotten: if a tool exists here but not in PROJECTIONS, its rows
+  // could never be serialized — better to fail this test than to find out in
+  // production that the projection was the missing piece.
+  for (const tool of Object.keys(TOOL_COMMAND)) {
+    // `hermes_balances` deliberately reuses the app's `payee_balances`
+    // projection: it is the same view, so it must not get a second, drifting
+    // definition of what may leave.
+    const projected = tool === "hermes_balances" ? "payee_balances" : tool;
+    assert.ok(
+      PROJECTIONS[projected],
+      `${tool} has no egress projection — it would throw at run time`,
+    );
+  }
+});
+
+test("conversational tools carry no identity fields into a projection", () => {
+  const blocked = Array.isArray(BLOCKED_KEYS) ? BLOCKED_KEYS : [...BLOCKED_KEYS];
+  for (const tool of Object.keys(TOOL_COMMAND)) {
+    const projected = tool === "hermes_balances" ? "payee_balances" : tool;
+    for (const field of PROJECTIONS[projected] ?? []) {
+      assert.ok(
+        !blocked.includes(field),
+        `${tool} projects "${field}", which is on the blocklist`,
+      );
+    }
+  }
+});
+
+test("a role is never offered a tool it may not run", () => {
+  for (const role of ["super_admin", "manager", "finance"]) {
+    const offered = specsForRole(role, commandAllowed).map((s) => s.function.name);
+    for (const name of offered) {
+      assert.ok(
+        commandAllowed(role, TOOL_COMMAND[name]!),
+        `${role} was offered ${name} but may not run it`,
+      );
+    }
+    // Every role that may hold a channel must get something to work with,
+    // otherwise the conversation is decorative for them.
+    assert.ok(offered.length > 0, `${role} was offered no tools at all`);
+  }
+});
+
+test("the conversational surface exposes no write tool", () => {
+  // Approving stays a button press routed through `decide_approval`, which
+  // re-checks the actor's role in the database. Nothing the model can call
+  // may mutate; the names are asserted rather than the behaviour because a
+  // write tool would most likely arrive as a new, plausibly-named entry.
+  for (const tool of Object.keys(TOOL_COMMAND)) {
+    assert.doesNotMatch(
+      tool,
+      /create|update|delete|approve|reject|close|post|pay|set_|write/i,
+      `${tool} reads as a mutation — the chat surface is read-only`,
+    );
+  }
 });

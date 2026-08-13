@@ -5,20 +5,16 @@ import { getAdminClient } from "./supabase.js";
 /**
  * Spend metering and the circuit breaker.
  *
- * ⚠ NOT YET WIRED. The intent is that every LLM call the worker makes passes
- * `assertUnderCostCap()` first and `recordCost()` after — an unattended agent
- * with no cap is an unbounded bill. Today the worker makes NO provider calls at
- * all (see jobs/morning-brief.ts: the digest is exact aggregates, not prose), so
- * nothing calls either function. The consequences, stated plainly so nobody
- * mistakes this for a live control:
+ * LIVE as of the conversational Telegram turn (`llm/converse.ts`), which is the
+ * worker's first and so far only provider call: it runs `assertUnderCostCap()`
+ * before the first request of a turn and `recordCost()` after every response,
+ * including the tool rounds. An unattended agent with no cap is an unbounded
+ * bill, so this is a real circuit breaker now, not scaffolding — `/cost`
+ * reports actual spend and `CostCapError` is reachable.
  *
- *   - `todaysCost()` always reads 0, so `overCap()` is permanently false and the
- *     `usesLlm` gate in scheduler/run.ts never trips.
- *   - the `/cost` Telegram command always reports $0 spent.
- *   - `CostCapError` is currently unthrowable.
- *
- * Wire both calls in with the FIRST provider call added to the worker — that is
- * the change that makes this file load-bearing.
+ * The scheduled jobs still make NO provider calls (morning-brief and friends
+ * are exact aggregates, not prose), so the `usesLlm` gate in scheduler/run.ts
+ * remains unexercised — it is armed, not dead.
  */
 
 export class CostCapError extends Error {
@@ -38,15 +34,43 @@ const PRICES: Record<string, { in: number; out: number }> = {
   "glm-4": { in: 0.5, out: 2.0 },
 };
 
+/**
+ * The price used when a model id matches nothing in `PRICES` — the most
+ * expensive rate we know, deliberately.
+ *
+ * Pricing to ZERO was the old behaviour and it silently disarmed the breaker:
+ * the model id is a free-text super-admin setting (`ai.chat_model.<provider>`),
+ * so an ordinary version bump — `kimi-k3` → `kimi-k4` — made every call cost 0,
+ * `todaysCost()` stay 0 forever, `assertUnderCostCap()` never throw, and
+ * `/cost` report $0 while real money was spent. A cap that quietly stops
+ * capping is worse than no cap, because the dashboards agree with it.
+ *
+ * Over-estimating is the safe direction: the worst case is the agent pausing
+ * itself early and someone adding a price, not an unbounded bill.
+ */
+const UNPRICED_FALLBACK = { in: 1.0, out: 3.0 };
+
+let warnedUnpriced = "";
+
 export function computeCost(
   model: string,
   usage: { inputTokens: number; outputTokens: number },
 ): number {
   const m = model.toLowerCase();
-  const price = Object.entries(PRICES).find(([k]) => m.includes(k))?.[1];
-  // An unknown model can't be priced — don't invent a number and don't block on it.
-  if (!price) return 0;
+  const price = Object.entries(PRICES).find(([k]) => m.includes(k))?.[1] ?? unpriced(model);
   return (usage.inputTokens * price.in + usage.outputTokens * price.out) / 1_000_000;
+}
+
+function unpriced(model: string): { in: number; out: number } {
+  // Once per model per process — a warning on every call would bury itself.
+  if (warnedUnpriced !== model) {
+    warnedUnpriced = model;
+    console.warn(
+      `[cost] no price for model "${model}" — metering at the conservative ` +
+        `$${UNPRICED_FALLBACK.in}/$${UNPRICED_FALLBACK.out} per 1M. Add it to PRICES.`,
+    );
+  }
+  return UNPRICED_FALLBACK;
 }
 
 function dayKey(): string {

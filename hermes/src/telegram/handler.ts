@@ -5,10 +5,12 @@ import { commandAllowed, roleMayUseBot } from "./access.js";
 import {
   answerCallbackQuery,
   escapeHtml,
+  sendChatAction,
   sendMessage,
   type TelegramUpdate,
 } from "./api.js";
 import { handleCommand } from "./commands.js";
+import { converse } from "../llm/converse.js";
 
 /**
  * Telegram update dispatch.
@@ -176,9 +178,26 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
         text,
       });
       if (handled) return;
+
+      // An unrecognised command is a typo, not a question. Show the list
+      // rather than paying for a provider turn to guess at "/blaance" — and
+      // this is the only thing that keeps the command list discoverable now
+      // that free text goes to the model.
+      await sendMessage(chatId, hermesDict(channel.locale).commandList);
+      return;
     }
 
-    await sendMessage(chatId, hermesDict(channel.locale).commandList);
+    // A message with no text at all — a sticker, photo, voice note, or a group
+    // service event. Telegram delivers these as updates with no `text`, and
+    // before this they hit the static command list for free; sending an empty
+    // prompt to a provider would bill a round trip per sticker.
+    if (!text.trim()) {
+      await sendMessage(chatId, hermesDict(channel.locale).commandList);
+      return;
+    }
+
+    // Free text from a verified member of senior staff — talk.
+    await converse_(chatId, text, channel);
   });
 }
 
@@ -224,5 +243,51 @@ async function handleApprovalCallback(
     await sendMessage(chatId, result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}`);
   } else {
     await sendMessage(chatId, h.rejectedNothingRan);
+  }
+}
+
+/**
+ * Answer free text.
+ *
+ * Every failure mode degrades to a sentence in the asker's language rather
+ * than silence: a bot that ignores you is indistinguishable from a broken one,
+ * and this is the surface staff will actually use.
+ *
+ * `sendChatAction` is fired first because a tool round trip takes a few
+ * seconds and a typing indicator is the difference between "thinking" and
+ * "dead". It is best-effort — a failed indicator must not cost us the reply.
+ */
+async function converse_(
+  chatId: number | string,
+  text: string,
+  channel: Channel,
+): Promise<void> {
+  const h = hermesDict(channel.locale);
+  await sendChatAction(chatId, "typing").catch(() => undefined);
+
+  const outcome = await converse({
+    text,
+    role: channel.role,
+    locale: channel.locale,
+    profileId: channel.profileId,
+  });
+
+  switch (outcome.kind) {
+    case "answered":
+      // Plain text on purpose: the model is told not to emit markup, and
+      // sending unescaped model output as HTML would let a tool result's
+      // contents break the message — or worse, be crafted to.
+      await sendMessage(chatId, outcome.text);
+      return;
+    case "not_configured":
+      await sendMessage(chatId, h.chatNotConfigured);
+      return;
+    case "over_cap":
+      await sendMessage(chatId, h.chatOverCap);
+      return;
+    case "failed":
+      console.warn("[telegram] conversation failed:", outcome.error);
+      await sendMessage(chatId, h.chatFailed);
+      return;
   }
 }

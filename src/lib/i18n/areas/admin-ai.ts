@@ -394,6 +394,65 @@ export const adminAiEn = {
       "That proposal has already been decided. Refresh to see its current state.",
     errGone: "That proposal no longer exists.",
     errFailed: "The decision could not be recorded.",
+
+    /* ------------------------------------------------------------ pairing --- */
+
+    /**
+     * Telegram pairing. Wording rule: the code is handed OVER, never sent by
+     * the app — the studio decides which channel is safe to pass it through.
+     */
+    pairing: {
+      cardTitle: "Telegram access",
+      cardDescription:
+        "Who can reach Hermes on Telegram. An unpaired chat can do nothing but redeem a code, and a code only works from the Telegram account it names.",
+
+      colPerson: "Person",
+      colRole: "Role",
+      /** A channel can outlive its owner's eligibility — say so, don't blank it. */
+      unknownPerson: "Unknown account",
+      roleIneligible: "No longer eligible",
+      colChat: "Telegram chat",
+      colPaired: "Paired",
+      unpair: "Revoke",
+      emptyTitle: "Nobody is paired yet",
+      emptyDescription:
+        "Create a code below and hand it to the person. They send it to the bot once, and the bot answers them from then on.",
+
+      mintTitle: "Create a pairing code",
+      mintPerson: "Who is pairing",
+      mintPersonPlaceholder: "Choose a person…",
+      mintPersonHelp:
+        "Only Super Admins, Managers and Finance may hold a Telegram channel — the bot answers from a service account that sees every row.",
+      mintUsername: "Their Telegram username",
+      mintUsernameHelp:
+        "The code works only from this account. Without the pin, anyone who saw the code could use it.",
+      mintDays: "Valid for (days)",
+      mintSubmit: "Create code",
+
+      resultTitle: "Hand this to them",
+      resultBody: (username: string) =>
+        `Ask @${username} to open the bot, press Start, and send this code. It is shown once.`,
+      resultExpires: (date: string) => `Valid until ${date}.`,
+      resultBotHint: "The bot is @FreedomStudioHermesBot.",
+      copy: "Copy",
+      copied: "Copied",
+
+      errChoosePerson: "Choose who is pairing.",
+      errUsername: "Enter a Telegram username — 5–32 letters, digits or underscores.",
+      errDays: "Choose between 1 and 30 days.",
+      errPersonGone: "That person no longer exists.",
+      errNotActive: "That account is not active, so the bot would refuse it.",
+      errRoleNotEligible:
+        "That role can't hold a Telegram channel. Only Super Admin, Manager and Finance can.",
+      errChannelGone: "That chat is already revoked.",
+      errFailed: "Could not create the code. Please try again.",
+
+      okUnpaired: "Telegram access revoked.",
+      mintToastOk: "Pairing code created",
+      mintToastErr: "Couldn't create the code",
+      unpairToastOk: "Access revoked",
+      unpairToastErr: "Couldn't revoke access",
+    },
   },
 
   /* --------------------------------------------------------- assistant --- */
@@ -895,6 +954,60 @@ export const adminAiRu: typeof adminAiEn = {
       "Решение по этому предложению уже принято. Обновите страницу, чтобы увидеть его состояние.",
     errGone: "Этого предложения больше нет.",
     errFailed: "Не удалось записать решение.",
+
+    /* ------------------------------------------------------------ привязка --- */
+
+    pairing: {
+      cardTitle: "Доступ через Telegram",
+      cardDescription:
+        "Кто может общаться с Гермесом в Telegram. Непривязанный чат не может ничего, кроме ввода кода, а код работает только с того аккаунта, который в нём указан.",
+
+      colPerson: "Человек",
+      colRole: "Роль",
+      unknownPerson: "Неизвестная учётная запись",
+      roleIneligible: "Больше не имеет права",
+      colChat: "Чат в Telegram",
+      colPaired: "Привязан",
+      unpair: "Отозвать",
+      emptyTitle: "Пока никто не привязан",
+      emptyDescription:
+        "Создайте код ниже и передайте его человеку. Он один раз отправляет код боту — и дальше бот отвечает ему.",
+
+      mintTitle: "Создать код привязки",
+      mintPerson: "Кто привязывается",
+      mintPersonPlaceholder: "Выберите человека…",
+      mintPersonHelp:
+        "Канал в Telegram могут иметь только супер-администраторы, менеджеры и финансы — бот отвечает от служебной учётной записи, которая видит все данные.",
+      mintUsername: "Его имя пользователя в Telegram",
+      mintUsernameHelp:
+        "Код сработает только с этого аккаунта. Без привязки к имени кодом смог бы воспользоваться любой, кто его увидел.",
+      mintDays: "Срок действия (дней)",
+      mintSubmit: "Создать код",
+
+      resultTitle: "Передайте это ему",
+      resultBody: (username: string) =>
+        `Попросите @${username} открыть бота, нажать «Старт» и отправить этот код. Код показывается один раз.`,
+      resultExpires: (date: string) => `Действителен до ${date}.`,
+      resultBotHint: "Бот — @FreedomStudioHermesBot.",
+      copy: "Копировать",
+      copied: "Скопировано",
+
+      errChoosePerson: "Выберите, кто привязывается.",
+      errUsername: "Укажите имя пользователя Telegram — 5–32 буквы, цифры или подчёркивания.",
+      errDays: "Выберите срок от 1 до 30 дней.",
+      errPersonGone: "Этого человека больше нет.",
+      errNotActive: "Эта учётная запись неактивна, бот её не примет.",
+      errRoleNotEligible:
+        "У этой роли не может быть канала в Telegram. Только супер-администратор, менеджер и финансы.",
+      errChannelGone: "Этот чат уже отозван.",
+      errFailed: "Не удалось создать код. Попробуйте ещё раз.",
+
+      okUnpaired: "Доступ через Telegram отозван.",
+      mintToastOk: "Код привязки создан",
+      mintToastErr: "Не удалось создать код",
+      unpairToastOk: "Доступ отозван",
+      unpairToastErr: "Не удалось отозвать доступ",
+    },
   },
 
   /* --------------------------------------------------------- assistant --- */

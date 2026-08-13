@@ -1,8 +1,11 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
+
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 
@@ -110,4 +113,144 @@ export async function decideApproval(input: DecideInput): Promise<ActionResult> 
     ok: true,
     message: parsed.data.verdict === "approve" ? d.okApproved : d.okRejected,
   };
+}
+
+/* ------------------------------------------------------------- pairing --- */
+
+/**
+ * Telegram pairing (migration 015).
+ *
+ * A person cannot simply message the bot: an unpaired chat may do exactly one
+ * thing, redeem a one-time code. Until now those codes were minted by hand in
+ * SQL, which meant the studio's second Super Admin had no way to pair at all —
+ * the gap this closes.
+ *
+ * Two rules carried over from how the bot actually redeems a code
+ * (`hermes/src/telegram/access.ts`, `telegram/handler.ts`), because minting a
+ * code the bot will refuse is worse than refusing to mint one:
+ *
+ *   * Only `super_admin`, `manager` and `finance` may hold a channel. The bot
+ *     answers from a service-role client that sees every row, so a channel for
+ *     a model or operator would be a privilege escalation, not a convenience.
+ *   * The code is PINNED to a Telegram username. A code was once pasted to an
+ *     unrelated third-party bot and had to be burned; a pinned code is inert in
+ *     anyone else's hands, and the bot stays silent on a mismatch rather than
+ *     confirming the code is real.
+ *
+ * The raw code is returned to the minting Super Admin exactly once, to hand
+ * over out of band. It is not secret in the password sense — it expires, it is
+ * single-use, and it is useless without the pinned username — but it is not
+ * shown again either.
+ */
+
+const TELEGRAM_USERNAME = /^@?[A-Za-z0-9_]{5,32}$/;
+
+const pairSchema = (d: Dictionary) =>
+  z.object({
+    profile_id: z.string().uuid(d.adminAi.hermes.pairing.errChoosePerson),
+    telegram_username: z
+      .string()
+      .trim()
+      .regex(TELEGRAM_USERNAME, d.adminAi.hermes.pairing.errUsername),
+    days: z.coerce
+      .number()
+      .int()
+      .min(1, d.adminAi.hermes.pairing.errDays)
+      .max(30, d.adminAi.hermes.pairing.errDays),
+  });
+
+export type MintPairingInput = {
+  profile_id: string;
+  telegram_username: string;
+  days: number;
+};
+
+export type MintPairingResult =
+  | { ok: true; code: string; username: string; expiresAt: string }
+  | { ok: false; error: string };
+
+export async function mintPairingCode(input: MintPairingInput): Promise<MintPairingResult> {
+  const { supabase, profile } = await requireRole("super_admin");
+  const dictionary = dict(toLocale(profile.locale));
+  const d = dictionary.adminAi.hermes.pairing;
+
+  const parsed = pairSchema(dictionary).safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? d.errFailed };
+  }
+  const username = parsed.data.telegram_username.replace(/^@/, "");
+
+  // Re-read the target through the caller's own RLS. The bot enforces this
+  // again at redemption; refusing here just means we never hand out a code
+  // that cannot work.
+  const { data: target, error: readError } = await supabase
+    .from("profiles")
+    .select("id, role, status, full_name, email")
+    .eq("id", parsed.data.profile_id)
+    .maybeSingle();
+
+  if (readError || !target) return { ok: false, error: d.errPersonGone };
+  if (target.status !== "active") return { ok: false, error: d.errNotActive };
+  if (!["super_admin", "manager", "finance"].includes(target.role)) {
+    return { ok: false, error: d.errRoleNotEligible };
+  }
+
+  const code = randomBytes(6).toString("hex");
+  const expiresAt = new Date(Date.now() + parsed.data.days * 86_400_000).toISOString();
+
+  const { error } = await supabase.from("hermes_pairing_codes").insert({
+    code,
+    profile_id: target.id,
+    expected_username: username,
+    expires_at: expiresAt,
+  });
+  if (error) return { ok: false, error: d.errFailed };
+
+  // The CODE never enters the audit trail — a permanent record of a live
+  // credential is exactly what an append-only log should not hold. Who minted
+  // one, for whom, pinned to which handle, is what an auditor needs.
+  await writeAudit({
+    action: "hermes.pair",
+    entityType: "profile",
+    entityId: target.id,
+    metadata: { op: "mint", telegram_username: username, expires_at: expiresAt },
+  });
+
+  revalidatePath("/admin/hermes");
+  return { ok: true, code, username, expiresAt };
+}
+
+/**
+ * Revoke a paired chat. Deactivates rather than deletes: the channel row is
+ * how a past instruction is attributed, and the worker checks `is_active`
+ * before it will answer anyone.
+ */
+export async function unpairChannel(input: { channel_id: string }): Promise<ActionResult> {
+  const { supabase, profile } = await requireRole("super_admin");
+  const dictionary = dict(toLocale(profile.locale));
+  const d = dictionary.adminAi.hermes.pairing;
+
+  const parsed = z.object({ channel_id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: d.errFailed };
+
+  const { data: updated, error } = await supabase
+    .from("hermes_channels")
+    .update({ is_active: false })
+    .eq("id", parsed.data.channel_id)
+    .eq("is_active", true)
+    .select("id, profile_id, external_id")
+    .maybeSingle();
+
+  if (error) return { ok: false, error: d.errFailed };
+  if (!updated) return { ok: false, error: d.errChannelGone };
+
+  await writeAudit({
+    action: "hermes.pair",
+    entityType: "profile",
+    entityId: updated.profile_id,
+    metadata: { op: "unpair", channel_id: updated.id },
+  });
+
+  revalidatePath("/admin/hermes");
+  return { ok: true, message: d.okUnpaired };
 }

@@ -12,7 +12,10 @@ import { fmt } from "@/lib/i18n/format";
 import { getDict, getLocale } from "@/lib/i18n/server";
 import { EM_DASH } from "@/lib/format";
 
+import type { SelectOption } from "@/components/ui/select";
+
 import { ApprovalsTable, type ApprovalRowView, type ApprovalState } from "./approvals-table";
+import { PairingPanel, type PairedChannelView } from "./pairing-panel";
 
 export async function generateMetadata(): Promise<Metadata> {
   return { title: (await getDict()).adminAi.hermes.metaTitle };
@@ -106,7 +109,7 @@ export default async function HermesPage() {
   const d = dict.adminAi.hermes;
   const fm = fmt(locale);
 
-  const [approvalsRes, jobsRes, heartbeatRes] = await Promise.all([
+  const [approvalsRes, jobsRes, heartbeatRes, channelsRes, eligibleRes] = await Promise.all([
     supabase
       .from("hermes_approvals")
       .select(
@@ -120,11 +123,61 @@ export default async function HermesPage() {
       .order("started_at", { ascending: false })
       .limit(12),
     supabase.from("hermes_policy").select("key, value, updated_at").like("key", "heartbeat:%"),
+    // Telegram access: who holds a live channel, and who is even eligible for
+    // one. BOT_ROLES (hermes/src/telegram/access.ts) is the authority the bot
+    // itself applies; mirroring it here means the picker cannot offer someone
+    // a code the bot would refuse.
+    supabase
+      .from("hermes_channels")
+      .select("id, external_id, profile_id, created_at")
+      .eq("channel_type", "telegram")
+      .eq("is_active", true)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, role")
+      .eq("status", "active")
+      .in("role", ["super_admin", "manager", "finance"])
+      .order("full_name", { ascending: true }),
   ]);
+
+  // Channel owners are looked up separately from the eligible list: a channel
+  // can outlive eligibility (a role change, a deactivation), and that row is
+  // exactly the one an admin needs to see clearly enough to revoke.
 
   const approvals = approvalsRes.data ?? [];
   const jobs = jobsRes.data ?? [];
   const heartbeats = heartbeatRes.data ?? [];
+  const channels = channelsRes.data ?? [];
+  const botEligible = eligibleRes.data ?? [];
+
+  const ownerIds = [...new Set(channels.map((c) => c.profile_id))];
+  const { data: owners } = ownerIds.length
+    ? await supabase.from("profiles").select("id, full_name, email, role, status").in("id", ownerIds)
+    : { data: [] as Array<{ id: string; full_name: string; email: string; role: string; status: string }> };
+  const ownerById = new Map((owners ?? []).map((p) => [p.id, p]));
+
+  const pairedChannels: PairedChannelView[] = channels.map((c) => {
+    const person = ownerById.get(c.profile_id);
+    const eligible =
+      person?.status === "active" &&
+      ["super_admin", "manager", "finance"].includes(person.role);
+    return {
+      id: c.id,
+      personName: person?.full_name || person?.email || d.pairing.unknownPerson,
+      roleLabel:
+        person && eligible
+          ? dict.roles[person.role as keyof typeof dict.roles]
+          : d.pairing.roleIneligible,
+      chatId: c.external_id,
+      pairedAt: c.created_at,
+    };
+  });
+
+  const peopleOptions: SelectOption[] = botEligible.map((p) => ({
+    value: p.id,
+    label: `${p.full_name || p.email} · ${dict.roles[p.role as keyof typeof dict.roles]}`,
+  }));
 
   // Resolve decider names in one round trip rather than per row.
   const deciderIds = [
@@ -192,6 +245,13 @@ export default async function HermesPage() {
         <CardHeader title={d.awaitingCardTitle} />
         <CardBody>
           <ApprovalsTable rows={pending} />
+        </CardBody>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader title={d.pairing.cardTitle} description={d.pairing.cardDescription} />
+        <CardBody>
+          <PairingPanel channels={pairedChannels} peopleOptions={peopleOptions} />
         </CardBody>
       </Card>
 

@@ -22,26 +22,28 @@ import { runTool } from "./tools.js";
  * commands already use, nothing wider.
  *
  * Four things bound this turn:
- *   1. COST — `assertUnderCostCap()` before the first call and `recordCost()`
- *      after every one. This is the change that finally makes `lib/cost.ts`
- *      load-bearing: before today the worker made no provider calls, so the
- *      cap was unthrowable and `/cost` always read $0.
+ *   1. COST — `assertUnderCostCap()` before the first call, a per-turn ceiling
+ *      between rounds, and ONE accumulated write at the end (off the critical
+ *      path, drain-tracked). This is what makes `lib/cost.ts` load-bearing:
+ *      before the worker made provider calls the cap was unthrowable and
+ *      `/cost` always read $0.
  *   2. EGRESS — the person's message is scrubbed by the app's real redactor
  *      before it leaves, and every tool result is projected by it. There is no
  *      other serialization path from here to a provider.
- *   3. ROUNDS — a hard cap; a model that keeps calling tools is cut off and
- *      answers with what it has.
+ *   3. TIME — a hard round cap AND a whole-turn deadline; a model that keeps
+ *      calling tools is cut off and answers with what it has.
  *   4. ROLE — tools are offered per role and re-checked at execution.
  *
- * History is deliberately NOT persisted across turns: each message is answered
- * on its own. A stored conversation is a stored copy of whatever staff type
- * into Telegram, and that is a retention decision for the owner, not a side
- * effect of making the bot chatty.
+ * MEMORY lives one layer up, not here. This function is given whatever prior
+ * turns should be replayed (`input.history`) and returns an answer; the
+ * caller — `telegram/handler.ts` — is what loads the chat's state, decides
+ * whether the thread has gone idle, and writes the exchange back through
+ * `hermes_session_append` (028). Keeping the turn itself stateless is what
+ * lets it be exercised without a database.
  *
- * What IS recorded: the inbound message, by the dedupe insert in
- * `telegram/handler.ts` (`hermes_messages`, direction `inbound`). Hermes'
- * REPLIES are not stored anywhere — say so plainly rather than implying a
- * trail that does not exist. Storing them is the same retention decision.
+ * The owner chose to keep that history indefinitely (027), so both sides are
+ * stored SCRUBBED: state is replayed straight back into the next provider
+ * call, and raw text there would egress on turn 2 exactly what turn 1 masked.
  */
 
 const MAX_ROUNDS = 4;

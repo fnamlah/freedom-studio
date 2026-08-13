@@ -1691,6 +1691,7 @@ export type Database = {
           created_at: string
           created_by: string
           display_name: string
+          staff_role: Database["public"]["Enums"]["staff_role"]
           email: string | null
           id: string
           legal_name: string
@@ -1707,6 +1708,7 @@ export type Database = {
           created_at?: string
           created_by: string
           display_name: string
+          staff_role?: Database["public"]["Enums"]["staff_role"]
           email?: string | null
           id?: string
           legal_name: string
@@ -1723,6 +1725,7 @@ export type Database = {
           created_at?: string
           created_by?: string
           display_name?: string
+          staff_role?: Database["public"]["Enums"]["staff_role"]
           email?: string | null
           id?: string
           legal_name?: string
@@ -2704,6 +2707,7 @@ export type Database = {
       model_status: "active" | "inactive" | "on_leave" | "terminated"
       payee_type: "model" | "operator"
       payout_status: "pending" | "approved" | "paid" | "cancelled"
+      staff_role: "operator" | "coach" | "team_leader"
       user_role: "super_admin" | "manager" | "model" | "finance" | "operator"
       user_status: "invited" | "active" | "deactivated"
     }
@@ -2889,6 +2893,7 @@ export const Constants = {
       model_status: ["active", "inactive", "on_leave", "terminated"],
       payee_type: ["model", "operator"],
       payout_status: ["pending", "approved", "paid", "cancelled"],
+      staff_role: ["operator", "coach", "team_leader"],
       user_role: ["super_admin", "manager", "model", "finance", "operator"],
       user_status: ["invited", "active", "deactivated"],
     },

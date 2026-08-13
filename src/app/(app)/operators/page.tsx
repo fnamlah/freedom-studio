@@ -12,7 +12,7 @@ import { fmt } from "@/lib/i18n/format";
 import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { OperatorForm } from "./operator-form";
-import { assignmentActivity, operatorStatusMeta, type OperatorStatus } from "./status";
+import { assignmentActivity, operatorStatusMeta, staffRoleMeta, type OperatorStatus, type StaffRole } from "./status";
 
 export async function generateMetadata(): Promise<Metadata> {
   return { title: (await getDict()).studio.operators.metaTitle };
@@ -21,6 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
 type OperatorListRow = {
   id: string;
   display_name: string;
+  staff_role: StaffRole;
   email: string | null;
   country: string | null;
   start_date: string | null;
@@ -49,7 +50,7 @@ export default async function OperatorsPage() {
   const [operatorsResult, assignmentsResult] = await Promise.all([
     supabase
       .from("operators")
-      .select("id, display_name, email, country, start_date, status, profile_id")
+      .select("id, display_name, staff_role, email, country, start_date, status, profile_id")
       .order("display_name", { ascending: true }),
     supabase.from("operator_assignments").select("operator_id, assigned_from, assigned_to"),
   ]);
@@ -109,6 +110,7 @@ export default async function OperatorsPage() {
           <THead>
             <TR>
               <TH>{d.studio.operators.colOperator}</TH>
+              <TH>{d.studio.staffRoleLabel}</TH>
               <TH>{d.studio.operators.colStatus}</TH>
               <TH align="right">{d.studio.operators.colAssignments}</TH>
               <TH>{d.studio.operators.colCountry}</TH>
@@ -118,6 +120,7 @@ export default async function OperatorsPage() {
           <TBody>
             {operators.map((operator) => {
               const statusMeta = operatorStatusMeta(d, operator.status);
+              const roleMeta = staffRoleMeta(d, operator.staff_role);
               const total = totalByOperator.get(operator.id) ?? 0;
               const active = activeByOperator.get(operator.id) ?? 0;
 
@@ -138,6 +141,9 @@ export default async function OperatorsPage() {
                         </Badge>
                       ) : null}
                     </div>
+                  </TD>
+                  <TD>
+                    <Badge variant={roleMeta.variant}>{roleMeta.label}</Badge>
                   </TD>
                   <TD>
                     <Badge variant={statusMeta.variant} dot>

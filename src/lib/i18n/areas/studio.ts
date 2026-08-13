@@ -20,6 +20,21 @@ export const studioEn = {
   /* ------------------------------------------------------------ enum labels --- */
 
   /** `model_status` — shared by models and operators (docs/04 §4.2, §4.3). */
+  /** What kind of team member someone is — the variables around the model. */
+  staffRole: {
+    operator: "Operator",
+    coach: "Coach",
+    team_leader: "Team leader",
+  },
+  staffRoleLabel: "Role in the group",
+  staffRoleHelp: "Operators chat, coaches develop the model, team leaders run the group. All three share the team pool.",
+  groupTitle: "Group",
+  groupDescription: "The model is the constant. Operators, coaches and team leaders are the variables — assign as many or as few as this model needs.",
+  groupModel: "Model",
+  groupTeam: "Team",
+  groupEmpty: "No one assigned yet. This model's whole team share stays with the studio.",
+  groupPoolNote: (percent: string) => `The team pool is ${percent} of net earnings, split by the weights below.`,
+  groupUnallocated: (percent: string) => `${percent} of the pool is unassigned and stays with the studio.`,
   lifecycleStatus: {
     active: "Active",
     inactive: "Inactive",
@@ -784,6 +799,21 @@ export const studioRu: typeof studioEn = {
    * and «оператор» (masculine), and «Активен» reads as a state of the record
    * rather than as an adjective agreeing with the person.
    */
+  /** Кто человек в группе — переменные вокруг модели. */
+  staffRole: {
+    operator: "Оператор",
+    coach: "Коуч",
+    team_leader: "Тимлид",
+  },
+  staffRoleLabel: "Роль в группе",
+  staffRoleHelp: "Операторы ведут переписку, коучи развивают модель, тимлиды руководят группой. Все трое делят общий пул команды.",
+  groupTitle: "Группа",
+  groupDescription: "Модель — постоянная величина. Операторы, коучи и тимлиды — переменные: назначьте столько, сколько нужно этой модели.",
+  groupModel: "Модель",
+  groupTeam: "Команда",
+  groupEmpty: "Никто не назначен. Вся командная доля этой модели остаётся у студии.",
+  groupPoolNote: (percent: string) => `Пул команды — ${percent} от чистого дохода, делится по весам ниже.`,
+  groupUnallocated: (percent: string) => `${percent} пула не распределено и остаётся у студии.`,
   lifecycleStatus: {
     active: "Активен",
     inactive: "Неактивен",

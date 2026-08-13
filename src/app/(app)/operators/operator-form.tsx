@@ -13,12 +13,13 @@ import { useToast } from "@/components/ui/toast";
 import { useDict } from "@/lib/i18n/client";
 
 import { createOperator, updateOperator } from "./actions";
-import { operatorStatusOptions, type OperatorStatus } from "./status";
+import { operatorStatusOptions, staffRoleOptions, type OperatorStatus, type StaffRole } from "./status";
 
 /** The subset of columns the form reads/writes (sensitive `legal_name` included). */
 export type EditableOperator = {
   id: string;
   display_name: string;
+  staff_role: StaffRole;
   legal_name: string;
   email: string | null;
   phone: string | null;
@@ -29,6 +30,7 @@ export type EditableOperator = {
 
 type FormState = {
   display_name: string;
+  staff_role: StaffRole;
   legal_name: string;
   email: string;
   phone: string;
@@ -41,6 +43,7 @@ type FormState = {
 function initialState(operator?: EditableOperator): FormState {
   return {
     display_name: operator?.display_name ?? "",
+    staff_role: operator?.staff_role ?? "operator",
     legal_name: operator?.legal_name ?? "",
     email: operator?.email ?? "",
     phone: operator?.phone ?? "",
@@ -96,6 +99,7 @@ export function OperatorForm({
       const result = isCreate
         ? await createOperator({
             display_name: form.display_name,
+            staff_role: form.staff_role,
             legal_name: form.legal_name,
             email: form.email,
             phone: form.phone,
@@ -107,6 +111,7 @@ export function OperatorForm({
         : await updateOperator({
             id: operator!.id,
             display_name: form.display_name,
+            staff_role: form.staff_role,
             legal_name: form.legal_name,
             email: form.email,
             phone: form.phone,
@@ -180,6 +185,19 @@ export function OperatorForm({
                 value={form.display_name}
                 onChange={(e) => field("display_name")(e.target.value)}
                 placeholder={d.studio.operators.placeholderDisplayName}
+              />
+            </Field>
+
+            <Field help={d.studio.staffRoleHelp}>
+              <Label htmlFor="operator-staff-role" required>
+                {d.studio.staffRoleLabel}
+              </Label>
+              <Select
+                id="operator-staff-role"
+                required
+                options={staffRoleOptions(d)}
+                value={form.staff_role}
+                onChange={(e) => field("staff_role")(e.target.value as StaffRole)}
               />
             </Field>
 

@@ -73,7 +73,7 @@ export default async function OperatorDetailPage({
     supabase
       .from("operators")
       .select(
-        "id, display_name, legal_name, email, phone, country, start_date, notes, status, profile_id, created_at",
+        "id, display_name, staff_role, legal_name, email, phone, country, start_date, notes, status, profile_id, created_at",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -116,6 +116,7 @@ export default async function OperatorDetailPage({
   const editable: EditableOperator = {
     id: operator.id,
     display_name: operator.display_name,
+    staff_role: operator.staff_role,
     legal_name: operator.legal_name,
     email: operator.email,
     phone: operator.phone,

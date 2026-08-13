@@ -101,6 +101,9 @@ const optionalNotes = (d: Dictionary) =>
 /** Shared operator profile fields (everything except lifecycle status). */
 const profileFields = (d: Dictionary) => ({
   display_name: z.string().trim().min(1, d.studio.operators.errDisplayNameRequired).max(160),
+  // Which kind of team member. Payment is identical for all three (they share
+  // the scheme's team pool); this only records who someone is.
+  staff_role: z.enum(["operator", "coach", "team_leader"]).default("operator"),
   legal_name: z.string().trim().min(1, d.studio.operators.errLegalNameRequired).max(200),
   email: optionalEmail(d),
   phone: optionalPhone(d),
@@ -173,6 +176,7 @@ const deleteAssignmentSchema = z.object({
 
 export type CreateOperatorInput = {
   display_name: string;
+  staff_role?: "operator" | "coach" | "team_leader";
   legal_name: string;
   email?: string | null;
   phone?: string | null;
@@ -257,6 +261,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Action
       .from("operators")
       .insert({
         display_name: data.display_name,
+        staff_role: data.staff_role,
         legal_name: data.legal_name,
         email: data.email ?? null,
         phone: data.phone ?? null,
@@ -277,7 +282,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Action
       action: "operator.create",
       entityType: "operator",
       entityId: created.id,
-      metadata: { display_name: data.display_name, status: data.status },
+      metadata: { display_name: data.display_name, staff_role: data.staff_role, status: data.status },
     });
 
     revalidatePath("/operators");
@@ -307,6 +312,7 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Action
       .from("operators")
       .update({
         display_name: data.display_name,
+        staff_role: data.staff_role,
         legal_name: data.legal_name,
         email: data.email ?? null,
         phone: data.phone ?? null,
@@ -329,7 +335,7 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Action
       action: "operator.update",
       entityType: "operator",
       entityId: data.id,
-      metadata: { display_name: data.display_name },
+      metadata: { display_name: data.display_name, staff_role: data.staff_role },
     });
 
     revalidatePath("/operators");

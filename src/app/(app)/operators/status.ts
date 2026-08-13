@@ -69,3 +69,36 @@ export function assignmentActivity(
   if (assignedTo !== null && today > assignedTo) return "ended";
   return "active";
 }
+
+/* ----------------------------------------------------------- staff roles --- */
+
+/**
+ * What kind of team member someone is (022).
+ *
+ * A studio group is always ONE model plus a variable team: sometimes nobody,
+ * sometimes an operator, sometimes an operator + coach + team leader. All three
+ * kinds are paid identically — they share the commission scheme's team pool,
+ * weighted per assignment — so this only says who someone IS, never what they
+ * earn.
+ */
+export type StaffRole = Database["public"]["Enums"]["staff_role"];
+
+export const STAFF_ROLES: readonly StaffRole[] = ["operator", "coach", "team_leader"] as const;
+
+/** Colour only; the label is a translation and comes from the dictionary. */
+export const STAFF_ROLE_VARIANT: Record<StaffRole, BadgeVariant> = {
+  operator: "primary",
+  coach: "success",
+  team_leader: "warning",
+};
+
+export function staffRoleMeta(
+  d: Dictionary,
+  role: StaffRole,
+): { variant: BadgeVariant; label: string } {
+  return { variant: STAFF_ROLE_VARIANT[role], label: d.studio.staffRole[role] };
+}
+
+export function staffRoleOptions(d: Dictionary): SelectOption[] {
+  return STAFF_ROLES.map((value) => ({ value, label: d.studio.staffRole[value] }));
+}

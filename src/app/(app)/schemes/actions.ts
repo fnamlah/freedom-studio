@@ -7,7 +7,13 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
-import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
+import {
+  describeDbError,
+  emptyToNull,
+  firstIssue,
+  isValidYmd,
+  type SqlStateMessages,
+} from "@/lib/forms";
 
 /**
  * Commission-scheme writes — Super Admin only (docs/03 §3: schemes are `CRUD`
@@ -36,24 +42,6 @@ const SCHEME_SCOPES = ["default", "model", "account"] as const;
 type SchemeScopeInput = (typeof SCHEME_SCOPES)[number];
 
 /* -------------------------------------------------------------- validation --- */
-
-const emptyToNull = (value: unknown) =>
-  typeof value === "string" && value.trim() === "" ? null : value;
-
-/** Parses a strict `YYYY-MM-DD` and rejects impossible calendar dates. */
-function isValidYmd(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return false;
-  const y = Number(match[1]);
-  const m = Number(match[2]);
-  const d = Number(match[3]);
-  const asDate = new Date(Date.UTC(y, m - 1, d));
-  return (
-    asDate.getUTCFullYear() === y &&
-    asDate.getUTCMonth() === m - 1 &&
-    asDate.getUTCDate() === d
-  );
-}
 
 /**
  * FACTORIES, not module constants. A module-scope `z.object` is evaluated at
@@ -389,6 +377,123 @@ export async function deleteScheme(input: { id: string }): Promise<ActionResult>
 
     revalidatePath("/schemes");
     return { ok: true, message: d.money.schemes.okDeleted };
+  } catch (error) {
+    if (isAuthzError(error)) {
+      return { ok: false, error: d.money.schemes.errNotAuthorized };
+    }
+    return { ok: false, error: d.common.unknownError };
+  }
+}
+
+/* ------------------------------------------------------------------- tiers --- */
+
+/**
+ * Income tiers (023): a scheme's percentages are not fixed — the more the model
+ * earns in a WEEK, the better her split, and the team pool and studio share move
+ * with it.
+ *
+ * The whole ladder saves at once, through `fn_set_commission_tiers` (024), which
+ * replaces it inside ONE transaction. Doing this as a DELETE then an INSERT over
+ * two requests would, on a failed second call, leave the scheme silently back on
+ * its base rates — no error, just quietly wrong money at the next close.
+ *
+ * An empty ladder is a legitimate save: it clears the tiers and returns the
+ * scheme to its own percentages.
+ */
+const tierRow = (d: Dictionary) =>
+  z
+    .object({
+      min_amount: z.coerce
+        .number({ invalid_type_error: d.money.schemes.tiers.errMinRequired })
+        .min(0, d.money.schemes.tiers.errMinNegative),
+      model_percent: percentField(d, "model"),
+      operator_percent: percentField(d, "operator"),
+      studio_percent: percentField(d, "studio"),
+    })
+    // Same 100% rule and the same 2-decimal rounding as a scheme's own split,
+    // but stated separately: a tier has no effective window, so it does not
+    // carry `refineSplit`'s date-ordering check.
+    .refine(
+      (v) =>
+        Math.round((v.model_percent + v.operator_percent + v.studio_percent) * 100) / 100 === 100,
+      { message: d.money.schemes.tiers.errSumNot100, path: ["studio_percent"] },
+    );
+
+const tiersSchema = (d: Dictionary) =>
+  z
+    .object({
+      scheme_id: z.string().uuid(),
+      tiers: z.array(tierRow(d)).max(20, d.money.schemes.tiers.errTooMany),
+    })
+    .refine(
+      (v) => new Set(v.tiers.map((t) => t.min_amount)).size === v.tiers.length,
+      { message: d.money.schemes.tiers.errDuplicateMin, path: ["tiers"] },
+    );
+
+export type TierInput = {
+  min_amount: string | number;
+  model_percent: string | number;
+  operator_percent: string | number;
+  studio_percent: string | number;
+};
+
+export async function saveSchemeTiers(input: {
+  scheme_id: string;
+  tiers: TierInput[];
+}): Promise<ActionResult> {
+  const { supabase, profile } = await requireRole("super_admin");
+  const d = dict(toLocale(profile.locale));
+
+  const parsed = tiersSchema(d).safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: firstIssue(parsed.error, d.money.schemes.tiers.errCheckForm) };
+  }
+
+  // Ascending on the way in, so the table reads as a ladder regardless of the
+  // order the rows were typed in.
+  const tiers = [...parsed.data.tiers]
+    .sort((a, b) => a.min_amount - b.min_amount)
+    .map((t) => ({
+      min_amount: t.min_amount,
+      model_percent: t.model_percent,
+      operator_percent: t.operator_percent,
+      studio_percent: t.studio_percent,
+    }));
+
+  try {
+    const { error } = await supabase.rpc("fn_set_commission_tiers", {
+      p_scheme_id: parsed.data.scheme_id,
+      p_tiers: tiers,
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        error: describeDbError(
+          error.code,
+          {
+            "23503": d.money.schemes.errGone,
+            "23505": d.money.schemes.tiers.errDuplicateMin,
+            "23514": d.money.schemes.tiers.errDbCheck,
+            "42501": d.money.schemes.errNotAuthorized,
+          },
+          d.money.schemes.tiers.errSaveFailed,
+        ),
+      };
+    }
+
+    await writeAudit({
+      action: "scheme.update",
+      entityType: "commission_scheme",
+      entityId: parsed.data.scheme_id,
+      metadata: { op: "tiers", count: tiers.length, tiers },
+    });
+
+    revalidatePath("/schemes");
+    return {
+      ok: true,
+      message: tiers.length === 0 ? d.money.schemes.tiers.okCleared : d.money.schemes.tiers.okSaved,
+    };
   } catch (error) {
     if (isAuthzError(error)) {
       return { ok: false, error: d.money.schemes.errNotAuthorized };

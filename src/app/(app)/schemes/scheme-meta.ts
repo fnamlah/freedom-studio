@@ -1,5 +1,7 @@
 import type { BadgeVariant } from "@/components/ui/badge";
 
+import type { SchemeTier } from "./tier-dialog";
+
 /**
  * Shared, client-safe vocabulary for commission schemes (docs/09 §4, docs/04 §4.9).
  *
@@ -37,6 +39,11 @@ export type SchemeRowView = {
   /** Raw scope keys, carried for the edit dialog. */
   model_id: string | null;
   platform_account_id: string | null;
+  /**
+   * The scheme's income ladder (023), ascending. Empty means the percentages
+   * above always apply, which is how every scheme behaved before tiers existed.
+   */
+  tiers: SchemeTier[];
 };
 
 export const SCOPE_META: Record<SchemeScope, { badge: BadgeVariant; order: number }> = {

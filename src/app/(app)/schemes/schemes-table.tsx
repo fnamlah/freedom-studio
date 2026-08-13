@@ -16,6 +16,7 @@ import { fmt } from "@/lib/i18n/format";
 import { deleteScheme } from "./actions";
 import { SchemeForm, type EditableScheme } from "./scheme-form";
 import { SCOPE_META, SCOPE_ORDER, STATUS_VARIANT, type SchemeRowView } from "./scheme-meta";
+import { TierDialog } from "./tier-dialog";
 
 /**
  * Schemes grouped by scope, in resolution order (account → model → default, most
@@ -32,6 +33,20 @@ export function SchemesTable({
 }) {
   const d = useDict();
   const fm = fmt(useLocale());
+
+  /**
+   * A percentage column, honestly. With income tiers (023) a scheme has no
+   * single model share — it has a range that the week's earnings pick from — so
+   * the cell shows the whole span rather than a base rate that may never be the
+   * one actually paid. Schemes without tiers read exactly as they always did.
+   */
+  function span(row: SchemeRowView, key: "model_percent" | "operator_percent" | "studio_percent") {
+    if (row.tiers.length === 0) return fm.percent(row[key]);
+    const values = [row[key], ...row.tiers.map((t) => t[key])];
+    const low = Math.min(...values);
+    const high = Math.max(...values);
+    return low === high ? fm.percent(low) : `${fm.percent(low)} – ${fm.percent(high)}`;
+  }
 
   if (rows.length === 0) {
     return (
@@ -78,9 +93,9 @@ export function SchemesTable({
                   return (
                     <TR key={row.id}>
                       <TD className="font-medium text-foreground">{row.scopeLabel}</TD>
-                      <TD numeric>{fm.percent(row.model_percent)}</TD>
-                      <TD numeric>{fm.percent(row.operator_percent)}</TD>
-                      <TD numeric>{fm.percent(row.studio_percent)}</TD>
+                      <TD numeric>{span(row, "model_percent")}</TD>
+                      <TD numeric>{span(row, "operator_percent")}</TD>
+                      <TD numeric>{span(row, "studio_percent")}</TD>
                       <TD className="text-muted whitespace-nowrap">
                         {fm.date(row.effective_from)}
                         {" – "}
@@ -94,6 +109,16 @@ export function SchemesTable({
                       {canWrite ? (
                         <TD align="right">
                           <div className="flex items-center justify-end gap-2">
+                            <TierDialog
+                              schemeId={row.id}
+                              scopeLabel={`${d.money.schemes.scope[row.scope].label} · ${row.scopeLabel}`}
+                              base={{
+                                model_percent: row.model_percent,
+                                operator_percent: row.operator_percent,
+                                studio_percent: row.studio_percent,
+                              }}
+                              tiers={row.tiers}
+                            />
                             <SchemeForm mode="edit" scheme={toEditable(row)} />
                             {row.isDefault ? (
                               <Button

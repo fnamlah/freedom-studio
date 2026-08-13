@@ -658,6 +658,49 @@ export const moneyEn = {
     okCreated: "Commission scheme added.",
     okUpdated: "Commission scheme updated.",
     okDeleted: "Commission scheme deleted.",
+
+    /* ------------------------------------------------------------- tiers --- */
+    tiers: {
+      cta: "Tiers",
+      ctaCount: (n: number) => `Tiers · ${n}`,
+
+      title: "Income tiers",
+      description:
+        "The split changes with what the model earns. Add a tier for each level; the whole week is paid at the rate she reaches.",
+      basis:
+        "A tier is chosen by the model's TOTAL net for the week — every payout in that week counted together, not one statement at a time.",
+      cliff:
+        "Reaching a threshold re-prices the whole week, so a little more earned near a threshold can be worth a lot.",
+
+      baseRow: "Below the first tier",
+      baseHint: "The scheme's own percentages",
+
+      colFrom: "Weekly net from",
+      colModel: "Model",
+      colTeam: "Team pool",
+      colStudio: "Studio",
+
+      add: "Add tier",
+      remove: "Remove tier",
+      save: "Save tiers",
+      empty: "No tiers yet. This scheme always pays its base percentages.",
+      emptyHint: "Add a tier to make the split rise with what she earns.",
+      sumRule: "Each tier must total 100%",
+
+      errMinRequired: "Enter the amount this tier starts at.",
+      errMinNegative: "A tier can't start below zero.",
+      errSumNot100: "Each tier's three percentages must total exactly 100%.",
+      errDuplicateMin: "Two tiers start at the same amount. Each threshold must be different.",
+      errTooMany: "That's more tiers than a scheme can hold.",
+      errCheckForm: "Please check the tiers and try again.",
+      errDbCheck: "A tier breaks a database rule — each one must total 100%.",
+      errSaveFailed: "Could not save the tiers. Please try again.",
+
+      okSaved: "Income tiers saved.",
+      okCleared: "Income tiers removed — this scheme is back to its base percentages.",
+      toastOk: "Tiers updated",
+      toastErr: "Couldn't save tiers",
+    },
   },
 };
 
@@ -1317,5 +1360,48 @@ export const moneyRu: typeof moneyEn = {
     okCreated: "Схема комиссий добавлена.",
     okUpdated: "Схема комиссий обновлена.",
     okDeleted: "Схема комиссий удалена.",
+
+    /* ------------------------------------------------------------ ступени --- */
+    tiers: {
+      cta: "Ступени",
+      ctaCount: (n: number) => `Ступени · ${n}`,
+
+      title: "Ступени дохода",
+      description:
+        "Распределение меняется в зависимости от того, сколько зарабатывает модель. Добавьте ступень для каждого уровня; вся неделя оплачивается по достигнутой ставке.",
+      basis:
+        "Ступень определяется по ОБЩЕМУ чистому доходу модели за неделю — все выплаты за эту неделю считаются вместе, а не каждый отчёт отдельно.",
+      cliff:
+        "При достижении порога вся неделя пересчитывается по новой ставке, поэтому небольшая сумма рядом с порогом может стоить многого.",
+
+      baseRow: "Ниже первой ступени",
+      baseHint: "Собственные проценты схемы",
+
+      colFrom: "Чистыми за неделю от",
+      colModel: "Модель",
+      colTeam: "Пул команды",
+      colStudio: "Студия",
+
+      add: "Добавить ступень",
+      remove: "Удалить ступень",
+      save: "Сохранить ступени",
+      empty: "Ступеней пока нет. Схема всегда платит по базовым процентам.",
+      emptyHint: "Добавьте ступень, чтобы доля росла вместе с заработком.",
+      sumRule: "Сумма каждой ступени должна быть 100%",
+
+      errMinRequired: "Укажите сумму, с которой начинается ступень.",
+      errMinNegative: "Ступень не может начинаться ниже нуля.",
+      errSumNot100: "Три процента каждой ступени должны составлять ровно 100%.",
+      errDuplicateMin: "Две ступени начинаются с одной суммы. Каждый порог должен быть свой.",
+      errTooMany: "Столько ступеней схема вместить не может.",
+      errCheckForm: "Проверьте ступени и попробуйте снова.",
+      errDbCheck: "Ступень нарушает правило базы данных — сумма каждой должна быть 100%.",
+      errSaveFailed: "Не удалось сохранить ступени. Попробуйте снова.",
+
+      okSaved: "Ступени дохода сохранены.",
+      okCleared: "Ступени дохода удалены — схема вернулась к базовым процентам.",
+      toastOk: "Ступени обновлены",
+      toastErr: "Не удалось сохранить ступени",
+    },
   },
 };

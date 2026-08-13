@@ -11,6 +11,7 @@ import { getDict, getLocale } from "@/lib/i18n/server";
 import { ResolutionExplainer } from "./resolution-explainer";
 import { SchemeForm } from "./scheme-form";
 import { SchemesTable } from "./schemes-table";
+import type { SchemeTier } from "./tier-dialog";
 import { deriveScope, deriveStatus, SCOPE_META, type SchemeRowView } from "./scheme-meta";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -37,7 +38,7 @@ export default async function SchemesPage() {
   // renders the same instant through the locale formatter.
   const todayIso = isoDate(new Date());
 
-  const [schemesRes, modelsRes, accountsRes, platformsRes] = await Promise.all([
+  const [schemesRes, modelsRes, accountsRes, platformsRes, tiersRes] = await Promise.all([
     supabase
       .from("commission_schemes")
       .select(
@@ -50,12 +51,29 @@ export default async function SchemesPage() {
       .select("id, username, model_id, platform_id")
       .order("username", { ascending: true }),
     supabase.from("platforms").select("id, name"),
+    // Income tiers (023), ascending so each scheme's ladder arrives in order.
+    supabase
+      .from("commission_tiers")
+      .select("scheme_id, min_amount, model_percent, operator_percent, studio_percent")
+      .order("min_amount", { ascending: true }),
   ]);
 
   const schemes = schemesRes.data ?? [];
   const models = modelsRes.data ?? [];
   const accounts = accountsRes.data ?? [];
   const platforms = platformsRes.data ?? [];
+
+  const tiersByScheme = new Map<string, SchemeTier[]>();
+  for (const tier of tiersRes.data ?? []) {
+    const ladder = tiersByScheme.get(tier.scheme_id) ?? [];
+    ladder.push({
+      min_amount: tier.min_amount,
+      model_percent: tier.model_percent,
+      operator_percent: tier.operator_percent,
+      studio_percent: tier.studio_percent,
+    });
+    tiersByScheme.set(tier.scheme_id, ladder);
+  }
 
   const modelName = new Map(models.map((m) => [m.id, m.stage_name]));
   const platformName = new Map(platforms.map((p) => [p.id, p.name]));
@@ -91,6 +109,7 @@ export default async function SchemesPage() {
         isDefault: scope === "default",
         model_id: s.model_id,
         platform_account_id: s.platform_account_id,
+        tiers: tiersByScheme.get(s.id) ?? [],
       } satisfies SchemeRowView;
     })
     .sort((a, b) => {

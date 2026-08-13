@@ -369,6 +369,54 @@ export type Database = {
           },
         ]
       }
+      commission_tiers: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          min_amount: number
+          model_percent: number
+          operator_percent: number
+          scheme_id: string
+          studio_percent: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          min_amount: number
+          model_percent: number
+          operator_percent: number
+          scheme_id: string
+          studio_percent: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          min_amount?: number
+          model_percent?: number
+          operator_percent?: number
+          scheme_id?: string
+          studio_percent?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commission_tiers_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commission_tiers_scheme_id_fkey"
+            columns: ["scheme_id"]
+            isOneToOne: false
+            referencedRelation: "commission_schemes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       doc_categories: {
         Row: {
           ai_enabled: boolean
@@ -404,6 +452,75 @@ export type Database = {
           sort?: number
         }
         Relationships: []
+      }
+      doc_extractions: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: Database["public"]["Enums"]["doc_extraction_kind"]
+          last_error: string | null
+          model: string | null
+          payload: Json
+          provider: Database["public"]["Enums"]["ai_provider"] | null
+          result: Json | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_id: string
+          source_kind: Database["public"]["Enums"]["doc_source_kind"]
+          state: Database["public"]["Enums"]["doc_extraction_state"]
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: Database["public"]["Enums"]["doc_extraction_kind"]
+          last_error?: string | null
+          model?: string | null
+          payload: Json
+          provider?: Database["public"]["Enums"]["ai_provider"] | null
+          result?: Json | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_id: string
+          source_kind: Database["public"]["Enums"]["doc_source_kind"]
+          state?: Database["public"]["Enums"]["doc_extraction_state"]
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: Database["public"]["Enums"]["doc_extraction_kind"]
+          last_error?: string | null
+          model?: string | null
+          payload?: Json
+          provider?: Database["public"]["Enums"]["ai_provider"] | null
+          result?: Json | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_id?: string
+          source_kind?: Database["public"]["Enums"]["doc_source_kind"]
+          state?: Database["public"]["Enums"]["doc_extraction_state"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "doc_extractions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "doc_extractions_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       document_share_views: {
         Row: {
@@ -801,6 +918,66 @@ export type Database = {
             columns: ["operator_id"]
             isOneToOne: false
             referencedRelation: "v_operator_directory"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expenses: {
+        Row: {
+          amount: number
+          category: string | null
+          created_at: string
+          created_by: string
+          currency: string
+          description: string | null
+          id: string
+          incurred_on: string
+          library_file_id: string | null
+          source: Database["public"]["Enums"]["entry_source"]
+          updated_at: string
+          vendor: string
+        }
+        Insert: {
+          amount: number
+          category?: string | null
+          created_at?: string
+          created_by: string
+          currency?: string
+          description?: string | null
+          id?: string
+          incurred_on: string
+          library_file_id?: string | null
+          source?: Database["public"]["Enums"]["entry_source"]
+          updated_at?: string
+          vendor: string
+        }
+        Update: {
+          amount?: number
+          category?: string | null
+          created_at?: string
+          created_by?: string
+          currency?: string
+          description?: string | null
+          id?: string
+          incurred_on?: string
+          library_file_id?: string | null
+          source?: Database["public"]["Enums"]["entry_source"]
+          updated_at?: string
+          vendor?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expenses_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_library_file_id_fkey"
+            columns: ["library_file_id"]
+            isOneToOne: false
+            referencedRelation: "library_files"
             referencedColumns: ["id"]
           },
         ]
@@ -1691,7 +1868,6 @@ export type Database = {
           created_at: string
           created_by: string
           display_name: string
-          staff_role: Database["public"]["Enums"]["staff_role"]
           email: string | null
           id: string
           legal_name: string
@@ -1699,6 +1875,7 @@ export type Database = {
           payment_details: Json | null
           phone: string | null
           profile_id: string | null
+          staff_role: Database["public"]["Enums"]["staff_role"]
           start_date: string | null
           status: Database["public"]["Enums"]["model_status"]
           updated_at: string
@@ -1708,7 +1885,6 @@ export type Database = {
           created_at?: string
           created_by: string
           display_name: string
-          staff_role?: Database["public"]["Enums"]["staff_role"]
           email?: string | null
           id?: string
           legal_name: string
@@ -1716,6 +1892,7 @@ export type Database = {
           payment_details?: Json | null
           phone?: string | null
           profile_id?: string | null
+          staff_role?: Database["public"]["Enums"]["staff_role"]
           start_date?: string | null
           status?: Database["public"]["Enums"]["model_status"]
           updated_at?: string
@@ -1725,7 +1902,6 @@ export type Database = {
           created_at?: string
           created_by?: string
           display_name?: string
-          staff_role?: Database["public"]["Enums"]["staff_role"]
           email?: string | null
           id?: string
           legal_name?: string
@@ -1733,6 +1909,7 @@ export type Database = {
           payment_details?: Json | null
           phone?: string | null
           profile_id?: string | null
+          staff_role?: Database["public"]["Enums"]["staff_role"]
           start_date?: string | null
           status?: Database["public"]["Enums"]["model_status"]
           updated_at?: string
@@ -2605,6 +2782,10 @@ export type Database = {
           subject_name: string
         }[]
       }
+      fn_set_commission_tiers: {
+        Args: { p_scheme_id: string; p_tiers: Json }
+        Returns: number
+      }
       fn_snapshot_forecast: {
         Args: { p_months_ahead?: number }
         Returns: number
@@ -2675,6 +2856,13 @@ export type Database = {
         | "overridden"
         | "skipped"
         | "failed"
+      doc_extraction_kind:
+        | "earnings"
+        | "sessions"
+        | "expenses"
+        | "document_meta"
+      doc_extraction_state: "proposed" | "applied" | "dismissed" | "failed"
+      doc_source_kind: "library_file" | "document"
       document_type:
         | "government_id"
         | "passport"
@@ -2857,6 +3045,14 @@ export const Constants = {
         "skipped",
         "failed",
       ],
+      doc_extraction_kind: [
+        "earnings",
+        "sessions",
+        "expenses",
+        "document_meta",
+      ],
+      doc_extraction_state: ["proposed", "applied", "dismissed", "failed"],
+      doc_source_kind: ["library_file", "document"],
       document_type: [
         "government_id",
         "passport",
@@ -2937,3 +3133,5 @@ export type HermesApprovalRow = PublicSchema["Tables"]["hermes_approvals"]["Row"
 export type HermesRunRow = PublicSchema["Tables"]["hermes_runs"]["Row"];
 export type HermesJobRunRow = PublicSchema["Tables"]["hermes_job_runs"]["Row"];
 export type HermesChannelRow = PublicSchema["Tables"]["hermes_channels"]["Row"];
+
+export type CommissionTierRow = PublicSchema["Tables"]["commission_tiers"]["Row"];

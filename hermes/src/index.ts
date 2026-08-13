@@ -31,6 +31,27 @@ async function main(): Promise<void> {
   registerLoop("approval-sweep");
   loops.push(runApprovalSweep());
 
+  // Say plainly at boot whether Hermes can think. Without a provider key the
+  // worker still starts, still polls, and still answers slash commands — every
+  // loop heartbeats and `railway logs` looks entirely healthy — while free
+  // text gets "no AI provider key is configured". That combination is how a
+  // missing key reaches a colleague in Telegram instead of whoever deployed.
+  if (!env.MOONSHOT_API_KEY && !env.ZHIPU_API_KEY) {
+    console.warn(
+      "[hermes] NO PROVIDER KEY (MOONSHOT_API_KEY / ZHIPU_API_KEY) — " +
+        "slash commands work, conversation does not",
+    );
+  } else {
+    console.info(
+      `[hermes] provider keys present: ${[
+        env.MOONSHOT_API_KEY ? "moonshot" : null,
+        env.ZHIPU_API_KEY ? "zhipu" : null,
+      ]
+        .filter(Boolean)
+        .join(", ")}`,
+    );
+  }
+
   if (env.TELEGRAM_BOT_TOKEN) {
     const { registerBotCommands } = await import("./telegram/register-commands.js");
     void registerBotCommands(); // fire-and-forget: cosmetic, must not delay boot

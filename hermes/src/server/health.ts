@@ -53,8 +53,15 @@ export function startHealthServer(): Server {
         loops[name] = { last, stale };
       }
 
+      // Reported, deliberately NOT a 503: a worker with no provider key is
+      // degraded in one capability, not unhealthy — its jobs, approvals and
+      // slash commands are all exact database reads that need no model. But it
+      // must be visible here, because "every loop heartbeats" was true on the
+      // day conversation was silently unavailable.
+      const conversational = Boolean(env.MOONSHOT_API_KEY || env.ZHIPU_API_KEY);
+
       res.writeHead(anyStale ? 503 : 200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ status: anyStale ? "degraded" : "ok", loops }));
+      res.end(JSON.stringify({ status: anyStale ? "degraded" : "ok", loops, conversational }));
       return;
     }
 

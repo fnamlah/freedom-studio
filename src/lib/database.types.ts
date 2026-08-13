@@ -2664,6 +2664,7 @@ export type Database = {
         | "classify"
         | "analyse"
         | "agent"
+        | "extract"
       ai_review_status:
         | "pending"
         | "suggested"
@@ -2842,6 +2843,7 @@ export const Constants = {
         "classify",
         "analyse",
         "agent",
+        "extract",
       ],
       ai_review_status: [
         "pending",

@@ -9,7 +9,12 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { appBaseUrl, optionalEnv } from "@/lib/env";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
-import { isAuthzError } from "@/lib/supabase/admin";
+import { guardedAdminClient, isAuthzError } from "@/lib/supabase/admin";
+import { analyseDraft } from "@/lib/ai/analyse-document";
+import { checkBudget, recordUsage } from "@/lib/ai/budget";
+import { isAiConfigured } from "@/lib/ai/provider";
+import type { AiSupabaseClient } from "@/lib/ai/types";
+import type { KeyFigure } from "@/lib/ai/classify";
 import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 import {
@@ -160,6 +165,128 @@ function hashToken(token: string): string {
 /** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
 function dbMessages(d: Dictionary): SqlStateMessages {
   return { "23503": d.documents.actions.modelGone, "23505": d.documents.actions.documentExists, "23514": d.documents.actions.dbRule };
+}
+
+/* --------------------------------------------------- analyse before upload --- */
+
+export type DraftAnalysis =
+  | {
+      ok: true;
+      /** Whatever the AI could read. Fields it could not read are absent. */
+      meta: { docType?: string; title?: string; issuedDate?: string; expiresAt?: string };
+      summary: string;
+      keyFigures: KeyFigure[];
+    }
+  | { ok: false; error: string; reason?: string };
+
+/**
+ * Read a just-picked file so the upload form can fill itself in.
+ *
+ * This runs BEFORE anything is stored: no `documents` row, no object in the
+ * bucket. That is deliberate — a file the uploader is still deciding about
+ * should not leave a trace, and analysing the bytes in hand avoids a
+ * store-then-download round trip.
+ *
+ * Consent: the uploader ticks "read this file" in the dialog, and that tick is
+ * what is passed to the compliance channel. It is the same per-file, per-person
+ * decision the stored-document opt-in represents (docs/12 §6) — taken a moment
+ * earlier, while they are looking at the file. Nothing is analysed without it.
+ *
+ * The result is a SUGGESTION. It is returned to the browser and shown in the
+ * form; it is never written anywhere until the human submits.
+ */
+export async function analyseDraftDocument(formData: FormData): Promise<DraftAnalysis> {
+  const { supabase, user, profile } = await requireRole("super_admin", "manager");
+  const locale = toLocale(profile.locale);
+  const d = dict(locale);
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: d.documents.actions.chooseFile };
+  }
+  if (file.size > MAX_FILE_BYTES) {
+    return { ok: false, error: d.documents.actions.tooLarge(MAX_FILE_MB) };
+  }
+  const mime = file.type || "application/octet-stream";
+  if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(mime)) {
+    return { ok: false, error: d.documents.actions.badType };
+  }
+
+  if (!(await isAiConfigured())) {
+    return { ok: false, error: d.aiRuntime.notConfigured, reason: "not_configured" };
+  }
+
+  // Metered and capped exactly like every other provider call. The service
+  // client is required for the GLOBAL budget window, which spans users.
+  let admin: AiSupabaseClient;
+  try {
+    ({ admin } = await guardedAdminClient(["super_admin", "manager"]));
+  } catch (error) {
+    if (isAuthzError(error)) return { ok: false, error: d.documents.actions.forbidden };
+    throw error;
+  }
+  const budget = await checkBudget(user.id, admin, locale);
+  if (!budget.ok) {
+    return { ok: false, error: budget.reason ?? d.aiRuntime.budgetReached, reason: budget.status };
+  }
+
+  const started = Date.now();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const result = await analyseDraft(bytes, mime, supabase, locale);
+
+  if (result.status === "analysed") {
+    await recordUsage(
+      {
+        userId: user.id,
+        requestKind: "extract",
+        provider: result.provider,
+        model: result.model,
+        promptTokens: result.usage.promptTokens,
+        completionTokens: result.usage.completionTokens,
+        status: "ok",
+        durationMs: Date.now() - started,
+      },
+      admin,
+    );
+    // A crossing happened, so it is audited — with the file's shape, never its
+    // contents, and no document id because no document exists yet.
+    await writeAudit({
+      action: "ai.analyse",
+      entityType: "document_draft",
+      metadata: { mime_type: mime, size_bytes: file.size, provider: result.provider, model: result.model },
+    });
+    return {
+      ok: true,
+      meta: {
+        docType: result.documentMeta.docType,
+        title: result.documentMeta.title,
+        issuedDate: result.documentMeta.issuedDate,
+        expiresAt: result.documentMeta.expiresAt,
+      },
+      summary: result.summary,
+      keyFigures: result.keyFigures,
+    };
+  }
+
+  if (result.status === "skipped") {
+    return { ok: false, error: d.documents.actions.analyseSkipped, reason: result.reason };
+  }
+  if (result.provider) {
+    await recordUsage(
+      {
+        userId: user.id,
+        requestKind: "extract",
+        provider: result.provider,
+        model: result.model ?? "unknown",
+        promptTokens: result.usage?.promptTokens ?? 0,
+        completionTokens: result.usage?.completionTokens ?? 0,
+        status: "error",
+        durationMs: Date.now() - started,
+      },
+      admin,
+    );
+  }
+  return { ok: false, error: d.documents.actions.analyseFailed, reason: result.reason };
 }
 
 export async function uploadDocument(formData: FormData): Promise<ActionResult> {

@@ -126,7 +126,7 @@ export interface RecordUsageInput {
    * Must stay in step with the `ai_request_kind` DB enum — this union is
    * hand-maintained and silently missed `agent` when migration 015 added it.
    */
-  requestKind: "chat" | "embedding" | "report" | "classify" | "analyse" | "agent";
+  requestKind: "chat" | "embedding" | "report" | "classify" | "analyse" | "agent" | "extract";
   provider: ProviderId;
   model: string;
   promptTokens: number;

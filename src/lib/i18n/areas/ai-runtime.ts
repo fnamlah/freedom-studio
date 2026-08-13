@@ -13,6 +13,7 @@ export const aiRuntimeEn = {
   documentNotFound: "Document not found.",
   notOptedIn: "This document is not opted in to AI analysis.",
   budgetReached: "AI budget reached. Try again later.",
+  notConfigured: "AI is not configured, so the file cannot be read automatically.",
   totpEnrollFailed: "Could not start TOTP enrollment.",
   totpChallengeFailed: "Could not start the TOTP challenge.",
 };
@@ -23,6 +24,7 @@ export const aiRuntimeRu: typeof aiRuntimeEn = {
   documentNotFound: "Документ не найден.",
   notOptedIn: "Для этого документа не включён ИИ-анализ.",
   budgetReached: "Достигнут лимит расходов на ИИ. Попробуйте позже.",
+  notConfigured: "ИИ не настроен — файл нельзя прочитать автоматически.",
   totpEnrollFailed: "Не удалось начать подключение аутентификатора.",
   totpChallengeFailed: "Не удалось запросить код подтверждения.",
 };

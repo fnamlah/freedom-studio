@@ -81,6 +81,10 @@ export const documentsEn = {
   /* --------------------------------------------------------- upload dialog --- */
 
   uploadCta: "Upload document",
+  aiReading: "Reading the document…",
+  aiFilledNote: "Filled in from the document — check it before saving.",
+  aiFilledNothing: "Nothing could be read from this document; fill the details in by hand.",
+  aiFilledBadge: "from the document",
   uploadTitle: "Upload a compliance document",
   uploadDescription:
     "Stored in a private bucket. Retrieval is only ever a 60-second signed URL or a revocable share link — every access is audited (docs/06).",
@@ -211,6 +215,9 @@ export const documentsEn = {
 
   actions: {
     checkForm: "Please check the form and try again.",
+    forbidden: "You are not allowed to do that.",
+    analyseSkipped: "That file could not be read automatically — fill the details in by hand.",
+    analyseFailed: "Reading the file failed. Fill the details in by hand.",
     invalidDate: "Enter a valid date (YYYY-MM-DD).",
     chooseModel: "Choose a model.",
     titleRequired: "Give the document a title.",
@@ -334,6 +341,10 @@ export const documentsRu: typeof documentsEn = {
   /* --------------------------------------------------------- upload dialog --- */
 
   uploadCta: "Загрузить документ",
+  aiReading: "Читаю документ…",
+  aiFilledNote: "Заполнено по документу — проверьте перед сохранением.",
+  aiFilledNothing: "Из этого документа ничего не удалось прочитать; заполните поля вручную.",
+  aiFilledBadge: "из документа",
   uploadTitle: "Загрузка документа соответствия",
   uploadDescription:
     "Документ хранится в приватном бакете. Получить его можно только по подписанной ссылке на 60 секунд или по отзываемой ссылке доступа — каждое обращение фиксируется (docs/06).",
@@ -465,6 +476,9 @@ export const documentsRu: typeof documentsEn = {
 
   actions: {
     checkForm: "Проверьте форму и попробуйте ещё раз.",
+    forbidden: "У вас нет прав на это действие.",
+    analyseSkipped: "Файл не удалось прочитать автоматически — заполните поля вручную.",
+    analyseFailed: "Не удалось прочитать файл. Заполните поля вручную.",
     invalidDate: "Введите корректную дату (ГГГГ-ММ-ДД).",
     chooseModel: "Выберите модель.",
     titleRequired: "Укажите название документа.",

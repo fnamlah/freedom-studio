@@ -12,23 +12,21 @@ import { getDict, getLocale } from "@/lib/i18n/server";
 
 import { GenerateReportButton } from "./generate-report-button";
 import { ReportMarkdown } from "./report-markdown";
+import { PROVIDER_LABELS, type ProviderId } from "@/lib/ai/types";
 
 export async function generateMetadata(): Promise<Metadata> {
   return { title: (await getDict()).adminAi.reports.metaTitle };
 }
 
-/** Human labels for the two switchable providers (docs/11 §3). */
-const PROVIDER_LABEL: Record<string, string> = {
-  moonshot: "Kimi K3 · Moonshot",
-  zhipu: "GLM 5.2 · Zhipu",
-};
 
 type ReportRow = {
   id: string;
   report_month: string;
   title: string;
   content_md: string;
-  provider: string;
+  // The DB column is the `ai_provider` enum; typing it `string` here was what
+  // forced the old label map to be keyed `string` and lose exhaustiveness.
+  provider: ProviderId;
   model: string;
   created_at: string;
 };
@@ -82,7 +80,7 @@ export default async function AiReportsPage() {
       ) : (
         <p className="text-xs text-muted">
           {d.activeProvider}{" "}
-          <span className="text-foreground">{PROVIDER_LABEL[activeProvider] ?? activeProvider}</span>
+          <span className="text-foreground">{PROVIDER_LABELS[activeProvider]}</span>
         </p>
       )}
 
@@ -109,7 +107,7 @@ export default async function AiReportsPage() {
                       <span className="flex items-center gap-2 text-xs text-muted">
                         <span>{fm.month(report.report_month)}</span>
                         <Badge variant="muted">
-                          {PROVIDER_LABEL[report.provider] ?? report.provider}
+                          {PROVIDER_LABELS[report.provider]}
                         </Badge>
                       </span>
                     </summary>
@@ -146,7 +144,7 @@ function ReportCard({
         action={
           <div className="flex items-center gap-2">
             {highlighted ? <Badge variant="primary">{d.latest}</Badge> : null}
-            <Badge variant="muted">{PROVIDER_LABEL[report.provider] ?? report.provider}</Badge>
+            <Badge variant="muted">{PROVIDER_LABELS[report.provider]}</Badge>
           </div>
         }
       />

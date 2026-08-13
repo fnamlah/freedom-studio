@@ -10,6 +10,7 @@ import { requireRole } from "@/lib/auth/guard";
 import { appBaseUrl, optionalEnv } from "@/lib/env";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 import {
   ALLOWED_MIME_TYPES,
@@ -115,10 +116,6 @@ const createShareSchema = (d: Dictionary) =>
 
 /* ------------------------------------------------------------------ helpers --- */
 
-function firstIssue(error: z.ZodError, d: Dictionary): string {
-  return error.issues[0]?.message ?? d.documents.actions.checkForm;
-}
-
 /**
  * `documents.storage_path` is recorded WITH the bucket prefix (docs/06 §2.1),
  * while the storage SDK wants a key relative to the bucket. Mirror the Edge
@@ -149,19 +146,6 @@ function hashToken(token: string): string {
   return createHash("sha256").update(`${SHARE_TOKEN_PEPPER}${token}`).digest("hex");
 }
 
-function describeDbError(code: string | undefined, d: Dictionary): string {
-  if (code === "23503") {
-    return d.documents.actions.modelGone;
-  }
-  if (code === "23505") {
-    return d.documents.actions.documentExists;
-  }
-  if (code === "23514") {
-    return d.documents.actions.dbRule;
-  }
-  return d.documents.actions.saveFailed;
-}
-
 /* ------------------------------------------------------------------ upload --- */
 
 /**
@@ -173,6 +157,11 @@ function describeDbError(code: string | undefined, d: Dictionary): string {
  * app-layer (type/size/MIME allow-list) purely for UX — the private bucket's RLS
  * is the authority.
  */
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages(d: Dictionary): SqlStateMessages {
+  return { "23503": d.documents.actions.modelGone, "23505": d.documents.actions.documentExists, "23514": d.documents.actions.dbRule };
+}
+
 export async function uploadDocument(formData: FormData): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin", "manager");
   const d = dict(toLocale(profile.locale));
@@ -186,7 +175,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
     notes: formData.get("notes"),
   });
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.documents.actions.checkForm) };
   }
   const meta = parsed.data;
 
@@ -242,7 +231,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
     if (insertError || !created) {
       // Roll back the orphaned object — metadata is the system of record.
       await supabase.storage.from(DOCUMENTS_BUCKET).remove([key]);
-      return { ok: false, error: describeDbError(insertError?.code, d) };
+      return { ok: false, error: describeDbError(insertError?.code, dbMessages(d), d.documents.actions.saveFailed) };
     }
 
     await writeAudit({
@@ -350,7 +339,7 @@ export async function createShare(input: CreateShareInput): Promise<CreateShareR
 
   const parsed = createShareSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.documents.actions.checkForm) };
   }
   const data = parsed.data;
 

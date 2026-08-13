@@ -15,6 +15,26 @@ export type AiSupabaseClient = SupabaseClient<Database, "public">;
 /** The two switchable providers (docs/11 §2.1). Tied to the DB enum. */
 export type ProviderId = Database["public"]["Enums"]["ai_provider"];
 
+/**
+ * Product names for the two switchable providers (docs/11 §3). Model + vendor
+ * proper nouns, so they are NEVER translated — which is why they live here as
+ * constants rather than in the dictionary.
+ *
+ * `Record<ProviderId, …>` on purpose: one former copy was keyed `string`, which
+ * silently dropped exhaustiveness and forced `?? provider` fallbacks at its
+ * call sites.
+ */
+export const PROVIDER_LABELS: Record<ProviderId, string> = {
+  moonshot: "Kimi K3 · Moonshot",
+  zhipu: "GLM 5.2 · Zhipu",
+};
+
+/** The env var each provider's key is read from — shown when one is missing. */
+export const PROVIDER_KEY_ENV: Record<ProviderId, string> = {
+  moonshot: "MOONSHOT_API_KEY",
+  zhipu: "ZHIPU_API_KEY",
+};
+
 /** Embedding source kinds (docs/11 §6.1). Tied to the DB enum. */
 export type EmbeddingSource = Database["public"]["Enums"]["embedding_source"];
 

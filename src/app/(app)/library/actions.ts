@@ -9,6 +9,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 import {
   MAX_UPLOAD_BYTES,
@@ -80,10 +81,6 @@ const categorizeSchema = () =>
 
 /* ------------------------------------------------------------------ helpers --- */
 
-function firstIssue(error: z.ZodError, d: Dictionary): string {
-  return error.issues[0]?.message ?? d.library.actions.checkForm;
-}
-
 /** Reduces a filename to a safe single path segment; preserves a readable name. */
 function sanitizeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? name;
@@ -95,19 +92,6 @@ function sanitizeFilename(name: string): string {
     .replace(/^[_.]+/, "")
     .slice(0, 180);
   return cleaned.length > 0 ? cleaned : "file";
-}
-
-function describeDbError(code: string | undefined, d: Dictionary): string {
-  if (code === "23503") {
-    return d.library.actions.categoryGone;
-  }
-  if (code === "23505") {
-    return d.library.actions.fileExists;
-  }
-  if (code === "23514") {
-    return d.library.actions.dbRule;
-  }
-  return d.library.actions.saveFailed;
 }
 
 /* ------------------------------------------------------------------ upload --- */
@@ -125,6 +109,11 @@ function describeDbError(code: string | undefined, d: Dictionary): string {
  * A pending file will TRANSIT the provider once when classified — the honest
  * limitation of docs/12 §6, surfaced to the uploader by the exemption notice.
  */
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages(d: Dictionary): SqlStateMessages {
+  return { "23503": d.library.actions.categoryGone, "23505": d.library.actions.fileExists, "23514": d.library.actions.dbRule };
+}
+
 export async function uploadLibraryFile(formData: FormData): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin", "manager");
   const d = dict(toLocale(profile.locale));
@@ -136,7 +125,7 @@ export async function uploadLibraryFile(formData: FormData): Promise<ActionResul
     ai_exempt: formData.get("ai_exempt"),
   });
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.library.actions.checkForm) };
   }
   const meta = parsed.data;
   const folderPath = normalizeFolderPath(meta.folder_path);
@@ -204,7 +193,7 @@ export async function uploadLibraryFile(formData: FormData): Promise<ActionResul
     if (insertError || !created) {
       // Roll back the orphaned object — metadata is the system of record.
       await supabase.storage.from(LIBRARY_BUCKET).remove([storagePath]);
-      return { ok: false, error: describeDbError(insertError?.code, d) };
+      return { ok: false, error: describeDbError(insertError?.code, dbMessages(d), d.library.actions.saveFailed) };
     }
 
     // docs/12 §3: record the exemption status AT UPLOAD, provably after the fact.
@@ -258,7 +247,7 @@ export async function categorizeLibraryFile(input: {
 
   const parsed = categorizeSchema().safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.library.actions.checkForm) };
   }
   const { file_id, decision, category_id } = parsed.data;
 

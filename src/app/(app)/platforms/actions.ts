@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
  * Platforms & platform-accounts CRUD — Super Admin + Manager only
@@ -137,32 +138,17 @@ export type UpdatePlatformAccountInput = {
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError, d: Dictionary): string {
-  return error.issues[0]?.message ?? d.studio.platforms.errForm;
-}
-
-/** Maps a Postgres error to a friendly message; DB constraints back-stop zod. */
-function describePlatformError(code: string | undefined, d: Dictionary): string {
-  if (code === "23505") {
-    return d.studio.platforms.errPlatformDuplicate;
-  }
-  return d.studio.platforms.errPlatformSaveFailed;
-}
-
-function describeAccountError(code: string | undefined, d: Dictionary): string {
-  if (code === "23505") {
-    return d.studio.platforms.errAccountDuplicate;
-  }
-  if (code === "23503") {
-    return d.studio.platforms.errAccountFk;
-  }
-  if (code === "23514") {
-    return d.studio.platforms.errAccountCheck;
-  }
-  return d.studio.platforms.errAccountSaveFailed;
-}
-
 /* --------------------------------------------------------- platforms: create --- */
+
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages1(d: Dictionary): SqlStateMessages {
+  return { "23505": d.studio.platforms.errPlatformDuplicate };
+}
+
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages2(d: Dictionary): SqlStateMessages {
+  return { "23505": d.studio.platforms.errAccountDuplicate, "23503": d.studio.platforms.errAccountFk, "23514": d.studio.platforms.errAccountCheck };
+}
 
 export async function createPlatform(input: CreatePlatformInput): Promise<ActionResult> {
   const { supabase, profile } = await requireRole("super_admin", "manager");
@@ -170,7 +156,7 @@ export async function createPlatform(input: CreatePlatformInput): Promise<Action
 
   const parsed = createPlatformSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.platforms.errForm) };
   }
   const data = parsed.data;
 
@@ -186,7 +172,7 @@ export async function createPlatform(input: CreatePlatformInput): Promise<Action
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describePlatformError(error?.code, d) };
+      return { ok: false, error: describeDbError(error?.code, dbMessages1(d), d.studio.platforms.errPlatformSaveFailed) };
     }
 
     await writeAudit({
@@ -214,7 +200,7 @@ export async function updatePlatform(input: UpdatePlatformInput): Promise<Action
 
   const parsed = updatePlatformSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.platforms.errForm) };
   }
   const data = parsed.data;
 
@@ -230,7 +216,7 @@ export async function updatePlatform(input: UpdatePlatformInput): Promise<Action
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describePlatformError(error.code, d) };
+      return { ok: false, error: describeDbError(error.code, dbMessages1(d), d.studio.platforms.errPlatformSaveFailed) };
     }
     if (!updated) {
       return { ok: false, error: d.studio.platforms.errPlatformGone };
@@ -324,7 +310,7 @@ export async function createPlatformAccount(
 
   const parsed = createAccountSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.platforms.errForm) };
   }
   const data = parsed.data;
 
@@ -342,7 +328,7 @@ export async function createPlatformAccount(
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeAccountError(error?.code, d) };
+      return { ok: false, error: describeDbError(error?.code, dbMessages2(d), d.studio.platforms.errAccountSaveFailed) };
     }
 
     await writeAudit({
@@ -378,7 +364,7 @@ export async function updatePlatformAccount(
 
   const parsed = updateAccountSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.platforms.errForm) };
   }
   const data = parsed.data;
 
@@ -394,7 +380,7 @@ export async function updatePlatformAccount(
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeAccountError(error.code, d) };
+      return { ok: false, error: describeDbError(error.code, dbMessages2(d), d.studio.platforms.errAccountSaveFailed) };
     }
     if (!updated) {
       return { ok: false, error: d.studio.platforms.errAccountGone };

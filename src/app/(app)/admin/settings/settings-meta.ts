@@ -19,16 +19,8 @@ import type { ProviderId } from "@/lib/ai/types";
  * (`d.adminAi.settings.switchDialogBody(next, current)`), so the label never has
  * to carry grammar with it.
  */
-export const PROVIDER_LABELS: Record<ProviderId, string> = {
-  moonshot: "Kimi K3 · Moonshot",
-  zhipu: "GLM 5.2 · Zhipu",
-};
+export { PROVIDER_LABELS, PROVIDER_KEY_ENV } from "@/lib/ai/types";
 
-/** The server env var each provider's key lives in (value NEVER surfaced — name only). */
-export const PROVIDER_KEY_ENV: Record<ProviderId, string> = {
-  moonshot: "MOONSHOT_API_KEY",
-  zhipu: "ZHIPU_API_KEY",
-};
 
 export const PROVIDER_IDS: readonly ProviderId[] = ["moonshot", "zhipu"];
 

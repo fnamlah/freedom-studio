@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
  * Commission-scheme writes — Super Admin only (docs/03 §3: schemes are `CRUD`
@@ -194,29 +195,12 @@ export type UpdateSchemeInput = {
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(d: Dictionary, error: z.ZodError): string {
-  return error.issues[0]?.message ?? d.money.schemes.errCheckForm;
-}
-
-/** Maps a Postgres error to a friendly message; DB constraints back-stop zod. */
-function describeWriteError(d: Dictionary, code: string | undefined): string {
-  if (code === "23514") {
-    // CHECK: percentages don't sum to 100, a percent is out of 0–100, or
-    // effective_to <= effective_from, or both scope columns are set.
-    return d.money.schemes.errDbCheck;
-  }
-  if (code === "23P01") {
-    // EXCLUDE USING gist — another scheme in the same scope already covers part
-    // of this date range (docs/04 §4.9).
-    return d.money.schemes.errDbOverlap;
-  }
-  if (code === "23503") {
-    return d.money.schemes.errDbMissingRef;
-  }
-  return d.money.schemes.errSaveFailed;
-}
-
 /* ------------------------------------------------------------------ create --- */
+
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages(d: Dictionary): SqlStateMessages {
+  return { "23503": d.money.schemes.errDbMissingRef };
+}
 
 export async function createScheme(input: CreateSchemeInput): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin");
@@ -224,7 +208,7 @@ export async function createScheme(input: CreateSchemeInput): Promise<ActionResu
 
   const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(d, parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d.money.schemes.errCheckForm) };
   }
   const data = parsed.data;
 
@@ -251,7 +235,7 @@ export async function createScheme(input: CreateSchemeInput): Promise<ActionResu
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeWriteError(d, error?.code) };
+      return { ok: false, error: describeDbError(error?.code, dbMessages(d), d.money.schemes.errSaveFailed) };
     }
 
     await writeAudit({
@@ -291,7 +275,7 @@ export async function updateScheme(input: UpdateSchemeInput): Promise<ActionResu
 
   const parsed = updateSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(d, parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d.money.schemes.errCheckForm) };
   }
   const data = parsed.data;
 
@@ -311,7 +295,7 @@ export async function updateScheme(input: UpdateSchemeInput): Promise<ActionResu
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeWriteError(d, error.code) };
+      return { ok: false, error: describeDbError(error.code, dbMessages(d), d.money.schemes.errSaveFailed) };
     }
     if (!updated) {
       return { ok: false, error: d.money.schemes.errGone };

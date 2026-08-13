@@ -6,7 +6,8 @@ import { getActiveProviderId, isAiConfigured } from "@/lib/ai/provider";
 import { getDict } from "@/lib/i18n/server";
 
 import { AiWorkspace } from "./ai-workspace";
-import { PROVIDER_LABELS, type ConversationLite } from "./ai-meta";
+import { type ConversationLite } from "./ai-meta";
+import { PROVIDER_LABELS } from "@/lib/ai/types";
 
 export async function generateMetadata(): Promise<Metadata> {
   return { title: (await getDict()).adminAi.assistant.metaTitle };

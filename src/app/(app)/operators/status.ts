@@ -14,23 +14,19 @@ export const OPERATOR_STATUSES: readonly OperatorStatus[] = [
 ] as const;
 
 /**
- * Only the badge colour lives here. The LABELS come from
- * `d.studio.lifecycleStatus` — the same map the models module reads, because
- * this is the same Postgres enum and two copies of a translation is how the two
- * modules drift apart.
+ * The badge colours are the models module's map, re-exported rather than
+ * repeated: same Postgres enum, same four states. The LABELS already came from
+ * the one shared `d.studio.lifecycleStatus`; this was the last copy left.
  */
-export const OPERATOR_STATUS_VARIANT: Record<OperatorStatus, BadgeVariant> = {
-  active: "success",
-  inactive: "muted",
-  on_leave: "warning",
-  terminated: "danger",
-};
+import { MODEL_STATUS_VARIANT } from "../models/status";
+
+export { MODEL_STATUS_VARIANT as OPERATOR_STATUS_VARIANT };
 
 export function operatorStatusMeta(
   d: Dictionary,
   status: OperatorStatus,
 ): { variant: BadgeVariant; label: string } {
-  return { variant: OPERATOR_STATUS_VARIANT[status], label: d.studio.lifecycleStatus[status] };
+  return { variant: MODEL_STATUS_VARIANT[status], label: d.studio.lifecycleStatus[status] };
 }
 
 export function operatorStatusOptions(d: Dictionary): SelectOption[] {

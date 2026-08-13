@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { firstIssue } from "@/lib/forms";
 
 /**
  * Document-category management — SUPER ADMIN ONLY (docs/12 §2.4). A category's
@@ -96,10 +97,6 @@ const updateSchema = (d: Dictionary) =>
     sort: sortSchema(d),
   });
 
-function firstIssue(error: z.ZodError, d: Dictionary): string {
-  return error.issues[0]?.message ?? d.library.categories.actions.checkForm;
-}
-
 /* ------------------------------------------------------------------ create --- */
 
 export async function createCategory(input: {
@@ -116,7 +113,7 @@ export async function createCategory(input: {
 
   const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.library.categories.actions.checkForm) };
   }
   const data = parsed.data;
 
@@ -181,7 +178,7 @@ export async function updateCategory(input: {
 
   const parsed = updateSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.library.categories.actions.checkForm) };
   }
   const data = parsed.data;
 
@@ -248,7 +245,7 @@ export async function setCategoryEnabled(input: {
     })
     .safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.library.categories.actions.checkForm) };
   }
   const { id, ai_enabled } = parsed.data;
 

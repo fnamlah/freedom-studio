@@ -11,6 +11,7 @@ import { getDict } from "@/lib/i18n/server";
 import { invalidateSettingsCache } from "@/lib/settings";
 import { guardedAdminClient, isAuthzError } from "@/lib/supabase/admin";
 import { createRouteSupabase, type ServerSupabaseClient } from "@/lib/supabase/server";
+import { firstIssue } from "@/lib/forms";
 
 import { PROVIDER_LABELS } from "./settings-meta";
 
@@ -80,10 +81,6 @@ const limitValueSchema = (d: Dictionary) =>
     .max(1_000_000_000, d.adminAi.settings.issueTooLarge);
 
 /* ------------------------------------------------------------------ helpers --- */
-
-function firstIssue(error: z.ZodError, d: Dictionary): string {
-  return error.issues[0]?.message ?? d.adminAi.settings.issueInvalid;
-}
 
 function authzOrGeneric(error: unknown, d: Dictionary): string {
   if (isAuthzError(error)) return d.adminAi.settings.errNotAuthorized;
@@ -185,7 +182,7 @@ export async function saveAiModels(input: {
     if (!parsed.success) {
       return {
         ok: false,
-        error: d.fieldIssue(d.modelLabels[key], firstIssue(parsed.error, dictionary)),
+        error: d.fieldIssue(d.modelLabels[key], firstIssue(parsed.error, d.issueInvalid)),
       };
     }
     entries.push({ key, value: parsed.data });
@@ -233,7 +230,7 @@ export async function saveAiLimits(input: {
     if (!parsed.success) {
       return {
         ok: false,
-        error: d.fieldIssue(d.limitLabels[key], firstIssue(parsed.error, dictionary)),
+        error: d.fieldIssue(d.limitLabels[key], firstIssue(parsed.error, d.issueInvalid)),
       };
     }
     entries.push({ key, value: parsed.data });

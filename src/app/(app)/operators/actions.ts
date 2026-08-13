@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
  * Operators + operator-assignments mutations — Super Admin + Manager only
@@ -196,21 +197,6 @@ export type UpdateAssignmentInput = CreateAssignmentInput & { id: string };
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError, d: Dictionary): string {
-  return error.issues[0]?.message ?? d.studio.operators.errForm;
-}
-
-/** Maps a Postgres error on `operators` to a friendly message. */
-function describeOperatorError(code: string | undefined, d: Dictionary): string {
-  if (code === "23514") {
-    return d.studio.operators.errDbCheck;
-  }
-  if (code === "23505") {
-    return d.studio.operators.errDuplicate;
-  }
-  return d.studio.operators.errSaveFailed;
-}
-
 /**
  * Translates the assignment write errors the DB raises into friendly toasts. The
  * database is the authority; these are only human-readable renderings.
@@ -251,13 +237,18 @@ function describeAssignmentError(
 
 /* -------------------------------------------------------- operator: create --- */
 
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages(d: Dictionary): SqlStateMessages {
+  return { "23514": d.studio.operators.errDbCheck, "23505": d.studio.operators.errDuplicate };
+}
+
 export async function createOperator(input: CreateOperatorInput): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin", "manager");
   const d = dict(toLocale(profile.locale));
 
   const parsed = createOperatorSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.operators.errForm) };
   }
   const data = parsed.data;
 
@@ -279,7 +270,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Action
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeOperatorError(error?.code, d) };
+      return { ok: false, error: describeDbError(error?.code, dbMessages(d), d.studio.operators.errSaveFailed) };
     }
 
     await writeAudit({
@@ -307,7 +298,7 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Action
 
   const parsed = updateOperatorSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.operators.errForm) };
   }
   const data = parsed.data;
 
@@ -328,7 +319,7 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Action
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeOperatorError(error.code, d) };
+      return { ok: false, error: describeDbError(error.code, dbMessages(d), d.studio.operators.errSaveFailed) };
     }
     if (!updated) {
       return { ok: false, error: d.studio.operators.errGone };
@@ -428,7 +419,7 @@ export async function createAssignment(input: CreateAssignmentInput): Promise<Ac
 
   const parsed = createAssignmentSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.operators.errForm) };
   }
   const data = parsed.data;
 
@@ -482,7 +473,7 @@ export async function updateAssignment(input: UpdateAssignmentInput): Promise<Ac
 
   const parsed = updateAssignmentSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.operators.errForm) };
   }
   const data = parsed.data;
 

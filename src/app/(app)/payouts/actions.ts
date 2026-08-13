@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
  * Payout workflow — maker-checker under strict role separation (docs/09 §6,
@@ -136,24 +137,12 @@ export type MarkPaidInput = {
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(d: Dictionary, error: z.ZodError): string {
-  return error.issues[0]?.message ?? d.money.payouts.errCheckForm;
-}
-
-function describeDbError(d: Dictionary, code: string | undefined): string {
-  if (code === "23514") {
-    return d.money.payouts.errDbCheck;
-  }
-  if (code === "23503" || code === "P0001") {
-    return d.money.payouts.errDbPayee;
-  }
-  if (code === "42501") {
-    return d.money.payouts.errDbForbidden;
-  }
-  return d.money.payouts.errDbGeneric;
-}
-
 /* ------------------------------------------------------------------ create --- */
+
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages(d: Dictionary): SqlStateMessages {
+  return { "23514": d.money.payouts.errDbCheck, "23503": d.money.payouts.errDbPayee, "42501": d.money.payouts.errDbForbidden };
+}
 
 export async function createPayout(input: CreatePayoutInput): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin", "manager", "finance");
@@ -161,7 +150,7 @@ export async function createPayout(input: CreatePayoutInput): Promise<ActionResu
 
   const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(d, parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d.money.payouts.errCheckForm) };
   }
   const data = parsed.data;
 
@@ -187,7 +176,7 @@ export async function createPayout(input: CreatePayoutInput): Promise<ActionResu
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(d, error?.code) };
+      return { ok: false, error: describeDbError(error?.code, dbMessages(d), d.money.payouts.errDbGeneric) };
     }
 
     await writeAudit({
@@ -236,7 +225,7 @@ export async function approvePayout(input: { id: string }): Promise<ActionResult
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(d, error.code) };
+      return { ok: false, error: describeDbError(error.code, dbMessages(d), d.money.payouts.errDbGeneric) };
     }
     if (!updated) {
       return { ok: false, error: d.money.payouts.errNotPending };
@@ -272,7 +261,7 @@ export async function markPayoutPaid(input: MarkPaidInput): Promise<ActionResult
 
   const parsed = markPaidSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(d, parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d.money.payouts.errCheckForm) };
   }
   const data = parsed.data;
 
@@ -291,7 +280,7 @@ export async function markPayoutPaid(input: MarkPaidInput): Promise<ActionResult
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(d, error.code) };
+      return { ok: false, error: describeDbError(error.code, dbMessages(d), d.money.payouts.errDbGeneric) };
     }
     if (!updated) {
       return { ok: false, error: d.money.payouts.errNotApproved };
@@ -343,7 +332,7 @@ export async function cancelPayout(input: { id: string }): Promise<ActionResult>
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(d, error.code) };
+      return { ok: false, error: describeDbError(error.code, dbMessages(d), d.money.payouts.errDbGeneric) };
     }
     if (!updated) {
       return { ok: false, error: d.money.payouts.errNotCancellable };

@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
  * Ledger mutations — the maker-checker accounting core (docs/09 §5).
@@ -121,27 +122,12 @@ export type ClosePeriodInput = { period_start: string; period_end: string };
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(d: Dictionary, error: z.ZodError): string {
-  return error.issues[0]?.message ?? d.money.ledger.errCheckForm;
-}
-
-function describeDbError(d: Dictionary, code: string | undefined): string {
-  if (code === "23514") {
-    return d.money.ledger.errDbZero;
-  }
-  if (code === "23503") {
-    return d.money.ledger.errDbMissingRef;
-  }
-  if (code === "P0001" || code === "23P01") {
-    return d.money.ledger.errDbPayee;
-  }
-  if (code === "42501") {
-    return d.money.ledger.errNotAuthorizedPost;
-  }
-  return d.money.ledger.errPostFailed;
-}
-
 /* -------------------------------------------------------------- post entry --- */
+
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages(d: Dictionary): SqlStateMessages {
+  return { "23514": d.money.ledger.errDbZero, "23503": d.money.ledger.errDbMissingRef, "42501": d.money.ledger.errNotAuthorizedPost };
+}
 
 export async function postLedgerEntry(input: PostLedgerEntryInput): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin", "finance");
@@ -149,7 +135,7 @@ export async function postLedgerEntry(input: PostLedgerEntryInput): Promise<Acti
 
   const parsed = postEntrySchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(d, parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d.money.ledger.errCheckForm) };
   }
   const data = parsed.data;
 
@@ -174,7 +160,7 @@ export async function postLedgerEntry(input: PostLedgerEntryInput): Promise<Acti
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(d, error?.code) };
+      return { ok: false, error: describeDbError(error?.code, dbMessages(d), d.money.ledger.errPostFailed) };
     }
 
     await writeAudit({
@@ -215,7 +201,7 @@ export async function closePeriod(input: ClosePeriodInput): Promise<ClosePeriodR
 
   const parsed = closePeriodSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(d, parsed.error) };
+    return { ok: false, error: firstIssue(parsed.error, d.money.ledger.errCheckForm) };
   }
   const { period_start, period_end } = parsed.data;
 

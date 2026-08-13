@@ -53,11 +53,6 @@ export interface AiMessageRowLite {
   tool_args: unknown;
 }
 
-/** Product names — never translated (model + vendor). */
-export const PROVIDER_LABELS: Record<ProviderId, string> = {
-  moonshot: "Kimi K3 · Moonshot",
-  zhipu: "GLM 5.2 · Zhipu",
-};
 
 type ToolLabels = Dictionary["adminAi"]["tools"];
 

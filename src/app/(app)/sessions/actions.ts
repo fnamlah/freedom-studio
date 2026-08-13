@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
  * Work-sessions mutations — Super Admin + Manager only (docs/03 §3, docs/04 §7.2:
@@ -132,21 +133,6 @@ export type UpdateSessionInput = SessionInput & { id: string };
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError, d: Dictionary): string {
-  return error.issues[0]?.message ?? d.studio.sessions.errForm;
-}
-
-/** Maps a Postgres error to a friendly message; DB constraints back-stop zod. */
-function describeDbError(code: string | undefined, d: Dictionary): string {
-  if (code === "23514") {
-    return d.studio.sessions.errDbCheck;
-  }
-  if (code === "23503") {
-    return d.studio.sessions.errAccountFk;
-  }
-  return d.studio.sessions.errSaveFailed;
-}
-
 /**
  * Resolves the model that owns a platform account. The result becomes the
  * session's denormalized `model_id`, so it always matches the account's owner.
@@ -196,13 +182,18 @@ function normalizeTimes(
 
 /* ------------------------------------------------------------------ create --- */
 
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages(d: Dictionary): SqlStateMessages {
+  return { "23514": d.studio.sessions.errDbCheck, "23503": d.studio.sessions.errAccountFk };
+}
+
 export async function createSession(input: SessionInput): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin", "manager");
   const d = dict(toLocale(profile.locale));
 
   const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.sessions.errForm) };
   }
   const data = parsed.data;
 
@@ -229,7 +220,7 @@ export async function createSession(input: SessionInput): Promise<ActionResult> 
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(error?.code, d) };
+      return { ok: false, error: describeDbError(error?.code, dbMessages(d), d.studio.sessions.errSaveFailed) };
     }
 
     await writeAudit({
@@ -268,7 +259,7 @@ export async function updateSession(input: UpdateSessionInput): Promise<ActionRe
 
   const parsed = updateSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.sessions.errForm) };
   }
   const data = parsed.data;
 
@@ -295,7 +286,7 @@ export async function updateSession(input: UpdateSessionInput): Promise<ActionRe
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(error.code, d) };
+      return { ok: false, error: describeDbError(error.code, dbMessages(d), d.studio.sessions.errSaveFailed) };
     }
     if (!updated) {
       return { ok: false, error: d.studio.sessions.errGone };

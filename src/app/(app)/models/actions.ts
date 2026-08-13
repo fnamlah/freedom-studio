@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
  * Models CRUD — Super Admin + Manager only (docs/03 §3, docs/04 §7.2).
@@ -176,22 +177,12 @@ export type UpdateModelInput = Omit<CreateModelInput, "status"> & { id: string }
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError, d: Dictionary): string {
-  return error.issues[0]?.message ?? d.studio.models.errForm;
-}
-
-/** Maps a Postgres error to a friendly message; CHECK violations back-stop zod. */
-function describeDbError(code: string | undefined, d: Dictionary): string {
-  if (code === "23514") {
-    return d.studio.models.errDbCheck;
-  }
-  if (code === "23505") {
-    return d.studio.models.errDuplicate;
-  }
-  return d.studio.models.errSaveFailed;
-}
-
 /* ------------------------------------------------------------------ create --- */
+
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages(d: Dictionary): SqlStateMessages {
+  return { "23514": d.studio.models.errDbCheck, "23505": d.studio.models.errDuplicate };
+}
 
 export async function createModel(input: CreateModelInput): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin", "manager");
@@ -199,7 +190,7 @@ export async function createModel(input: CreateModelInput): Promise<ActionResult
 
   const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.models.errForm) };
   }
   const data = parsed.data;
 
@@ -223,7 +214,7 @@ export async function createModel(input: CreateModelInput): Promise<ActionResult
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(error?.code, d) };
+      return { ok: false, error: describeDbError(error?.code, dbMessages(d), d.studio.models.errSaveFailed) };
     }
 
     await writeAudit({
@@ -251,7 +242,7 @@ export async function updateModel(input: UpdateModelInput): Promise<ActionResult
 
   const parsed = updateSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.models.errForm) };
   }
   const data = parsed.data;
 
@@ -274,7 +265,7 @@ export async function updateModel(input: UpdateModelInput): Promise<ActionResult
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(error.code, d) };
+      return { ok: false, error: describeDbError(error.code, dbMessages(d), d.studio.models.errSaveFailed) };
     }
     if (!updated) {
       return { ok: false, error: d.studio.models.errGone };

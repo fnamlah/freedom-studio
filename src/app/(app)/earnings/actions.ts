@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
  * Earnings mutations — Super Admin + Manager only (docs/03 §3, docs/04 §7.2:
@@ -117,27 +118,6 @@ export type UpdateEarningInput = EarningInput & { id: string };
 
 /* ---------------------------------------------------------------- helpers --- */
 
-function firstIssue(error: z.ZodError, d: Dictionary): string {
-  return error.issues[0]?.message ?? d.studio.earnings.errForm;
-}
-
-/**
- * Maps a Postgres error to a friendly message. The unique-violation is the one the
- * brief calls out: each account can hold only one statement per period.
- */
-function describeDbError(code: string | undefined, d: Dictionary): string {
-  if (code === "23505") {
-    return d.studio.earnings.errDuplicate;
-  }
-  if (code === "23514") {
-    return d.studio.earnings.errDbCheck;
-  }
-  if (code === "23503") {
-    return d.studio.earnings.errAccountFk;
-  }
-  return d.studio.earnings.errSaveFailed;
-}
-
 /**
  * Resolves the model that owns a platform account. The result becomes the row's
  * denormalized `model_id`, so it always matches the account's owner (docs/04 §4.7).
@@ -164,13 +144,18 @@ async function resolveAccountModel(
 
 /* ------------------------------------------------------------------ create --- */
 
+/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
+function dbMessages(d: Dictionary): SqlStateMessages {
+  return { "23505": d.studio.earnings.errDuplicate, "23514": d.studio.earnings.errDbCheck, "23503": d.studio.earnings.errAccountFk };
+}
+
 export async function createEarning(input: EarningInput): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin", "manager");
   const d = dict(toLocale(profile.locale));
 
   const parsed = createSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.earnings.errForm) };
   }
   const data = parsed.data;
 
@@ -195,7 +180,7 @@ export async function createEarning(input: EarningInput): Promise<ActionResult> 
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(error?.code, d) };
+      return { ok: false, error: describeDbError(error?.code, dbMessages(d), d.studio.earnings.errSaveFailed) };
     }
 
     await writeAudit({
@@ -230,7 +215,7 @@ export async function updateEarning(input: UpdateEarningInput): Promise<ActionRe
 
   const parsed = updateSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d) };
+    return { ok: false, error: firstIssue(parsed.error, d.studio.earnings.errForm) };
   }
   const data = parsed.data;
 
@@ -255,7 +240,7 @@ export async function updateEarning(input: UpdateEarningInput): Promise<ActionRe
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(error.code, d) };
+      return { ok: false, error: describeDbError(error.code, dbMessages(d), d.studio.earnings.errSaveFailed) };
     }
     if (!updated) {
       return { ok: false, error: d.studio.earnings.errGone };

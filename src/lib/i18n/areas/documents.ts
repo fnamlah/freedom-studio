@@ -268,6 +268,112 @@ export const documentsEn = {
     viewsLoadFailed: "Could not load the view audit. Please try again.",
     forbiddenViewsList: "You are not authorized to view the share audit.",
   },
+
+  /* ------------------------------------------------------------------ inbox --- */
+
+  /**
+   * The review-and-apply surface (`/documents/inbox`, migration 021): rows the
+   * AI read out of uploaded files, waiting for a human decision. Wording rule:
+   * the AI "proposes", the person "applies" — nothing here may imply a record
+   * already exists.
+   */
+  inbox: {
+    metaTitle: "Inbox",
+    title: "Inbox",
+    description:
+      "What the AI read in uploaded files, as rows ready to apply. Everything passes the same checks as manual entry, and nothing is recorded until you confirm it.",
+
+    emptyTitle: "Nothing waiting",
+    emptyDescription:
+      "Upload payout statements, shift reports or receipts to the Library and run the classifier — proposed rows appear here for review.",
+
+    kind: {
+      earnings: "Earnings statement",
+      sessions: "Work sessions",
+      expenses: "Expense",
+      document_meta: "Document details",
+    },
+    sourceLibrary: "Library file",
+    sourceDocument: "Document",
+    sourceGone: "Source file no longer exists",
+    confidence: (pct: string) => `Confidence ${pct}`,
+    proposedOn: (date: string) => `Read ${date}`,
+
+    colAccount: "Account",
+    colPeriodStart: "Period from",
+    colPeriodEnd: "Period to",
+    colGross: "Gross",
+    colFee: "Fee",
+    colNet: "Net",
+    colCurrency: "Currency",
+    colStarted: "Started",
+    colEnded: "Ended",
+    colDate: "Date",
+    colVendor: "Vendor",
+    colDescription: "Description",
+    colAmount: "Amount",
+    colCategory: "Category",
+    colNotes: "Notes",
+
+    chooseAccount: "Choose account…",
+    printed: (platform: string, username: string) =>
+      `Printed on the document: ${platform} · ${username}`,
+    printedUnknown: "The document does not name the account.",
+    unresolvedHint:
+      "Highlighted rows matched no account — pick the right one before applying.",
+    removeRow: "Remove row",
+
+    metaField: "Field",
+    metaCurrent: "Current",
+    metaProposed: "Proposed",
+    metaApplyField: "Apply this field",
+    field: {
+      doc_type: "Type",
+      title: "Title",
+      issued_date: "Issued",
+      expires_at: "Expires",
+    },
+    metaNone: "—",
+
+    apply: "Apply",
+    dismiss: "Dismiss",
+
+    /* Apply-time validation (expenses have no manual form; these ARE canonical). */
+    errDateInvalid: "Enter a real date as YYYY-MM-DD.",
+    errVendorRequired: "Enter who was paid.",
+    errVendorTooLong: "Keep the vendor under 200 characters.",
+    errDescriptionTooLong: "Keep the description under 2000 characters.",
+    errAmountType: "Enter the amount as a number.",
+    errAmountPositive: "An expense must be more than zero.",
+    errAmountTooLarge: "That amount is larger than this system accepts.",
+    errCurrency: "Use a 3-letter currency code, e.g. USD.",
+    errCategoryTooLong: "Keep the category under 100 characters.",
+
+    errNoRows: "Nothing to apply — every row was removed.",
+    errCheckRows: "Please check the rows and try again.",
+    errGone: "This proposal no longer exists or was already decided.",
+    errPayloadInvalid:
+      "This proposal can't be read. Dismiss it and run the analysis again.",
+    errNoFields: "Choose at least one field to apply.",
+    errApplyFailed: "Could not apply. Please try again.",
+    errDismissFailed: "Could not dismiss. Please try again.",
+    errNotAuthorized: "You are not authorized to review proposals.",
+    errDocumentGone: "The document this proposal belongs to no longer exists.",
+
+    okApplied: (n: number) => `Recorded: ${n}.`,
+    okAppliedWithDuplicates: (created: number, duplicates: number) =>
+      `Recorded: ${created}. Already existed: ${duplicates}.`,
+    okAllDuplicates: "Every row was already recorded — nothing new to add.",
+    okDuplicatesDiffer: (n: number) =>
+      `⚠ Stored amounts differ from this statement for ${n} of them — check Earnings.`,
+    okMetaApplied: "Document details updated.",
+    okDismissed: "Proposal dismissed.",
+
+    applyToastOk: "Applied",
+    applyToastErr: "Couldn't apply",
+    dismissToastOk: "Dismissed",
+    dismissToastErr: "Couldn't dismiss",
+  },
 };
 
 export const documentsRu: typeof documentsEn = {
@@ -529,5 +635,105 @@ export const documentsRu: typeof documentsEn = {
     forbiddenSharesList: "У вас нет прав просматривать ссылки доступа.",
     viewsLoadFailed: "Не удалось загрузить журнал просмотров. Попробуйте ещё раз.",
     forbiddenViewsList: "У вас нет прав просматривать журнал обращений по ссылке.",
+  },
+
+  /* ----------------------------------------------------------------- входящие --- */
+
+  inbox: {
+    metaTitle: "Входящие",
+    title: "Входящие",
+    description:
+      "То, что ИИ прочитал в загруженных файлах, — строки, готовые к записи. Всё проходит те же проверки, что и ручной ввод, и ничего не записывается, пока вы не подтвердите.",
+
+    emptyTitle: "Ничего не ждёт",
+    emptyDescription:
+      "Загрузите в Библиотеку отчёты о выплатах, отчёты о сменах или чеки и запустите классификатор — предложенные строки появятся здесь на проверку.",
+
+    kind: {
+      earnings: "Отчёт о выплатах",
+      sessions: "Рабочие сессии",
+      expenses: "Расход",
+      document_meta: "Данные документа",
+    },
+    sourceLibrary: "Файл библиотеки",
+    sourceDocument: "Документ",
+    sourceGone: "Исходный файл больше не существует",
+    confidence: (pct: string) => `Уверенность ${pct}`,
+    proposedOn: (date: string) => `Прочитано ${date}`,
+
+    colAccount: "Аккаунт",
+    colPeriodStart: "Период с",
+    colPeriodEnd: "Период по",
+    colGross: "Брутто",
+    colFee: "Комиссия",
+    colNet: "Нетто",
+    colCurrency: "Валюта",
+    colStarted: "Начало",
+    colEnded: "Конец",
+    colDate: "Дата",
+    colVendor: "Поставщик",
+    colDescription: "Описание",
+    colAmount: "Сумма",
+    colCategory: "Категория",
+    colNotes: "Заметки",
+
+    chooseAccount: "Выберите аккаунт…",
+    printed: (platform: string, username: string) =>
+      `В документе указано: ${platform} · ${username}`,
+    printedUnknown: "В документе аккаунт не назван.",
+    unresolvedHint:
+      "Для выделенных строк аккаунт не нашёлся — выберите его перед записью.",
+    removeRow: "Убрать строку",
+
+    metaField: "Поле",
+    metaCurrent: "Сейчас",
+    metaProposed: "Предложено",
+    metaApplyField: "Применить это поле",
+    field: {
+      doc_type: "Тип",
+      title: "Название",
+      issued_date: "Выдан",
+      expires_at: "Истекает",
+    },
+    metaNone: "—",
+
+    apply: "Записать",
+    dismiss: "Отклонить",
+
+    /* Проверки при записи (у расходов нет ручной формы; эти правила — канон). */
+    errDateInvalid: "Укажите настоящую дату в формате ГГГГ-ММ-ДД.",
+    errVendorRequired: "Укажите, кому заплатили.",
+    errVendorTooLong: "Название поставщика — не длиннее 200 символов.",
+    errDescriptionTooLong: "Описание — не длиннее 2000 символов.",
+    errAmountType: "Введите сумму числом.",
+    errAmountPositive: "Расход должен быть больше нуля.",
+    errAmountTooLarge: "Эта сумма больше, чем принимает система.",
+    errCurrency: "Используйте трёхбуквенный код валюты, например USD.",
+    errCategoryTooLong: "Категория — не длиннее 100 символов.",
+
+    errNoRows: "Записывать нечего — все строки убраны.",
+    errCheckRows: "Проверьте строки и попробуйте снова.",
+    errGone: "Этого предложения больше нет, или по нему уже принято решение.",
+    errPayloadInvalid:
+      "Это предложение не читается. Отклоните его и запустите разбор заново.",
+    errNoFields: "Выберите хотя бы одно поле для применения.",
+    errApplyFailed: "Не удалось записать. Попробуйте ещё раз.",
+    errDismissFailed: "Не удалось отклонить. Попробуйте ещё раз.",
+    errNotAuthorized: "У вас нет прав проверять предложения.",
+    errDocumentGone: "Документа, к которому относится это предложение, больше нет.",
+
+    okApplied: (n: number) => `Записано: ${n}.`,
+    okAppliedWithDuplicates: (created: number, duplicates: number) =>
+      `Записано: ${created}. Дубликатов: ${duplicates}.`,
+    okAllDuplicates: "Каждая строка уже была записана — добавлять нечего.",
+    okDuplicatesDiffer: (n: number) =>
+      `⚠ Для ${n} из них записанные суммы отличаются от этого отчёта — проверьте раздел «Доходы».`,
+    okMetaApplied: "Данные документа обновлены.",
+    okDismissed: "Предложение отклонено.",
+
+    applyToastOk: "Записано",
+    applyToastErr: "Не удалось записать",
+    dismissToastOk: "Отклонено",
+    dismissToastErr: "Не удалось отклонить",
   },
 };

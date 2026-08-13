@@ -19,10 +19,10 @@ import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms"
 
 import {
   ALLOWED_MIME_TYPES,
-  DOCUMENT_TYPES,
   MAX_FILE_BYTES,
   MAX_FILE_MB,
 } from "./doc-meta";
+import { docDateOnly, documentMetaFields } from "./meta-fields";
 
 /**
  * Documents module — Super Admin + Manager only (docs/03 §3, docs/04 §7.11:
@@ -53,46 +53,19 @@ const SHARE_TOKEN_PEPPER = optionalEnv("SHARE_TOKEN_PEPPER", "") ?? "";
 
 /* -------------------------------------------------------------- validation --- */
 
-function isValidYmd(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return false;
-  const y = Number(match[1]);
-  const m = Number(match[2]);
-  const d = Number(match[3]);
-  const asDate = new Date(Date.UTC(y, m - 1, d));
-  return (
-    asDate.getUTCFullYear() === y &&
-    asDate.getUTCMonth() === m - 1 &&
-    asDate.getUTCDate() === d
-  );
-}
-
 /**
  * The schemas are FACTORIES rather than module constants: a `z.object(...)`
  * evaluated at import time is built long before any request exists, so it cannot
  * know the caller's language. Each action builds its schema once it holds the
  * auth context — that is what lets a validation message come back in Russian.
+ *
+ * The four metadata fields live in `./meta-fields`, shared with the inbox's
+ * `document_meta` apply (021) so both write paths obey identical rules.
  */
-const dateOnly = (d: Dictionary) =>
-  z.string().refine(isValidYmd, d.documents.actions.invalidDate);
-
-const optionalDate = (d: Dictionary) =>
-  z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    dateOnly(d).nullable(),
-  );
-
 const uploadMetaSchema = (d: Dictionary) =>
   z.object({
     model_id: z.string().uuid(d.documents.actions.chooseModel),
-    doc_type: z.enum(DOCUMENT_TYPES),
-    title: z
-      .string()
-      .trim()
-      .min(1, d.documents.actions.titleRequired)
-      .max(200, d.documents.actions.titleTooLong),
-    issued_date: optionalDate(d),
-    expires_at: optionalDate(d),
+    ...documentMetaFields(d),
     notes: z.preprocess(
       (v) => (typeof v === "string" && v.trim() === "" ? null : v),
       z.string().max(2000, d.documents.actions.notesTooLong).nullable(),
@@ -103,7 +76,7 @@ const createShareSchema = (d: Dictionary) =>
   z.object({
     document_id: z.string().uuid(d.documents.actions.chooseDocument),
     // A calendar day; the link expires at the end of that day (UTC).
-    expires_date: dateOnly(d),
+    expires_date: docDateOnly(d),
     max_views: z.preprocess(
       (v) => (v === "" || v === null || v === undefined ? null : v),
       z.coerce

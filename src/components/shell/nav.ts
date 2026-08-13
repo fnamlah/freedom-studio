@@ -80,7 +80,10 @@ export const NAV_SECTIONS: readonly NavSection[] = [
       { href: "/platforms", label: "platforms", icon: "platforms", roles: SA_MGR },
       { href: "/sessions", label: "sessions", icon: "sessions", roles: SA_MGR },
       { href: "/earnings", label: "earnings", icon: "earnings", roles: SA_MGR },
-      { href: "/documents", label: "documents", icon: "documents", roles: SA_MGR },
+      // `exact`: /documents/inbox is its own nav item below; without it both
+      // links would highlight for the inbox route (prefix matching).
+      { href: "/documents", label: "documents", icon: "documents", roles: SA_MGR, exact: true },
+      { href: "/documents/inbox", label: "inbox", icon: "documents", roles: SA_MGR },
       { href: "/library", label: "library", icon: "library", roles: SA_MGR },
     ],
   },

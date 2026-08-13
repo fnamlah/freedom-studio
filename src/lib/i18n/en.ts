@@ -69,6 +69,7 @@ export const en = {
     sessions: "Work sessions",
     earnings: "Earnings",
     documents: "Documents",
+    inbox: "Inbox",
     library: "Library",
     sectionMoney: "Money",
     schemes: "Commission schemes",

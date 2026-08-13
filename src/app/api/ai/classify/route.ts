@@ -31,6 +31,7 @@
 import { z } from "zod";
 
 import { classifyFile, type ClassifySuggestion } from "@/lib/ai/classify";
+import { persistProposal } from "@/lib/extractions";
 import { checkBudget, recordUsage } from "@/lib/ai/budget";
 import { getActiveProviderId, getChatModel, isAiConfigured } from "@/lib/ai/provider";
 import { writeAudit } from "@/lib/audit";
@@ -211,6 +212,27 @@ async function applyResult(
     };
     await supabase.from("library_files").update(update).eq("id", file.id);
 
+    // Stage the proposed rows for the review inbox (021). Same crossing, richer
+    // answer: nothing extra left the system, and nothing lands in a business
+    // table until a human applies it. Best-effort by design — a staging hiccup
+    // must never fail the classification that produced it.
+    if (suggestion.records) {
+      try {
+        await persistProposal(supabase, {
+          sourceKind: "library_file",
+          sourceId: file.id,
+          kind: suggestion.records.kind,
+          payload: { rows: suggestion.records.rows },
+          confidence: suggestion.confidence,
+          provider: suggestion.provider,
+          model: suggestion.model,
+          userId,
+        });
+      } catch {
+        /* the classification result stands regardless */
+      }
+    }
+
     await writeAudit({
       action: "ai.classify",
       entityType: "library_file",
@@ -223,6 +245,12 @@ async function applyResult(
         size_bytes: file.size_bytes,
         category_slug: suggestion.categorySlug,
         confidence: suggestion.confidence,
+        ...(suggestion.records
+          ? {
+              records_kind: suggestion.records.kind,
+              records_rows: suggestion.records.rows.length,
+            }
+          : {}),
       },
     });
     await recordUsage(

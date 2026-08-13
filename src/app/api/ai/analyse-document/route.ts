@@ -19,6 +19,7 @@
 import { z } from "zod";
 
 import { analyseDocument, type AnalyseResult } from "@/lib/ai/analyse-document";
+import { persistProposal, type DocumentMetaPayload } from "@/lib/extractions";
 import { checkBudget, recordUsage } from "@/lib/ai/budget";
 import { getActiveProviderId, getChatModel, isAiConfigured } from "@/lib/ai/provider";
 import { writeAudit } from "@/lib/audit";
@@ -126,6 +127,28 @@ async function applyResult(
     };
     await supabase.from("documents").update(update).eq("id", document.id);
 
+    // Stage what the document says ABOUT ITSELF when it differs from the row —
+    // the dates that drive the compliance dashboard, the type, the title. A
+    // proposal for `/documents/inbox` (021), applied only by a human; the
+    // summary/key-figures write above stays exactly as it was.
+    const metaDiff = proposeMetaDiff(document, result);
+    if (metaDiff) {
+      try {
+        await persistProposal(supabase, {
+          sourceKind: "document",
+          sourceId: document.id,
+          kind: "document_meta",
+          payload: metaDiff,
+          confidence: null,
+          provider: result.provider,
+          model: result.model,
+          userId,
+        });
+      } catch {
+        /* the analysis result stands regardless */
+      }
+    }
+
     await writeAudit({
       action: "ai.analyse",
       entityType: "document",
@@ -136,6 +159,7 @@ async function applyResult(
         model: result.model,
         key_figure_count: result.keyFigures.length,
         model_id: document.model_id,
+        ...(metaDiff ? { meta_fields_proposed: Object.keys(metaDiff.fields) } : {}),
       },
     });
     await recordUsage(
@@ -182,6 +206,38 @@ async function applyResult(
   // skipped — nothing crossed, nothing metered.
   await supabase.from("documents").update({ ai_status: "skipped" }).eq("id", document.id);
   return "written";
+}
+
+/**
+ * What the document says about itself, minus what the row already says. Only
+ * fields the analyser actually READ (it is told to omit rather than guess) and
+ * only where they differ — a proposal that changes nothing is noise. Returns
+ * null when there is nothing to propose.
+ */
+function proposeMetaDiff(
+  document: DocumentRow,
+  result: Extract<AnalyseResult, { status: "analysed" }>,
+): DocumentMetaPayload | null {
+  const meta = result.documentMeta;
+  const fields: DocumentMetaPayload["fields"] = {};
+  if (meta.docType && meta.docType !== document.doc_type) fields.doc_type = meta.docType;
+  if (meta.title && meta.title !== document.title) fields.title = meta.title;
+  if (meta.issuedDate && meta.issuedDate !== document.issued_date) {
+    fields.issued_date = meta.issuedDate;
+  }
+  if (meta.expiresAt && meta.expiresAt !== document.expires_at) {
+    fields.expires_at = meta.expiresAt;
+  }
+  if (Object.keys(fields).length === 0) return null;
+  return {
+    fields,
+    current: {
+      doc_type: document.doc_type,
+      title: document.title,
+      issued_date: document.issued_date,
+      expires_at: document.expires_at,
+    },
+  };
 }
 
 async function meterRefusal(

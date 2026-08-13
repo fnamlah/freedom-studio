@@ -7,7 +7,14 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
-import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
+import { describeDbError, firstIssue } from "@/lib/forms";
+
+import {
+  earningDbMessages,
+  earningFields,
+  periodOrdered,
+  periodOrderedMessage,
+} from "./earning-fields";
 
 /**
  * Earnings mutations — Super Admin + Manager only (docs/03 §3, docs/04 §7.2:
@@ -42,57 +49,6 @@ import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms"
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
 /* -------------------------------------------------------------- validation --- */
-
-/** Parses a strict `YYYY-MM-DD` and rejects impossible calendar dates. */
-function isValidYmd(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return false;
-  const y = Number(match[1]);
-  const m = Number(match[2]);
-  const d = Number(match[3]);
-  const asDate = new Date(Date.UTC(y, m - 1, d));
-  return (
-    asDate.getUTCFullYear() === y &&
-    asDate.getUTCMonth() === m - 1 &&
-    asDate.getUTCDate() === d
-  );
-}
-
-const dateOnly = (d: Dictionary) =>
-  z.string().refine(isValidYmd, d.studio.earnings.errDateInvalid);
-
-const money2 = (d: Dictionary) =>
-  z.coerce
-    .number({ invalid_type_error: d.studio.earnings.errAmountType })
-    .min(0, d.studio.earnings.errAmountMin)
-    .max(9_999_999_999.99, d.studio.earnings.errAmountTooLarge);
-
-/** Optional money field that defaults to 0 (matches `platform_fee_amount` default). */
-const money2OrZero = (d: Dictionary) =>
-  z.preprocess((v) => (v === "" || v === null || v === undefined ? 0 : v), money2(d));
-
-const currency = (d: Dictionary) =>
-  z.preprocess(
-    (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : "USD"),
-    z.string().regex(/^[A-Z]{3}$/, d.studio.earnings.errCurrency),
-  );
-
-const earningFields = (d: Dictionary) => ({
-  platform_account_id: z.string().uuid(d.studio.earnings.errAccountRequired),
-  period_start: dateOnly(d),
-  period_end: dateOnly(d),
-  gross_amount: money2(d),
-  platform_fee_amount: money2OrZero(d),
-  net_amount: money2(d),
-  currency: currency(d),
-});
-
-const periodOrdered = (data: { period_start: string; period_end: string }) =>
-  data.period_end >= data.period_start;
-const periodOrderedMessage = (d: Dictionary) => ({
-  message: d.studio.earnings.errPeriodOrder,
-  path: ["period_end"],
-});
 
 const createSchema = (d: Dictionary) =>
   z.object(earningFields(d)).refine(periodOrdered, periodOrderedMessage(d));
@@ -144,11 +100,6 @@ async function resolveAccountModel(
 
 /* ------------------------------------------------------------------ create --- */
 
-/** SQLSTATEs this area turns into prose; anything else gets the generic fallback. */
-function dbMessages(d: Dictionary): SqlStateMessages {
-  return { "23505": d.studio.earnings.errDuplicate, "23514": d.studio.earnings.errDbCheck, "23503": d.studio.earnings.errAccountFk };
-}
-
 export async function createEarning(input: EarningInput): Promise<ActionResult> {
   const { supabase, user, profile } = await requireRole("super_admin", "manager");
   const d = dict(toLocale(profile.locale));
@@ -180,7 +131,7 @@ export async function createEarning(input: EarningInput): Promise<ActionResult> 
       .single();
 
     if (error || !created) {
-      return { ok: false, error: describeDbError(error?.code, dbMessages(d), d.studio.earnings.errSaveFailed) };
+      return { ok: false, error: describeDbError(error?.code, earningDbMessages(d), d.studio.earnings.errSaveFailed) };
     }
 
     await writeAudit({
@@ -240,7 +191,7 @@ export async function updateEarning(input: UpdateEarningInput): Promise<ActionRe
       .maybeSingle();
 
     if (error) {
-      return { ok: false, error: describeDbError(error.code, dbMessages(d), d.studio.earnings.errSaveFailed) };
+      return { ok: false, error: describeDbError(error.code, earningDbMessages(d), d.studio.earnings.errSaveFailed) };
     }
     if (!updated) {
       return { ok: false, error: d.studio.earnings.errGone };

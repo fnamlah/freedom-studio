@@ -268,3 +268,38 @@ Legacy binary Word `.doc` is read by `word-extractor`; `.pptx` is unzipped with 
 | images | vision model |
 
 Still unreadable: `.ppt` (pre-2007 binary PowerPoint) only. It is recognised explicitly and skipped with `legacy_office`, so the UI can tell the user to convert rather than reporting a bare "unsupported type".
+
+## 8. Proposed records — the review inbox (migration 021)
+
+The same crossing that classifies a file also proposes the **rows a bookkeeper
+would have typed from it**: a payout statement's earnings lines, a shift
+export's work sessions, a receipt's expense. The model returns an optional
+`records` block — `{kind: earnings|sessions|expenses, rows: [...]}` — parsed
+separately from the classification (`parseRecords`, `src/lib/extractions.ts`),
+so a malformed block drops silently and never fails the filing decision. No new
+egress: the block rides the existing `classificationChannel` crossing, and the
+compliance analyser's `document_meta` proposal (type/title/dates the document
+states about itself) rides `complianceAnalysisChannel` the same way.
+
+Proposals are STAGED, never written: they land in `doc_extractions`
+(`(source_kind, source_id, kind)` unique; re-analysis refreshes a live proposal
+but never resurrects a decided one) and wait on **`/documents/inbox`**
+(SA/MGR). A human reviews and edits every row, then applies. The apply path is
+the whole safety argument:
+
+* every row is validated by **the same zod field factories the manual forms
+  use** (`earnings/earning-fields.ts`, `sessions/session-fields.ts`,
+  `documents/meta-fields.ts`; `expenseFields` in `src/lib/extractions.ts` is
+  canonical because expenses have no manual form yet);
+* `model_id` is derived server-side from the chosen account, exactly like the
+  manual path — the printed platform/username pair is only ever a HINT, matched
+  to an account when unambiguous (`matchAccount`) and left for the reviewer to
+  pick otherwise;
+* inserts run under the caller's own RLS with `source='import'` — the
+  `entry_source` value reserved since migration 001, written here first;
+* each apply is one atomic statement; earnings upsert against
+  `earnings_stmt_unique` with duplicates ignored, so re-applying the same
+  statement reports "already recorded" instead of double-booking;
+* decisions are audited as `extraction.apply` / `extraction.dismiss`.
+
+The AI still writes nothing. It drafts; a person decides.

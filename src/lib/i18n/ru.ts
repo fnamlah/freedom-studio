@@ -59,6 +59,7 @@ export const ru = {
     sessions: "Рабочие смены",
     earnings: "Доходы",
     documents: "Документы",
+    inbox: "Входящие",
     library: "Библиотека",
     sectionMoney: "Финансы",
     schemes: "Схемы комиссий",

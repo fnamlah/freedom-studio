@@ -1218,7 +1218,9 @@ export type Database = {
       hermes_messages: {
         Row: {
           body: string | null
+          channel_id: string | null
           channel_type: string
+          chat_external_id: string | null
           created_at: string
           direction: string
           external_message_id: string | null
@@ -1228,7 +1230,9 @@ export type Database = {
         }
         Insert: {
           body?: string | null
+          channel_id?: string | null
           channel_type?: string
+          chat_external_id?: string | null
           created_at?: string
           direction: string
           external_message_id?: string | null
@@ -1238,7 +1242,9 @@ export type Database = {
         }
         Update: {
           body?: string | null
+          channel_id?: string | null
           channel_type?: string
+          chat_external_id?: string | null
           created_at?: string
           direction?: string
           external_message_id?: string | null
@@ -1246,7 +1252,15 @@ export type Database = {
           msg_type?: string | null
           update_id?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "hermes_messages_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "hermes_channels"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       hermes_pairing_codes: {
         Row: {
@@ -2809,6 +2823,18 @@ export type Database = {
           p_required: Database["public"]["Enums"]["user_role"]
         }
         Returns: boolean
+      }
+      hermes_session_append: {
+        Args: {
+          p_assistant: string
+          p_channel_id: string
+          p_idle_minutes?: number
+          p_keep?: number
+          p_reset?: boolean
+          p_role: string
+          p_user: string
+        }
+        Returns: undefined
       }
       is_aal2: { Args: never; Returns: boolean }
       is_active_profile: { Args: never; Returns: boolean }

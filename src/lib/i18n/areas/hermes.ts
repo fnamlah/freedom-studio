@@ -29,6 +29,17 @@ export const hermesEn = {
 
   /* ------------------------------------------------------- conversation --- */
   /** Free-text replies. Every failure says something — silence reads as broken. */
+  chatThinking: "Thinking…",
+  chatLookingUp: "Looking that up…",
+  chatStillWorking: "Still working on it…",
+  /** Keyed by tool name — a missing entry falls back to chatLookingUp. */
+  chatTool: {
+    hermes_balances: "Checking balances…",
+    hermes_approvals: "Checking approvals…",
+    hermes_compliance: "Checking documents…",
+    hermes_cost: "Checking AI spend…",
+    hermes_status: "Checking system status…",
+  } as Record<string, string>,
   chatNotConfigured:
     "I can't think right now — no AI provider key is configured. The commands still work: /brief /balances /approvals /compliance /cost /status",
   chatOverCap:
@@ -165,6 +176,16 @@ export const hermesRu: typeof hermesEn = {
   commandList: "Команды: /brief /compliance /balances /approvals /cost /status /help",
 
   /* --------------------------------------------------------- разговор --- */
+  chatThinking: "Думаю…",
+  chatLookingUp: "Смотрю данные…",
+  chatStillWorking: "Ещё работаю…",
+  chatTool: {
+    hermes_balances: "Смотрю остатки…",
+    hermes_approvals: "Смотрю предложения…",
+    hermes_compliance: "Смотрю документы…",
+    hermes_cost: "Смотрю расходы на ИИ…",
+    hermes_status: "Проверяю состояние…",
+  } as Record<string, string>,
   chatNotConfigured:
     "Сейчас я не могу думать — не настроен ключ ИИ-провайдера. Команды по-прежнему работают: /brief /balances /approvals /compliance /cost /status",
   chatOverCap:

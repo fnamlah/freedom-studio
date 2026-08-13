@@ -117,27 +117,31 @@ export async function runTool(
     }
 
     case "hermes_cost": {
-      const spent = await todaysCost();
-      const cap = (await getPolicyValue<number>("daily_cost_cap_usd")) ?? 0;
+      // Independent reads — issued together rather than one after the other.
+      const [spent, capRaw] = await Promise.all([
+        todaysCost(),
+        getPolicyValue<number>("daily_cost_cap_usd"),
+      ]);
+      const cap = capRaw ?? 0;
       return redactToolResult("hermes_cost", [
         { spent_usd: Number(spent.toFixed(4)), cap_usd: cap, currency: "USD" },
       ]);
     }
 
     case "hermes_status": {
-      const beats = orThrow(
-        name,
-        await db.from("hermes_policy").select("key, updated_at").like("key", "heartbeat:%"),
-      );
-      const jobs = orThrow(
-        name,
-        await db
+      // Three independent reads. Serially these were the most expensive tool
+      // in the set; together they cost one round trip.
+      const [beatsRes, jobsRes, enabled] = await Promise.all([
+        db.from("hermes_policy").select("key, updated_at").like("key", "heartbeat:%"),
+        db
           .from("hermes_job_runs")
           .select("job_name, status, outcome, started_at")
           .order("started_at", { ascending: false })
           .limit(5),
-      );
-      const enabled = await getPolicyValue<boolean>("enabled");
+        getPolicyValue<boolean>("enabled"),
+      ]);
+      const beats = orThrow(name, beatsRes);
+      const jobs = orThrow(name, jobsRes);
 
       const rows = [
         ...beats.map((b) => ({

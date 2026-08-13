@@ -4,6 +4,7 @@ import { getAdminClient } from "../lib/supabase.js";
 import { commandAllowed, roleMayUseBot } from "./access.js";
 import {
   answerCallbackQuery,
+  editMessageText,
   escapeHtml,
   sendChatAction,
   sendMessage,
@@ -11,6 +12,9 @@ import {
 } from "./api.js";
 import { handleCommand } from "./commands.js";
 import { converse } from "../llm/converse.js";
+import { buildHistory } from "../llm/history.js";
+import { scrubText } from "../llm/redact.js";
+import { env } from "../config/env.js";
 
 /**
  * Telegram update dispatch.
@@ -38,12 +42,22 @@ interface Channel {
   profileId: string;
   role: string;
   locale: Locale;
+  /** The chat's replay buffer, embedded in the same query. */
+  conversationState: unknown;
+  lastInboundAt: string | null;
 }
 
 async function findVerifiedChannel(chatId: number | string): Promise<Channel | null> {
+  // The session is a one-to-one FK from hermes_sessions, so PostgREST can
+  // embed it here — conversational memory costs no extra round trip.
   const { data } = await getAdminClient()
     .from("hermes_channels")
-    .select("id, profile_id, verified, is_active, profiles:profile_id(role, status, locale)")
+    // One string literal, deliberately: supabase-js infers the row shape from
+    // the literal type, and a concatenated string degrades to `string` and
+    // silently loses every column type.
+    .select(
+      "id, profile_id, verified, is_active, profiles:profile_id(role, status, locale), hermes_sessions(conversation_state, last_inbound_at)",
+    )
     .eq("channel_type", "telegram")
     .eq("external_id", String(chatId))
     .maybeSingle();
@@ -53,11 +67,18 @@ async function findVerifiedChannel(chatId: number | string): Promise<Channel | n
     | { role?: string; status?: string; locale?: string }
     | null;
   if (p?.status !== "active" || !roleMayUseBot(p?.role)) return null;
+  // The embed arrives as an array-of-at-most-one for a to-one relationship.
+  const session = Array.isArray(data.hermes_sessions)
+    ? data.hermes_sessions[0]
+    : (data.hermes_sessions as { conversation_state?: unknown; last_inbound_at?: string } | null);
+
   return {
     id: data.id as string,
     profileId: data.profile_id as string,
     role: p!.role!,
     locale: toLocale(p.locale),
+    conversationState: session?.conversation_state ?? null,
+    lastInboundAt: session?.last_inbound_at ?? null,
   };
 }
 
@@ -112,21 +133,90 @@ async function tryPair(
   return true;
 }
 
-/** Insert the dedupe marker. Returns false when this update was already seen. */
-async function markSeen(update: TelegramUpdate, body: string, msgType: string): Promise<boolean> {
-  const { error } = await getAdminClient().from("hermes_messages").insert({
-    direction: "inbound",
-    channel_type: "telegram",
-    update_id: update.update_id,
-    msg_type: msgType,
-    body: body.slice(0, 4000),
-  });
-  if (!error) return true;
-  if (error.code === "23505") return false; // duplicate delivery
+/**
+ * Insert the dedupe marker. Returns false when this update was already seen.
+ *
+ * Two things about `body`:
+ *   * It is stored SCRUBBED, so the row holds the same bytes that would cross
+ *     to a provider — the property `ai_messages` has, and the reason this log
+ *     is safe to keep indefinitely.
+ *   * The scrub applies to the STORED COPY ONLY. The caller's `text` must stay
+ *     verbatim: a pairing code is `[A-Za-z0-9-]{6,64}` and can match the
+ *     card/phone patterns, so scrubbing the working copy would silently break
+ *     pairing. Dedupe keys on `update_id`, never on the body.
+ *   * Nothing is stored for an unpaired sender. `markSeen` runs BEFORE the
+ *     access check by design (a re-delivered pairing code must not re-run
+ *     `tryPair`), so a stranger's words would otherwise be persisted forever
+ *     for no operational reason.
+ */
+async function markSeen(
+  update: TelegramUpdate,
+  msgType: string,
+): Promise<{ fresh: boolean; rowId: number | null }> {
+  const chatId = update.message?.chat.id ?? update.callback_query?.message?.chat.id;
+  const { data, error } = await getAdminClient()
+    .from("hermes_messages")
+    .insert({
+      direction: "inbound",
+      channel_type: "telegram",
+      update_id: update.update_id,
+      msg_type: msgType,
+      chat_external_id: chatId === undefined ? null : String(chatId),
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (!error) return { fresh: true, rowId: data?.id ?? null };
+  if (error.code === "23505") return { fresh: false, rowId: null }; // duplicate delivery
   // Any other insert failure: log it, but still handle the update. Dropping a
   // real message is worse than risking a rare duplicate.
   console.warn("[telegram] dedupe insert failed:", error.message);
-  return true;
+  return { fresh: true, rowId: null };
+}
+
+/**
+ * Attach the body and the owner once the sender is known to be paired.
+ *
+ * Deliberately a second, un-awaited write rather than part of the insert: the
+ * dedupe marker has to be committed BEFORE the access check (a re-delivered
+ * pairing code must not re-run `tryPair`), and at that moment we do not yet
+ * know who — or whether — this is. Splitting it means a stranger's words are
+ * never written at all, and a colleague's are written scrubbed.
+ */
+function attachInboundBody(rowId: number | null, channelId: string, text: string): void {
+  if (rowId === null) return;
+  void getAdminClient()
+    .from("hermes_messages")
+    .update({ channel_id: channelId, body: scrubText(text).slice(0, 4000) })
+    .eq("id", rowId)
+    .then(
+      () => undefined,
+      () => undefined, // the reply matters; the log is best-effort
+    );
+}
+
+/** Record what Hermes said. Best-effort, like the app's `persistMessage`. */
+function recordReply(
+  channelId: string,
+  chatId: number | string,
+  text: string,
+  messageId: number | null,
+): void {
+  void getAdminClient()
+    .from("hermes_messages")
+    .insert({
+      direction: "outbound",
+      channel_type: "telegram",
+      msg_type: "chat",
+      body: scrubText(text).slice(0, 4000),
+      chat_external_id: String(chatId),
+      channel_id: channelId,
+      external_message_id: messageId === null ? null : String(messageId),
+    })
+    .then(
+      () => undefined,
+      () => undefined,
+    );
 }
 
 export async function processUpdate(update: TelegramUpdate): Promise<void> {
@@ -135,7 +225,8 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
 
   const isCallback = Boolean(update.callback_query);
   const text = update.message?.text ?? update.callback_query?.data ?? "";
-  if (!(await markSeen(update, text, isCallback ? "callback" : "text"))) return;
+  const seen = await markSeen(update, isCallback ? "callback" : "text");
+  if (!seen.fresh) return;
 
   await enqueueKeyed(`chat:${chatId}`, async () => {
     const channel = await findVerifiedChannel(chatId);
@@ -151,6 +242,9 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
       }
       return;
     }
+
+    // Known sender: the message may now be attributed and its text kept.
+    attachInboundBody(seen.rowId, channel.id, text);
 
     if (isCallback && update.callback_query) {
       await handleApprovalCallback(
@@ -197,7 +291,7 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
     }
 
     // Free text from a verified member of senior staff — talk.
-    await converse_(chatId, text, channel);
+    await converse_(chatId, text, channel, seen.rowId);
   });
 }
 
@@ -261,33 +355,134 @@ async function converse_(
   chatId: number | string,
   text: string,
   channel: Channel,
+  inboundRowId: number | null,
 ): Promise<void> {
   const h = hermesDict(channel.locale);
-  await sendChatAction(chatId, "typing").catch(() => undefined);
 
-  const outcome = await converse({
-    text,
-    role: channel.role,
-    locale: channel.locale,
-    profileId: channel.profileId,
+  // Replay whatever this chat was just talking about. `buildHistory` is pure
+  // and fails open: an unreadable or expired state costs the bot its memory,
+  // never an answer.
+  const { messages: history, reset } = buildHistory({
+    conversationState: channel.conversationState,
+    lastInboundAt: channel.lastInboundAt,
+    currentRole: channel.role,
+    idleMinutes: env.HERMES_CHAT_IDLE_MIN,
   });
 
-  switch (outcome.kind) {
-    case "answered":
-      // Plain text on purpose: the model is told not to emit markup, and
-      // sending unescaped model output as HTML would let a tool result's
-      // contents break the message — or worse, be crafted to.
-      await sendMessage(chatId, outcome.text);
-      return;
-    case "not_configured":
-      await sendMessage(chatId, h.chatNotConfigured);
-      return;
-    case "over_cap":
-      await sendMessage(chatId, h.chatOverCap);
-      return;
-    case "failed":
-      console.warn("[telegram] conversation failed:", outcome.error);
-      await sendMessage(chatId, h.chatFailed);
-      return;
+  // A placeholder sent NOW, then edited as the turn progresses. One message
+  // that visibly evolves beats ten silent seconds and then a second message.
+  // If it cannot be sent we simply fall back to answering with a new message —
+  // the placeholder is decoration, the reply is not.
+  let placeholderId: number | null = null;
+  try {
+    placeholderId = (await sendMessage(chatId, h.chatThinking)).message_id;
+  } catch {
+    placeholderId = null;
   }
+  void sendChatAction(chatId, "typing").catch(() => undefined);
+
+  // Telegram clears "typing…" after ~5s, so re-assert it for the duration.
+  const typing = setInterval(() => {
+    void sendChatAction(chatId, "typing").catch(() => undefined);
+  }, 4_000);
+
+  // Progress edits are throttled and de-duplicated: Telegram allows roughly
+  // one message per second per chat and answers an identical edit with a 400.
+  let lastShown = h.chatThinking;
+  let lastEditAt = 0;
+  const show = (next: string): void => {
+    if (placeholderId === null || next === lastShown) return;
+    if (Date.now() - lastEditAt < 3_000) return;
+    lastShown = next;
+    lastEditAt = Date.now();
+    void editMessageText(chatId, placeholderId, next).catch(() => undefined);
+  };
+
+  try {
+    const outcome = await converse({
+      text,
+      role: channel.role,
+      locale: channel.locale,
+      profileId: channel.profileId,
+      history,
+      onProgress: (stage) => {
+        if (stage.kind === "thinking") return show(h.chatStillWorking);
+        const label = stage.names
+          .map((n) => h.chatTool[n])
+          .find((l): l is string => Boolean(l));
+        show(label ?? h.chatLookingUp);
+      },
+    });
+
+    // Every outcome ends by REPLACING the placeholder. A path that forgets to
+    // would leave "Thinking…" on screen as a permanent lie.
+    const reply =
+      outcome.kind === "answered"
+        ? outcome.text
+        : outcome.kind === "not_configured"
+          ? h.chatNotConfigured
+          : outcome.kind === "over_cap"
+            ? h.chatOverCap
+            : h.chatFailed;
+
+    if (outcome.kind === "failed") {
+      console.warn("[telegram] conversation failed:", outcome.error);
+    }
+
+    // Plain text on purpose: the model is told not to emit markup, and sending
+    // unescaped model output as HTML would let a tool result's contents break
+    // the message — or be crafted to.
+    let sentId = placeholderId;
+    if (placeholderId !== null) {
+      try {
+        await editMessageText(chatId, placeholderId, reply);
+      } catch {
+        // The one error path that must not lose the answer.
+        sentId = (await sendMessage(chatId, reply).catch(() => null))?.message_id ?? null;
+      }
+    } else {
+      sentId = (await sendMessage(chatId, reply).catch(() => null))?.message_id ?? null;
+    }
+
+    attachInboundBody(inboundRowId, channel.id, text);
+    recordReply(channel.id, chatId, reply, sentId);
+
+    // Only a real exchange is worth remembering. Storing an apology would have
+    // the model treat it as its own prior answer next turn.
+    if (outcome.kind === "answered") {
+      void rememberTurn(channel, text, outcome.text, reset);
+    }
+  } finally {
+    clearInterval(typing);
+  }
+}
+
+/**
+ * Append this exchange to the chat's replay buffer.
+ *
+ * The trimming rules live in `hermes_session_append` (028) — one statement, so
+ * two workers overlapping during a redeploy cannot lose a turn. Both sides are
+ * stored scrubbed: the state is replayed straight into the next provider call,
+ * so raw text here would egress on turn 2 something turn 1 masked.
+ */
+function rememberTurn(
+  channel: Channel,
+  asked: string,
+  answered: string,
+  reset: boolean,
+): void {
+  void getAdminClient()
+    .rpc("hermes_session_append", {
+      p_channel_id: channel.id,
+      p_user: scrubText(asked).slice(0, 2000),
+      p_assistant: scrubText(answered).slice(0, 1200),
+      p_role: channel.role,
+      p_keep: env.HERMES_HISTORY_KEEP,
+      p_idle_minutes: env.HERMES_CHAT_IDLE_MIN,
+      p_reset: reset,
+    })
+    .then(
+      () => undefined,
+      (e: unknown) => console.warn("[telegram] memory write failed:", e),
+    );
 }

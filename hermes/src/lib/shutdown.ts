@@ -37,8 +37,16 @@ export function trackDrain<T>(p: Promise<T>): Promise<T> {
   return p;
 }
 
+/** How much work is in flight — the poller's back-pressure signal. */
+export function inFlight(): number {
+  return drains.size;
+}
+
 export function installSignalHandlers(opts: { deadlineMs?: number } = {}): void {
-  const deadlineMs = opts.deadlineMs ?? 25_000;
+  // Longer than one turn's own 60s ceiling (llm/converse.ts). At 25s a
+  // redeploy killed conversations mid-sentence; now the drain outlasts the
+  // slowest thing it is draining.
+  const deadlineMs = opts.deadlineMs ?? 70_000;
   let signalled = false;
 
   const onSignal = (signal: string) => {

@@ -42,7 +42,9 @@ const schema = z.object({
   HERMES_APPROVAL_SWEEP_MS: z.coerce.number().default(10_000),
   HERMES_MAX_RUN_ITERATIONS: z.coerce.number().default(8),
   HERMES_DAILY_COST_CAP_USD: z.coerce.number().default(5),
-  HERMES_HISTORY_KEEP: z.coerce.number().default(12),
+  // Conversational memory. HISTORY_KEEP is turn PAIRS, not messages.
+  HERMES_HISTORY_KEEP: z.coerce.number().default(6),
+  HERMES_CHAT_IDLE_MIN: z.coerce.number().default(30),
 
   // Job gates (UTC hours / day-of-week, 0 = Sunday).
   HERMES_BRIEF_HOUR_UTC: z.coerce.number().default(6),

@@ -71,13 +71,46 @@ export function sendMessage(
   chatId: number | string,
   text: string,
   opts: { html?: boolean } = {},
-): Promise<unknown> {
-  return call("sendMessage", {
+): Promise<TelegramMessage> {
+  return call<TelegramMessage>("sendMessage", {
     chat_id: chatId,
     text: text.slice(0, HARD_LIMIT),
     ...(opts.html ? { parse_mode: "HTML" } : {}),
     disable_web_page_preview: true,
   });
+}
+
+/**
+ * Replace the text of a message already sent.
+ *
+ * This is how a conversational turn shows its work: one placeholder is sent
+ * immediately and then edited — "looking that up…" → the answer — rather than
+ * leaving the chat silent for ten seconds and then posting a second message.
+ *
+ * Telegram answers a byte-identical edit with 400 "message is not modified",
+ * which `call` would throw on. Callers dedupe on the last text they sent; this
+ * swallows that one description as a backstop so a cosmetic race can never
+ * cost anyone their answer.
+ */
+export async function editMessageText(
+  chatId: number | string,
+  messageId: number,
+  text: string,
+  opts: { html?: boolean } = {},
+): Promise<void> {
+  try {
+    await call("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text: text.slice(0, HARD_LIMIT),
+      ...(opts.html ? { parse_mode: "HTML" } : {}),
+      disable_web_page_preview: true,
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (/not modified/i.test(message)) return;
+    throw e;
+  }
 }
 
 /**

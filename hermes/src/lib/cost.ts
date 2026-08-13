@@ -30,6 +30,11 @@ export class CostCapError extends Error {
 /** USD per 1M tokens. Keys are matched as SUBSTRINGS of the model id. */
 const PRICES: Record<string, { in: number; out: number }> = {
   "kimi-k3": { in: 0.6, out: 2.5 },
+  // Hermes' chat model (measured 2.5x faster than k3 for short tool-using
+  // replies). Priced at the k3 rate as a deliberate over-estimate: k2.6 is an
+  // older, cheaper model, so this can only over-report spend, never under.
+  // Replace with the published rate when someone confirms it.
+  "kimi-k2": { in: 0.6, out: 2.5 },
   "glm-5.2": { in: 0.6, out: 2.2 },
   "glm-4": { in: 0.5, out: 2.0 },
 };
@@ -105,8 +110,18 @@ export async function recordCost(
   model: string,
   usage: { inputTokens: number; outputTokens: number },
 ): Promise<void> {
-  const cost = computeCost(model, usage);
-  if (cost <= 0) return;
+  return recordCostUsd(computeCost(model, usage));
+}
+
+/**
+ * Add an already-computed amount to today's accumulator.
+ *
+ * A conversational turn makes several provider calls and used to write one row
+ * per call, on the critical path. It now sums them and calls this once, which
+ * is the same arithmetic in one round trip instead of up to five.
+ */
+export async function recordCostUsd(cost: number): Promise<void> {
+  if (!Number.isFinite(cost) || cost <= 0) return;
   // 6dp: rounding to 4 sent sub-$0.0001 calls to zero, so they never accumulated.
   const delta = Math.round(cost * 1e6) / 1e6;
 

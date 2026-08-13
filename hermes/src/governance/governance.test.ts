@@ -20,6 +20,8 @@ import {
 } from "./policy.js";
 import { BOT_ROLES, commandAllowed, roleMayUseBot } from "../telegram/access.js";
 import { specsForRole, TOOL_COMMAND } from "../llm/tool-catalog.js";
+import { isIdleExpired, parseState, toMessages, withinBudget } from "../llm/history.js";
+import { hermesEn, hermesRu } from "../lib/i18n.js";
 
 test("unknown actions fail safe to approval, never automatic", () => {
   for (const unknown of ["", "wire_funds", "drop_table", "../../etc/passwd", "SEND_BRIEF"]) {
@@ -189,5 +191,75 @@ test("the conversational surface exposes no write tool", () => {
       /create|update|delete|approve|reject|close|post|pay|set_|write/i,
       `${tool} reads as a mutation — the chat surface is read-only`,
     );
+  }
+});
+
+/* ------------------------------------------------------ conversation memory --- */
+
+const turn = (i: number, at = new Date().toISOString()) => ({
+  user: `q${i}`,
+  assistant: `a${i}`,
+  at,
+});
+
+test("a replayed history is only user and assistant prose — never a tool stub", () => {
+  // The invariant the whole storage shape exists to hold. Re-feeding an
+  // assistant message with tool_calls, or a tool message whose call is gone,
+  // is a provider linkage error — the app has to filter its own log for this
+  // reason; here it must be unrepresentable.
+  const messages = toMessages([turn(1), turn(2)]);
+  assert.equal(messages.length, 4);
+  for (const m of messages) {
+    assert.ok(m.role === "user" || m.role === "assistant", `unexpected role ${m.role}`);
+    assert.equal("tool_calls" in m, false);
+    assert.equal("tool_call_id" in m, false);
+  }
+});
+
+test("state from a different role is discarded", () => {
+  // Assistant prose contains aggregates the previous role was entitled to see.
+  const state = { v: 1, role: "super_admin", turns: [turn(1)] };
+  assert.deepEqual(parseState(state, "finance"), []);
+  assert.equal(parseState(state, "super_admin").length, 1);
+});
+
+test("malformed or future state fails open to no memory, never throws", () => {
+  for (const bad of [null, undefined, {}, [], "nope", 7, { v: 2, turns: [turn(1)] }]) {
+    assert.deepEqual(parseState(bad, "super_admin"), [], `${JSON.stringify(bad)} should be empty`);
+  }
+  // Individually malformed turns are skipped, not fatal.
+  const mixed = { v: 1, role: "x", turns: [turn(1), { user: "" }, { assistant: 3 }, turn(2)] };
+  assert.equal(parseState(mixed, "x").length, 2);
+});
+
+test("an idle gap starts a new conversation", () => {
+  const now = Date.parse("2026-08-13T12:00:00Z");
+  const recent = new Date(now - 5 * 60_000).toISOString();
+  const stale = new Date(now - 45 * 60_000).toISOString();
+  assert.equal(isIdleExpired(recent, 30, now), false);
+  assert.equal(isIdleExpired(stale, 30, now), true);
+  // No prior message, or an unparseable one, is a fresh conversation.
+  assert.equal(isIdleExpired(null, 30, now), true);
+  assert.equal(isIdleExpired("not-a-date", 30, now), true);
+});
+
+test("the character budget drops WHOLE pairs, newest first", () => {
+  const big = (i: number) => ({ user: "u".repeat(500), assistant: "a".repeat(500), at: `t${i}` });
+  const kept = withinBudget([big(1), big(2), big(3), big(4)], 2200);
+  // 1000 chars per pair → only two fit, and they must be the NEWEST two.
+  assert.equal(kept.length, 2);
+  assert.equal(kept[0]!.at, "t3");
+  assert.equal(kept[1]!.at, "t4");
+  // Never a half pair.
+  for (const t of kept) assert.ok(t.user && t.assistant);
+});
+
+test("every conversational tool has a progress label in BOTH languages", () => {
+  // A missing label is not fatal at run time (it falls back), but a tool with
+  // no Russian label would show English to a Russian reader — the exact
+  // failure the typed dictionary exists to prevent.
+  for (const tool of Object.keys(TOOL_COMMAND)) {
+    assert.ok(hermesEn.chatTool[tool], `${tool} has no English progress label`);
+    assert.ok(hermesRu.chatTool[tool], `${tool} has no Russian progress label`);
   }
 });

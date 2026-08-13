@@ -1,6 +1,6 @@
 import { alertOwner } from "../lib/owner.js";
 import { getPolicyValue, isEnabled, setPolicyValue } from "../lib/policy-kv.js";
-import { isStopping, stoppableSleep, trackDrain } from "../lib/shutdown.js";
+import { inFlight, isStopping, stoppableSleep, trackDrain } from "../lib/shutdown.js";
 import { getUpdates } from "../telegram/api.js";
 import { processUpdate } from "../telegram/handler.js";
 
@@ -19,6 +19,9 @@ import { processUpdate } from "../telegram/handler.js";
 
 const OFFSET_KEY = "telegram_offset";
 const CONFLICT_ALERT_AFTER = 20;
+
+/** Concurrent turns. Each one holds a provider socket and costs money. */
+const MAX_CONCURRENT_TURNS = 4;
 
 export async function runTelegramPoller(): Promise<void> {
   let offset = (await getPolicyValue<number>(OFFSET_KEY)) ?? 0;
@@ -39,16 +42,31 @@ export async function runTelegramPoller(): Promise<void> {
       conflicts = 0;
       errors = 0;
 
+      // Dispatch WITHOUT awaiting. `enqueueKeyed` inside processUpdate still
+      // serialises per chat — which is what conversational memory needs — while
+      // different chats finally run concurrently, as keyed-queue.ts always
+      // claimed. Awaiting here meant one 20s turn froze every other chat AND
+      // the approval buttons, which take this same path.
       for (const update of updates) {
-        try {
-          await trackDrain(processUpdate(update));
-        } catch (e) {
-          // One poisonous update must not wedge the queue behind it.
-          console.error("[telegram] update failed:", e instanceof Error ? e.message : e);
-        }
+        void trackDrain(
+          processUpdate(update).catch((e: unknown) => {
+            // One poisonous update must not wedge anything behind it.
+            console.error("[telegram] update failed:", e instanceof Error ? e.message : e);
+          }),
+        );
         offset = update.update_id + 1;
-        await setPolicyValue(OFFSET_KEY, offset).catch(() => {});
+
+        // Each turn holds a provider socket and spends money; an unbounded
+        // burst would be an unbounded bill. Wait for room before accepting more.
+        while (inFlight() >= MAX_CONCURRENT_TURNS && !isStopping()) {
+          await stoppableSleep(250);
+        }
       }
+
+      // Once per batch rather than per update. Awaited, so a stale offset can
+      // never overwrite a newer one; long polls return a single update in
+      // normal operation, so the crash exposure is unchanged in practice.
+      if (updates.length > 0) await setPolicyValue(OFFSET_KEY, offset).catch(() => {});
 
       const now = Date.now();
       if (now - lastHeartbeat >= 60_000) {

@@ -1,5 +1,5 @@
 import { env } from "../config/env.js";
-import { getAdminClient } from "../lib/supabase.js";
+import { readSetting } from "../lib/settings.js";
 
 /**
  * The worker's provider call — the FIRST one Hermes has ever made.
@@ -54,32 +54,41 @@ export class ProviderNotConfiguredError extends Error {
 
 type ProviderId = "moonshot" | "zhipu";
 
+/**
+ * Fallbacks only — the seeded `app_settings` rows shadow these in every real
+ * environment. They agree with the app's own fallbacks
+ * (`src/lib/ai/provider.ts`) on purpose: this file previously said
+ * `kimi-k3-turbo`, an id that appears nowhere else in the repo and could never
+ * fire, so the disagreement was invisible until someone deleted a seed row.
+ */
 const DEFAULT_MODEL: Record<ProviderId, string> = {
-  moonshot: "kimi-k3-turbo",
+  moonshot: "kimi-k3",
   zhipu: "glm-5.2",
 };
-
-async function readSetting(key: string): Promise<string | null> {
-  const { data } = await getAdminClient()
-    .from("app_settings")
-    .select("value")
-    .eq("key", key)
-    .maybeSingle();
-  const v = data?.value;
-  if (typeof v === "string") return v;
-  // `app_settings.value` is jsonb; a plain string arrives already unwrapped by
-  // PostgREST, but a JSON-encoded string does not.
-  if (v && typeof v === "object") return null;
-  return v == null ? null : String(v);
-}
 
 export async function activeProvider(): Promise<ProviderId> {
   const raw = (await readSetting("ai.active_provider")) ?? "moonshot";
   return raw === "zhipu" ? "zhipu" : "moonshot";
 }
 
+/**
+ * The chat model, preferring a HERMES-specific override.
+ *
+ * `ai.chat_model.<provider>` is shared with the portal's assistant, where the
+ * job is deep analysis; here it is two-sentence chat over a handful of
+ * aggregates. `hermes.chat_model.<provider>` lets the bot run a faster or
+ * cheaper model without changing what the portal does — and changing the
+ * shared key is a governed action audited as `ai.model_switch`, not something
+ * a latency fix should do behind the owner's back.
+ *
+ * Unset means "use whatever the studio uses", so nothing needs seeding.
+ */
 export async function chatModelFor(provider: ProviderId): Promise<string> {
-  return (await readSetting(`ai.chat_model.${provider}`)) ?? DEFAULT_MODEL[provider];
+  return (
+    (await readSetting(`hermes.chat_model.${provider}`)) ??
+    (await readSetting(`ai.chat_model.${provider}`)) ??
+    DEFAULT_MODEL[provider]
+  );
 }
 
 /**
@@ -110,8 +119,13 @@ function credentialsFor(provider: ProviderId): { key: string; baseUrl: string } 
  * freezes the whole bot, including the approval buttons, until the socket
  * eventually dies. A turn can make several of these, so the ceiling is
  * per-request and deliberately shorter than a person's patience.
+ *
+ * 25s, not the original 45s: `converse()` now imposes a 60s ceiling on the
+ * whole turn, so a 45s request could only ever be the first one and a stall
+ * would eat the entire budget. At 25s a stalled call still leaves room for the
+ * turn to recover and answer.
  */
-const REQUEST_TIMEOUT_MS = 45_000;
+const REQUEST_TIMEOUT_MS = 25_000;
 
 /**
  * One non-streaming completion. Every string in `messages` and every tool
@@ -139,8 +153,12 @@ export async function chat(input: {
       ...(temp === undefined ? {} : { temperature: temp }),
       stream: false,
     }),
-    // Caller-supplied signal wins; otherwise every request still gets a bound.
-    signal: input.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    // Both bounds apply. A caller-supplied turn deadline must not REPLACE the
+    // per-request ceiling — otherwise one stalled request could consume the
+    // whole turn budget and leave nothing for a retry or a final answer.
+    signal: input.signal
+      ? AbortSignal.any([input.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {

@@ -198,6 +198,16 @@ async function recordEarning(
   if (typeof prior.earning_id === "string") {
     return { message: h.execAlreadyRecorded, result: prior };
   }
+  if (prior.attempted === true) {
+    // The previous run reached the insert and did not come back. Re-running
+    // could double-post money, so this stops and asks for eyes.
+    throw new Error("a previous attempt may already have recorded this — check Earnings first");
+  }
+
+  // Claim the attempt BEFORE the write. A crash between the insert and the
+  // marker would otherwise re-run the insert on retry, and `earnings` has no
+  // unique key that would stop a second identical row.
+  await saveStep({ attempted: true });
 
   const { data, error } = await getAdminClient().rpc("fn_agent_record_earning", {
     p_approver: approver,
@@ -226,6 +236,9 @@ async function recordSession(
   if (typeof prior.session_id === "string") {
     return { message: h.execAlreadyRecorded, result: prior };
   }
+  if (prior.attempted === true) {
+    throw new Error("a previous attempt may already have recorded this — check Work sessions first");
+  }
 
   // An OPEN session has no end time, so `p_ended_at` is omitted rather than
   // passed as null — PostgREST types a defaulted argument as optional. Built
@@ -239,6 +252,8 @@ async function recordSession(
   };
   if (typeof payload.ended_at === "string") args.p_ended_at = payload.ended_at;
   if (typeof payload.notes === "string") args.p_notes = payload.notes;
+
+  await saveStep({ attempted: true });
 
   const { data, error } = await getAdminClient().rpc(
     "fn_agent_record_session",
@@ -261,6 +276,11 @@ async function recordExpense(
   if (typeof prior.expense_id === "string") {
     return { message: h.execAlreadyRecorded, result: prior };
   }
+  if (prior.attempted === true) {
+    throw new Error("a previous attempt may already have recorded this — check Expenses first");
+  }
+
+  await saveStep({ attempted: true });
 
   const { data, error } = await getAdminClient().rpc("fn_agent_record_expense", {
     p_approver: approver,
@@ -349,6 +369,8 @@ async function upsertModel(
     if (payload[from] !== undefined) args[to] = payload[from];
   }
 
+  await saveStep({ attempted: true });
+
   const { data, error } = await getAdminClient().rpc("fn_agent_upsert_model", args as never);
   if (error) throw new Error(error.message);
 
@@ -384,13 +406,12 @@ async function readComplianceDocument(
   });
   if (consentError) throw new Error(consentError.message);
 
-  await saveStep({ consented: true });
-
-  // The analyser lives in the app and needs a request context, so the crossing
-  // itself is left to the portal's own route: consent is recorded here, and
-  // the document becomes readable from the next analysis onward. Telling the
-  // person that plainly beats pretending the read already happened.
-  return { message: h.execDocumentReadable, result: await saveStep({ analysed: true }) };
+  // `consented`, not `analysed`. Nothing here reads the document: the analyser
+  // lives in the app and needs a request context. Recording `analysed: true`
+  // would put a claim in the approval's permanent result that never happened,
+  // and the message says exactly what did.
+  const result = await saveStep({ consented: true });
+  return { message: h.execDocumentReadable, result };
 }
 
 export async function runExecutor(

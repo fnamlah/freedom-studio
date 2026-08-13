@@ -19,7 +19,26 @@
 
 export const BOT_ROLES: ReadonlySet<string> = new Set(["super_admin", "manager", "finance"]);
 
-const SUPER_ADMIN_ONLY = new Set(["/pause", "/resume"]);
+/**
+ * Commands whose surface is narrower than the bot's own role set.
+ *
+ * Anything absent is open to all three bot roles. That default was previously
+ * the ONLY behaviour, which is how a documents reader gated by `/balances`
+ * came to serve compliance documents to `finance` — a role 008 denies that
+ * table entirely ("a deliberate least-privilege stance"). Where the app's
+ * capability matrix is narrower than super_admin|manager|finance, it has to be
+ * said here, not assumed.
+ */
+const COMMAND_ROLES: Record<string, ReadonlySet<string>> = {
+  // The kill switch is the owner's.
+  "/pause": new Set(["super_admin"]),
+  "/resume": new Set(["super_admin"]),
+  // `documents` is SA/MGR in 008; finance and operators have no policy at all.
+  "/documents": new Set(["super_admin", "manager"]),
+  // Proposing a write. Belt to the braces of the per-action `roleSatisfies`
+  // check that `specsForRole` and `runTool` already apply.
+  "/propose": new Set(["super_admin", "manager"]),
+};
 
 export function roleMayUseBot(role: string | null | undefined): boolean {
   return typeof role === "string" && BOT_ROLES.has(role);
@@ -27,6 +46,6 @@ export function roleMayUseBot(role: string | null | undefined): boolean {
 
 export function commandAllowed(role: string, command: string): boolean {
   if (!roleMayUseBot(role)) return false;
-  if (SUPER_ADMIN_ONLY.has(command)) return role === "super_admin";
-  return true;
+  const allowed = COMMAND_ROLES[command];
+  return allowed ? allowed.has(role) : true;
 }

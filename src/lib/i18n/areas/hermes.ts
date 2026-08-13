@@ -37,7 +37,8 @@ export const hermesEn = {
   execDocumentUpdated: "Document details updated.",
   execModelCreated: "Model added.",
   execModelUpdated: "Model updated.",
-  execDocumentReadable: "Consent recorded — that document can now be read, and the decision is in the audit trail.",
+  execDocumentReadable:
+    "Consent recorded. The document can now be analysed — open it in the portal and press Analyse, or ask me again. The decision is in the audit trail and you can revoke it any time.",
   execDeleted: "Deleted.",
   execAlreadyGone: "That record was already gone — nothing to delete.",
 
@@ -205,7 +206,8 @@ export const hermesRu: typeof hermesEn = {
   execDocumentUpdated: "Данные документа обновлены.",
   execModelCreated: "Модель добавлена.",
   execModelUpdated: "Данные модели обновлены.",
-  execDocumentReadable: "Согласие записано — теперь этот документ можно читать, решение зафиксировано в журнале.",
+  execDocumentReadable:
+    "Согласие записано. Теперь документ можно разобрать — откройте его в портале и нажмите «Разобрать», либо спросите меня снова. Решение зафиксировано в журнале, и его можно отозвать в любой момент.",
   execDeleted: "Удалено.",
   execAlreadyGone: "Этой записи уже не было — удалять нечего.",
 

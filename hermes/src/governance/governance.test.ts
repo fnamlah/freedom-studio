@@ -321,3 +321,36 @@ test("every conversational tool has a progress label in BOTH languages", () => {
     assert.ok(hermesRu.chatTool[tool], `${tool} has no Russian progress label`);
   }
 });
+
+test("finance never reaches compliance documents through the bot", () => {
+  // An adversarial review caught this as a live privilege escalation: all
+  // three new read tools were gated by `/balances`, and `commandAllowed`
+  // returns true for finance on any command not explicitly restricted — so
+  // the bot served passport titles, types, expiry dates and the AI's extracts
+  // of their contents to a role that 008 denies the `documents` table
+  // ENTIRELY. Earnings and terms ARE fine for finance, which is what made
+  // documents a silent outlier rather than an obvious one.
+  assert.equal(commandAllowed("finance", "/documents"), false);
+  assert.equal(commandAllowed("finance", "/propose"), false);
+  assert.equal(commandAllowed("manager", "/documents"), true);
+  assert.equal(commandAllowed("super_admin", "/documents"), true);
+
+  const offered = specsForRole("finance", commandAllowed).map((s) => s.function.name);
+  assert.ok(!offered.includes("hermes_documents"), "finance was offered the document reader");
+  assert.ok(
+    !offered.some((n) => n.startsWith("hermes_propose")),
+    "finance was offered a write proposal it could not approve",
+  );
+  // …and the reads finance legitimately holds are still there.
+  assert.ok(offered.includes("hermes_model_earnings"));
+});
+
+test("no read tool inherits a gate wider than the surface it reads", () => {
+  // The circular version of this test — asserting commandAllowed(role,
+  // TOOL_COMMAND[name]) — passed unconditionally and caught nothing. This
+  // pins the mapping itself.
+  assert.equal(TOOL_COMMAND.hermes_documents, "/documents");
+  for (const tool of Object.keys(PROPOSE_ACTION)) {
+    assert.equal(TOOL_COMMAND[tool], "/propose", `${tool} must sit behind /propose`);
+  }
+});

@@ -310,6 +310,7 @@ const PROPOSE_TOOLS: ToolSpec[] = [
           kind: { type: "string", enum: ["earning", "work_session", "expense"] },
           model: { type: "string", description: "Whose record, for earnings and sessions." },
           period_start: { type: "string", description: "YYYY-MM-DD, to identify an earning." },
+          started_on: { type: "string", description: "YYYY-MM-DD, to identify a work session." },
           vendor: { type: "string", description: "To identify an expense." },
           incurred_on: { type: "string", description: "YYYY-MM-DD, to identify an expense." },
         },
@@ -339,7 +340,30 @@ const PROPOSE_TOOLS: ToolSpec[] = [
 
 TOOL_SPECS.push(...READ_TOOLS, ...PROPOSE_TOOLS);
 
-// Reads follow the surface they extend; writes are manager-and-above, matching
-// the ACTION_POLICIES `requiredRole` on every proposed action.
-for (const spec of READ_TOOLS) TOOL_COMMAND[spec.function.name] = "/balances";
+/**
+ * Which command's role gate each read tool inherits.
+ *
+ * NOT all `/balances`. An adversarial review caught that mapping handing the
+ * FINANCE role every compliance document: `commandAllowed` returns true for
+ * finance on `/balances`, but 008 denies finance the `documents` table
+ * ENTIRELY — "a deliberate least-privilege stance". The bot would have served
+ * passport titles, types, expiry dates and the AI's extracts of their contents
+ * to a role with no path to a single such row in the app.
+ *
+ * Earnings and terms are genuinely fine for finance — it holds explicit SELECT
+ * policies on `earnings`, `work_sessions`, `commission_schemes` and
+ * `commission_rates` — which is exactly what made the documents case a silent
+ * outlier rather than an obvious one. So each tool now names the surface it
+ * actually reads.
+ */
+const READ_TOOL_COMMAND: Record<string, string> = {
+  hermes_model_earnings: "/balances",
+  hermes_model_terms: "/balances",
+  // SA/MGR only, mirroring `documents_admin_all` in 008.
+  hermes_documents: "/documents",
+};
+
+for (const spec of READ_TOOLS) {
+  TOOL_COMMAND[spec.function.name] = READ_TOOL_COMMAND[spec.function.name] ?? "/documents";
+}
 for (const spec of PROPOSE_TOOLS) TOOL_COMMAND[spec.function.name] = "/propose";

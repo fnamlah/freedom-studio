@@ -232,12 +232,13 @@ function sinceMonths(n: number): string {
 }
 
 async function readModelEarnings(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const name_ = "hermes_model_earnings";
   const db = getAdminClient();
   const model = await resolveModel(String(args.model ?? ""));
   if (!model.ok) throw new Error(explain(model, "models"));
 
   const since = sinceMonths(typeof args.months === "number" ? args.months : 3);
-  const [earn, hours, platforms] = await Promise.all([
+  const [earnRes, hoursRes, platformsRes] = await Promise.all([
     db
       .from("v_earnings_monthly")
       .select("month, platform_id, gross_amount, net_amount")
@@ -252,12 +253,16 @@ async function readModelEarnings(args: Record<string, unknown>): Promise<Record<
     db.from("platforms").select("id, name"),
   ]);
 
-  const pname = new Map((platforms.data ?? []).map((p) => [p.id, p.name]));
-  const hoursByMonth = new Map(
-    (hours.data ?? []).map((h) => [String(h.month), h] as const),
-  );
+  // A failed read must not become "she earned nothing" — the same reasoning
+  // `orThrow` carries for the original tools.
+  const earn = orThrow(name_, earnRes);
+  const hours = orThrow(name_, hoursRes);
+  const platforms = orThrow(name_, platformsRes);
 
-  const rows = (earn.data ?? []).map((e) => {
+  const pname = new Map(platforms.map((p) => [p.id, p.name]));
+  const hoursByMonth = new Map(hours.map((h) => [String(h.month), h] as const));
+
+  const rows = earn.map((e) => {
     const h = hoursByMonth.get(String(e.month));
     return {
       stage_name: model.value.label,
@@ -292,21 +297,27 @@ async function readModelTerms(args: Record<string, unknown>): Promise<Record<str
       .eq("model_id", model.value.id),
   ]);
 
+  const schemeRows = orThrow("hermes_model_terms", schemes);
+  const assignmentRows = orThrow("hermes_model_terms", assignments);
+
   const scheme =
-    (schemes.data ?? []).find((s) => s.model_id === model.value.id) ??
-    (schemes.data ?? []).find((s) => s.model_id === null);
+    schemeRows.find((s) => s.model_id === model.value.id) ??
+    schemeRows.find((s) => s.model_id === null);
 
   const rows: Record<string, unknown>[] = [];
 
   if (scheme) {
-    const { data: rates } = await db
-      .from("commission_rates")
-      .select("party, min_amount, percent")
-      .eq("scheme_id", scheme.id)
-      .order("party")
-      .order("min_amount");
+    const rates = orThrow(
+      "hermes_model_terms",
+      await db
+        .from("commission_rates")
+        .select("party, min_amount, percent")
+        .eq("scheme_id", scheme.id)
+        .order("party")
+        .order("min_amount"),
+    );
 
-    if (rates?.length) {
+    if (rates.length) {
       for (const r of rates) {
         rows.push({
           stage_name: model.value.label,
@@ -331,7 +342,7 @@ async function readModelTerms(args: Record<string, unknown>): Promise<Record<str
     }
   }
 
-  for (const a of assignments.data ?? []) {
+  for (const a of assignmentRows) {
     const op = a.operators as unknown as { display_name?: string; staff_role?: string } | null;
     rows.push({
       stage_name: model.value.label,
@@ -385,13 +396,15 @@ async function readDocuments(args: Record<string, unknown>): Promise<Record<stri
     db.from("models").select("id, stage_name"),
   ]);
 
-  const mname = new Map((models.data ?? []).map((m) => [m.id, m.stage_name]));
+  const docRows = orThrow("hermes_documents", docs);
+  const libRows = orThrow("hermes_documents", lib);
+  const mname = new Map(orThrow("hermes_documents", models).map((m) => [m.id, m.stage_name]));
   const today = new Date().toISOString().slice(0, 10);
   const expiringOnly = args.expiring === true;
 
   const rows: Record<string, unknown>[] = [];
 
-  for (const d of docs.data ?? []) {
+  for (const d of docRows) {
     const compliance = !d.expires_at
       ? "valid"
       : d.expires_at < today
@@ -417,7 +430,7 @@ async function readDocuments(args: Record<string, unknown>): Promise<Record<stri
   }
 
   if (!expiringOnly) {
-    for (const f of lib.data ?? []) {
+    for (const f of libRows) {
       const cat = f.doc_categories as unknown as { name?: string } | null;
       rows.push({
         kind: "library file",
@@ -436,6 +449,14 @@ async function readDocuments(args: Record<string, unknown>): Promise<Record<stri
 }
 
 /* ------------------------------------------------------------- proposals --- */
+
+/** "status: terminated, country: PL" — what the card actually promises to do. */
+function describeChanges(payload: Record<string, unknown>, omit: string[]): string {
+  return Object.entries(payload)
+    .filter(([k, v]) => !omit.includes(k) && v !== undefined)
+    .map(([k, v]) => `${k}: ${String(v)}`)
+    .join(", ");
+}
 
 /** Build the bilingual preview a human reads on the card before tapping. */
 function preview(en: string, ru: string, risk?: string): Record<string, unknown> {
@@ -477,7 +498,25 @@ async function propose(
   ]);
 }
 
-const money2 = (v: unknown): number => Math.round(Number(v) * 100) / 100;
+/**
+ * A money value, or a refusal.
+ *
+ * `Number(null)` is 0 and `Number([])` is 0, so an omitted or malformed amount
+ * used to become a silent zero on an approval card; NaN and Infinity survived
+ * to the executor and died there, long after the human had read a sentence
+ * that looked fine. `earnings.net_amount` carries no non-negative constraint,
+ * so nothing downstream would have caught it either.
+ */
+function money2(v: unknown, field: string): number {
+  if (v === null || v === undefined || v === "" || typeof v === "boolean" || Array.isArray(v)) {
+    throw new Error(`${field} is missing — say the amount and I will prepare it.`);
+  }
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`${field} is not a number I can record.`);
+  if (n < 0) throw new Error(`${field} cannot be negative.`);
+  if (n > 9_999_999_999) throw new Error(`${field} is larger than this system accepts.`);
+  return Math.round(n * 100) / 100;
+}
 
 async function proposeEarning(ctx: ToolContext, a: Record<string, unknown>) {
   const acct = await resolveAccount(
@@ -486,13 +525,13 @@ async function proposeEarning(ctx: ToolContext, a: Record<string, unknown>) {
   );
   if (!acct.ok) throw new Error(explain(acct, "accounts"));
 
-  const net = money2(a.net_amount);
+  const net = money2(a.net_amount, "net amount");
   const payload = {
     platform_account_id: acct.value.id,
     period_start: String(a.period_start),
     period_end: String(a.period_end),
-    gross_amount: money2(a.gross_amount),
-    fee_amount: a.fee_amount === undefined ? 0 : money2(a.fee_amount),
+    gross_amount: money2(a.gross_amount, "gross amount"),
+    fee_amount: a.fee_amount === undefined ? 0 : money2(a.fee_amount, "fee"),
     net_amount: net,
   };
   return propose(
@@ -515,7 +554,7 @@ async function proposeSession(ctx: ToolContext, a: Record<string, unknown>) {
     platform_account_id: acct.value.id,
     started_at: String(a.started_at),
     ...(typeof a.ended_at === "string" ? { ended_at: a.ended_at } : {}),
-    ...(a.gross_earnings === undefined ? {} : { gross_earnings: money2(a.gross_earnings) }),
+    ...(a.gross_earnings === undefined ? {} : { gross_earnings: money2(a.gross_earnings, "gross earnings") }),
     ...(typeof a.notes === "string" ? { notes: a.notes } : {}),
   };
   return propose(
@@ -528,7 +567,7 @@ async function proposeSession(ctx: ToolContext, a: Record<string, unknown>) {
 }
 
 async function proposeExpense(ctx: ToolContext, a: Record<string, unknown>) {
-  const amount = money2(a.amount);
+  const amount = money2(a.amount, "amount");
   const payload = {
     incurred_on: String(a.incurred_on),
     vendor: String(a.vendor),
@@ -567,9 +606,9 @@ async function proposeModel(ctx: ToolContext, a: Record<string, unknown>) {
     ...(typeof a.country === "string" ? { country: a.country } : {}),
   };
 
-  const changed = Object.keys(payload)
-    .filter((k) => k !== "model_id")
-    .join(", ");
+  // Name the values, not just the fields. "change status" is not something a
+  // person can meaningfully approve; "status: active → terminated" is.
+  const changed = describeChanges(payload, ["model_id"]);
   return modelId
     ? propose(
         ctx,
@@ -601,7 +640,7 @@ async function proposeDocumentUpdate(ctx: ToolContext, a: Record<string, unknown
     ...(typeof a.issued_date === "string" ? { issued_date: a.issued_date } : {}),
     ...(typeof a.expires_at === "string" ? { expires_at: a.expires_at } : {}),
   };
-  const changed = Object.keys(payload).filter((k) => k !== "document_id").join(", ");
+  const changed = describeChanges(payload, ["document_id"]);
   return propose(
     ctx,
     "update_document",
@@ -627,19 +666,33 @@ async function proposeDelete(ctx: ToolContext, a: Record<string, unknown>) {
         .select("id, period_start, period_end, net_amount")
         .eq("model_id", m.value.id);
       if (typeof a.period_start === "string") q = q.eq("period_start", a.period_start);
-      const { data } = await q.limit(5);
-      if (!data?.length) throw new Error("No earning matches that.");
+      const data = orThrow("hermes_propose_delete", await q.limit(5));
+      if (!data.length) throw new Error("No earning matches that.");
       if (data.length > 1) throw new Error("Several earnings match — name the exact period.");
       recordId = data[0]!.id;
       what = `${m.value.label} — ${data[0]!.net_amount} net, ${data[0]!.period_start} to ${data[0]!.period_end}`;
     } else {
-      const { data } = await db
+      // Deleting is irreversible, so this refuses ambiguity exactly as the
+      // earning branch does. Taking the most recent session because it was
+      // first in the list would delete a row nobody named.
+      let q = db
         .from("work_sessions")
         .select("id, started_at")
-        .eq("model_id", m.value.id)
-        .order("started_at", { ascending: false })
-        .limit(5);
-      if (!data?.length) throw new Error("No session matches that.");
+        .eq("model_id", m.value.id);
+      if (typeof a.started_on === "string") {
+        q = q
+          .gte("started_at", `${a.started_on}T00:00:00Z`)
+          .lt("started_at", `${a.started_on}T23:59:59Z`);
+      }
+      const data = orThrow("hermes_propose_delete", await q.limit(5));
+      if (!data.length) throw new Error("No session matches that.");
+      if (data.length > 1) {
+        throw new Error(
+          `Several sessions match — which day? ${data
+            .map((r) => String(r.started_at).slice(0, 10))
+            .join(", ")}`,
+        );
+      }
       recordId = data[0]!.id;
       what = `${m.value.label} — session starting ${data[0]!.started_at}`;
     }
@@ -647,8 +700,8 @@ async function proposeDelete(ctx: ToolContext, a: Record<string, unknown>) {
     let q = db.from("expenses").select("id, vendor, amount, incurred_on");
     if (typeof a.vendor === "string") q = q.ilike("vendor", `%${a.vendor}%`);
     if (typeof a.incurred_on === "string") q = q.eq("incurred_on", a.incurred_on);
-    const { data } = await q.limit(5);
-    if (!data?.length) throw new Error("No expense matches that.");
+    const data = orThrow("hermes_propose_delete", await q.limit(5));
+    if (!data.length) throw new Error("No expense matches that.");
     if (data.length > 1) throw new Error("Several expenses match — name the vendor and date.");
     recordId = data[0]!.id;
     what = `${data[0]!.amount} to ${data[0]!.vendor} on ${data[0]!.incurred_on}`;
@@ -679,8 +732,8 @@ async function proposeReadDocument(ctx: ToolContext, a: Record<string, unknown>)
     ctx,
     "read_compliance_document",
     { document_id: doc.value.id },
-    `Send "${doc.value.label}" to the AI provider so it can be read?`,
-    `Отправить «${doc.value.label}» ИИ-провайдеру, чтобы он смог его прочитать?`,
-    "This is a compliance document — it may contain a person's identity data. Approving records consent, is audited, and can be revoked in the portal.",
+    `Send ${doc.value.owner}'s "${doc.value.label}" to the AI provider so it can be read?`,
+    `Отправить документ «${doc.value.label}» (${doc.value.owner}) ИИ-провайдеру для прочтения?`,
+    `This is ${doc.value.owner}'s compliance document and may contain her identity data — name, date of birth, document number. Approving records consent, is audited, and can be revoked in the portal.`,
   );
 }

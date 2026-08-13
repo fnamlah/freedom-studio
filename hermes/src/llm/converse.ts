@@ -46,6 +46,19 @@ import { runTool } from "./tools.js";
  * call, and raw text there would egress on turn 2 exactly what turn 1 masked.
  */
 
+/**
+ * Turn a thrown tool error into something safe to send to a provider.
+ *
+ * Everything else that crosses is projected by the redactor; this path is not,
+ * so it gets the strongest thing available to free text — the same `scrubText`
+ * the human's own message gets — plus a hard cap, so a stack trace or a long
+ * enumeration cannot ride out inside an error string.
+ */
+function toolError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : "tool failed";
+  return scrubText(raw).slice(0, 300);
+}
+
 const MAX_ROUNDS = 4;
 const MAX_REPLY_CHARS = 3500;
 
@@ -239,7 +252,15 @@ export async function converse(input: {
             // A refused or unknown tool is reported back to the model as a
             // result, not thrown: it can answer without that data instead of
             // the whole turn dying.
-            return JSON.stringify({ error: e instanceof Error ? e.message : "tool failed" });
+            //
+            // SCRUBBED, because this IS an egress path and it was missed. A
+            // resolver's "did you mean…" text carries live studio data —
+            // document titles, account handles, stage names — and it reaches
+            // the provider without passing a projection. Scrubbing is weaker
+            // than a projection, so `toolError` also caps the length; the
+            // structural fix is that resolvers no longer enumerate candidates
+            // they were never asked about (see resolve.ts).
+            return JSON.stringify({ error: toolError(e) });
           }
         }),
       );

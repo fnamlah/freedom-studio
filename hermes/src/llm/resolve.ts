@@ -30,9 +30,15 @@ function pick<T extends { id: string; label: string }>(
   const partial = rows.filter((r) => r.label.toLowerCase().includes(want));
   if (partial.length === 1) return { ok: true, value: partial[0]! };
   if (partial.length > 1) {
+    // Only the things that actually matched what they typed. Naming these is
+    // the point of the question.
     return { ok: false, reason: "ambiguous", candidates: partial.map((r) => r.label).slice(0, 8) };
   }
-  return { ok: false, reason: "not_found", candidates: rows.map((r) => r.label).slice(0, 8) };
+  // NOT FOUND lists NOTHING. It used to answer "no document by that name;
+  // known: <eight passport titles>" — an enumeration of the shelf, reached by
+  // guessing a title, and it left through the unprojected tool-error path.
+  // A miss is a miss.
+  return { ok: false, reason: "not_found", candidates: [] };
 }
 
 /** A model by stage name. */
@@ -52,7 +58,7 @@ export async function resolveModel(name: string): Promise<Resolved<{ id: string;
 export async function resolveAccount(
   modelName: string,
   platformName?: string,
-): Promise<Resolved<{ id: string; label: string; modelId: string }>> {
+): Promise<Resolved<{ id: string; label: string; modelId: string; platform: string }>> {
   const db = getAdminClient();
   const model = await resolveModel(modelName);
   if (!model.ok) return model;
@@ -67,6 +73,7 @@ export async function resolveAccount(
   const rows = (accounts ?? []).map((a) => ({
     id: a.id,
     modelId: model.value.id,
+    platform: platformName_.get(a.platform_id) ?? "?",
     label: `${platformName_.get(a.platform_id) ?? "?"} · @${a.username}`,
   }));
 
@@ -78,14 +85,26 @@ export async function resolveAccount(
   if (!platformName) {
     return { ok: false, reason: "ambiguous", candidates: rows.map((r) => r.label) };
   }
-  return pick(rows, platformName) as Resolved<{ id: string; label: string; modelId: string }>;
+  // Match the PLATFORM only. Matching the whole label meant a handle like
+  // "@stripchat_lily" on Chaturbate answered to "Stripchat" — and an account
+  // chosen that way decides which model an earning is written against.
+  const want = platformName.trim().toLowerCase().replace(/^@+/, "");
+  const byPlatform = rows.filter((r) => r.platform.toLowerCase() === want);
+  if (byPlatform.length === 1) return { ok: true, value: byPlatform[0]! };
+  const loose = rows.filter((r) => r.platform.toLowerCase().includes(want));
+  if (loose.length === 1) return { ok: true, value: loose[0]! };
+  return {
+    ok: false,
+    reason: loose.length > 1 ? "ambiguous" : "not_found",
+    candidates: loose.map((r) => r.label),
+  };
 }
 
 /** A compliance document by title, optionally scoped to one model. */
 export async function resolveDocument(
   title: string,
   modelName?: string,
-): Promise<Resolved<{ id: string; label: string }>> {
+): Promise<Resolved<{ id: string; label: string; owner: string }>> {
   const db = getAdminClient();
   let query = db.from("documents").select("id, title, model_id");
 
@@ -95,10 +114,22 @@ export async function resolveDocument(
     query = query.eq("model_id", model.value.id);
   }
 
-  const { data, error } = await query;
+  const [{ data, error }, { data: models }] = await Promise.all([
+    query,
+    db.from("models").select("id, stage_name"),
+  ]);
   if (error) throw new Error(`document lookup failed: ${error.message}`);
+
+  // The OWNER travels with the document. Searching studio-wide by title is
+  // convenient and dangerous in equal measure — "passport" matches everyone's
+  // — so whoever approves sending one must see whose it is on the card.
+  const owner = new Map((models ?? []).map((m) => [m.id, m.stage_name]));
   return pick(
-    (data ?? []).map((d) => ({ id: d.id, label: d.title })),
+    (data ?? []).map((d) => ({
+      id: d.id,
+      label: d.title,
+      owner: owner.get(d.model_id) ?? "unknown",
+    })),
     title,
   );
 }
@@ -107,7 +138,5 @@ export async function resolveDocument(
 export function explain(r: Extract<Resolved<unknown>, { ok: false }>, what: string): string {
   return r.reason === "ambiguous"
     ? `Several ${what} match that. Which one: ${r.candidates.join(", ")}?`
-    : r.candidates.length
-      ? `No ${what} by that name. Known: ${r.candidates.join(", ")}.`
-      : `No ${what} found by that name.`;
+    : `No ${what} found by that name.`;
 }

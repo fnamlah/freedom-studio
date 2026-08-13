@@ -13,9 +13,19 @@
 --   1. Re-verify the APPROVER's role from `profiles`, server-side. The agent
 --      never names its own approver — `enqueueApproval` reads `required_role`
 --      from the policy table, never from the caller's arguments.
---   2. Impersonate that human transaction-locally, so the write happens under
---      THEIR RLS. The service role is how the worker connects; it is not how
---      the row gets written. RLS stays the final authority.
+--   2. Set `request.jwt.claims` to that human for the rest of the transaction,
+--      so anything reading `auth.uid()` / `current_user_role()` — triggers,
+--      nested INVOKER functions, audit helpers — sees the PERSON, not the
+--      worker.
+--
+--      ⚠ Be precise about what this does NOT do. These are SECURITY DEFINER
+--      functions owned by the role that owns the tables, and no table here
+--      carries FORCE ROW LEVEL SECURITY, so RLS is NOT evaluated inside them.
+--      Setting the GUC does not switch the Postgres role. The real gate on
+--      these paths is the explicit role check in step 1 plus the approval that
+--      had to happen first — a code-and-governance gate, not RLS. Saying
+--      otherwise (an earlier draft of this header did) would leave the next
+--      reader trusting a control that is not running.
 --   3. Stamp the row with their id, so `entered_by`/`created_by` names a person.
 --      A record created this way is indistinguishable from one they typed —
 --      which is correct, because they authorised it.
@@ -72,9 +82,16 @@ volatile
 security definer
 set search_path = ''
 as $$
+  -- `sub` and `user_role` only — deliberately matching 016. An `aal` claim
+  -- here would ASSERT the person completed a second factor in this session,
+  -- and nothing on the Telegram path establishes that: pairing is a one-time
+  -- code and `decide_approval` checks role and status, not MFA. Fabricating it
+  -- would be harmless only for as long as RLS stays un-forced on these tables
+  -- — and would then silently keep the bypass alive the day someone adds
+  -- FORCE ROW LEVEL SECURITY believing they had closed it.
   select set_config(
     'request.jwt.claims',
-    json_build_object('sub', p_approver::text, 'user_role', p_role::text, 'aal', 'aal2')::text,
+    json_build_object('sub', p_approver::text, 'user_role', p_role::text)::text,
     true
   );
 $$;

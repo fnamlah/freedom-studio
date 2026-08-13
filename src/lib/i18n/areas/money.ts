@@ -659,47 +659,78 @@ export const moneyEn = {
     okUpdated: "Commission scheme updated.",
     okDeleted: "Commission scheme deleted.",
 
-    /* ------------------------------------------------------------- tiers --- */
-    tiers: {
-      cta: "Tiers",
-      ctaCount: (n: number) => `Tiers · ${n}`,
+    /* --------------------------------------------------------- rate card --- */
 
-      title: "Income tiers",
+    /**
+     * The studio rate card (025). Each party earns its OWN percentage of the
+     * model's weekly (Sunday–Saturday) net, with its own brackets; the studio
+     * keeps whatever is left. Which of the three model rows applies is decided
+     * by who is assigned to her — never stored on the model herself.
+     */
+    rates: {
+      cta: "Rate card",
+      ctaCount: (n: number) => `Rate card · ${n}`,
+
+      title: "Rate card",
       description:
-        "The split changes with what the model earns. Add a tier for each level; the whole week is paid at the rate she reaches.",
+        "What each person earns from the model's weekly income. Every role has its own percentages and its own income levels; the studio keeps the rest.",
       basis:
-        "A tier is chosen by the model's TOTAL net for the week — every payout in that week counted together, not one statement at a time.",
+        "The week runs Sunday to Saturday, and a level is chosen by the model's TOTAL net for that week — every payout counted together, not one statement at a time.",
       cliff:
-        "Reaching a threshold re-prices the whole week, so a little more earned near a threshold can be worth a lot.",
+        "Reaching a level re-prices the whole week, so a little more earned near a threshold can be worth a lot.",
+      composition:
+        "Which model row applies is decided by her team: an operator means the operator row (even if a coach is also assigned), a coach alone means the coach row, and nobody means independent.",
 
-      baseRow: "Below the first tier",
-      baseHint: "The scheme's own percentages",
+      party: {
+        model_independent: "Model — on her own",
+        model_with_coach: "Model — with a coach",
+        model_with_operator: "Model — with an operator",
+        operator: "Operator",
+        coach: "Coach",
+        team_leader: "Team leader",
+      },
 
       colFrom: "Weekly net from",
-      colModel: "Model",
-      colTeam: "Team pool",
-      colStudio: "Studio",
+      colPercent: "Percent",
+      addLevel: "Add level",
+      removeLevel: "Remove level",
+      save: "Save rate card",
+      empty: "No rate card. This scheme uses its own three-way split above.",
+      emptyHint: "Add the studio's rates to pay each role its own percentage.",
+      baseLevel: "From the first dollar",
 
-      add: "Add tier",
-      remove: "Remove tier",
-      save: "Save tiers",
-      empty: "No tiers yet. This scheme always pays its base percentages.",
-      emptyHint: "Add a tier to make the split rise with what she earns.",
-      sumRule: "Each tier must total 100%",
+      /* The preview: what a week of a given size pays out, per composition. */
+      previewHeading: "What a week pays",
+      previewWeek: "Weekly net",
+      previewStudio: "Studio keeps",
+      compositionLabel: {
+        independent: "On her own",
+        with_coach: "With a coach",
+        with_operator: "With an operator",
+        full: "Operator + coach + team leader",
+      },
+      overHundredWarning:
+        "This pays out more than the studio takes in — the studio's share would be negative.",
 
-      errMinRequired: "Enter the amount this tier starts at.",
-      errMinNegative: "A tier can't start below zero.",
-      errSumNot100: "Each tier's three percentages must total exactly 100%.",
-      errDuplicateMin: "Two tiers start at the same amount. Each threshold must be different.",
-      errTooMany: "That's more tiers than a scheme can hold.",
-      errCheckForm: "Please check the tiers and try again.",
-      errDbCheck: "A tier breaks a database rule — each one must total 100%.",
-      errSaveFailed: "Could not save the tiers. Please try again.",
+      errParty: "Choose which role this rate is for.",
+      errMinRequired: "Enter the amount this level starts at.",
+      errMinNegative: "A level can't start below zero.",
+      errPercentRequired: "Enter the percentage.",
+      errPercentNegative: "A percentage can't be below zero.",
+      errPercentMax: "A percentage can't be above 100.",
+      errDuplicate: "Two levels for the same role start at the same amount.",
+      errNeedsZeroRow:
+        "Every role needs a rate starting from 0, or it earns nothing below its lowest level.",
+      errTooMany: "That's more levels than a rate card can hold.",
+      errCheckForm: "Please check the rate card and try again.",
+      errOverHundred:
+        "This card would pay out more than 100% of a week for at least one team.",
+      errSaveFailed: "Could not save the rate card. Please try again.",
 
-      okSaved: "Income tiers saved.",
-      okCleared: "Income tiers removed — this scheme is back to its base percentages.",
-      toastOk: "Tiers updated",
-      toastErr: "Couldn't save tiers",
+      okSaved: "Rate card saved.",
+      okCleared: "Rate card removed — this scheme is back to its own split.",
+      toastOk: "Rate card updated",
+      toastErr: "Couldn't save the rate card",
     },
   },
 };
@@ -1361,47 +1392,71 @@ export const moneyRu: typeof moneyEn = {
     okUpdated: "Схема комиссий обновлена.",
     okDeleted: "Схема комиссий удалена.",
 
-    /* ------------------------------------------------------------ ступени --- */
-    tiers: {
-      cta: "Ступени",
-      ctaCount: (n: number) => `Ступени · ${n}`,
+    /* -------------------------------------------------------- тарифная сетка --- */
 
-      title: "Ступени дохода",
+    rates: {
+      cta: "Тарифы",
+      ctaCount: (n: number) => `Тарифы · ${n}`,
+
+      title: "Тарифная сетка",
       description:
-        "Распределение меняется в зависимости от того, сколько зарабатывает модель. Добавьте ступень для каждого уровня; вся неделя оплачивается по достигнутой ставке.",
+        "Сколько получает каждый участник от недельного дохода модели. У каждой роли свои проценты и свои уровни дохода; остальное остаётся студии.",
       basis:
-        "Ступень определяется по ОБЩЕМУ чистому доходу модели за неделю — все выплаты за эту неделю считаются вместе, а не каждый отчёт отдельно.",
+        "Неделя считается с воскресенья по субботу, а уровень определяется по ОБЩЕМУ чистому доходу модели за эту неделю — все выплаты вместе, а не каждый отчёт отдельно.",
       cliff:
-        "При достижении порога вся неделя пересчитывается по новой ставке, поэтому небольшая сумма рядом с порогом может стоить многого.",
+        "При достижении уровня вся неделя пересчитывается заново, поэтому небольшая сумма рядом с порогом может стоить многого.",
+      composition:
+        "Какая строка модели применяется, решает её команда: есть оператор — строка с оператором (даже если есть и коуч), только коуч — строка с коучем, никого — самостоятельно.",
 
-      baseRow: "Ниже первой ступени",
-      baseHint: "Собственные проценты схемы",
+      party: {
+        model_independent: "Модель — самостоятельно",
+        model_with_coach: "Модель — с коучем",
+        model_with_operator: "Модель — с оператором",
+        operator: "Оператор",
+        coach: "Коуч",
+        team_leader: "Тимлид",
+      },
 
       colFrom: "Чистыми за неделю от",
-      colModel: "Модель",
-      colTeam: "Пул команды",
-      colStudio: "Студия",
+      colPercent: "Процент",
+      addLevel: "Добавить уровень",
+      removeLevel: "Удалить уровень",
+      save: "Сохранить тарифы",
+      empty: "Тарифной сетки нет. Схема использует своё разделение на три части выше.",
+      emptyHint: "Добавьте тарифы студии, чтобы каждая роль получала свой процент.",
+      baseLevel: "С первого доллара",
 
-      add: "Добавить ступень",
-      remove: "Удалить ступень",
-      save: "Сохранить ступени",
-      empty: "Ступеней пока нет. Схема всегда платит по базовым процентам.",
-      emptyHint: "Добавьте ступень, чтобы доля росла вместе с заработком.",
-      sumRule: "Сумма каждой ступени должна быть 100%",
+      previewHeading: "Сколько платит неделя",
+      previewWeek: "Чистыми за неделю",
+      previewStudio: "Студии остаётся",
+      compositionLabel: {
+        independent: "Самостоятельно",
+        with_coach: "С коучем",
+        with_operator: "С оператором",
+        full: "Оператор + коуч + тимлид",
+      },
+      overHundredWarning:
+        "Выплаты превышают поступления — доля студии стала бы отрицательной.",
 
-      errMinRequired: "Укажите сумму, с которой начинается ступень.",
-      errMinNegative: "Ступень не может начинаться ниже нуля.",
-      errSumNot100: "Три процента каждой ступени должны составлять ровно 100%.",
-      errDuplicateMin: "Две ступени начинаются с одной суммы. Каждый порог должен быть свой.",
-      errTooMany: "Столько ступеней схема вместить не может.",
-      errCheckForm: "Проверьте ступени и попробуйте снова.",
-      errDbCheck: "Ступень нарушает правило базы данных — сумма каждой должна быть 100%.",
-      errSaveFailed: "Не удалось сохранить ступени. Попробуйте снова.",
+      errParty: "Выберите, для какой роли этот тариф.",
+      errMinRequired: "Укажите сумму, с которой начинается уровень.",
+      errMinNegative: "Уровень не может начинаться ниже нуля.",
+      errPercentRequired: "Укажите процент.",
+      errPercentNegative: "Процент не может быть меньше нуля.",
+      errPercentMax: "Процент не может быть больше 100.",
+      errDuplicate: "Два уровня одной роли начинаются с одной суммы.",
+      errNeedsZeroRow:
+        "У каждой роли должен быть тариф с 0, иначе ниже своего минимального уровня она не получит ничего.",
+      errTooMany: "Столько уровней тарифная сетка вместить не может.",
+      errCheckForm: "Проверьте тарифную сетку и попробуйте снова.",
+      errOverHundred:
+        "С такой сеткой хотя бы для одной команды выплаты превысят 100% недели.",
+      errSaveFailed: "Не удалось сохранить тарифную сетку. Попробуйте снова.",
 
-      okSaved: "Ступени дохода сохранены.",
-      okCleared: "Ступени дохода удалены — схема вернулась к базовым процентам.",
-      toastOk: "Ступени обновлены",
-      toastErr: "Не удалось сохранить ступени",
+      okSaved: "Тарифная сетка сохранена.",
+      okCleared: "Тарифная сетка удалена — схема вернулась к своему разделению.",
+      toastOk: "Тарифы обновлены",
+      toastErr: "Не удалось сохранить тарифы",
     },
   },
 };

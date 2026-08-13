@@ -11,7 +11,7 @@ import { getDict, getLocale } from "@/lib/i18n/server";
 import { ResolutionExplainer } from "./resolution-explainer";
 import { SchemeForm } from "./scheme-form";
 import { SchemesTable } from "./schemes-table";
-import type { SchemeTier } from "./tier-dialog";
+import type { RateRow } from "./rate-card";
 import { deriveScope, deriveStatus, SCOPE_META, type SchemeRowView } from "./scheme-meta";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -38,7 +38,7 @@ export default async function SchemesPage() {
   // renders the same instant through the locale formatter.
   const todayIso = isoDate(new Date());
 
-  const [schemesRes, modelsRes, accountsRes, platformsRes, tiersRes] = await Promise.all([
+  const [schemesRes, modelsRes, accountsRes, platformsRes, ratesRes] = await Promise.all([
     supabase
       .from("commission_schemes")
       .select(
@@ -51,10 +51,10 @@ export default async function SchemesPage() {
       .select("id, username, model_id, platform_id")
       .order("username", { ascending: true }),
     supabase.from("platforms").select("id, name"),
-    // Income tiers (023), ascending so each scheme's ladder arrives in order.
+    // The rate card (025), ascending so each scheme's levels arrive in order.
     supabase
-      .from("commission_tiers")
-      .select("scheme_id, min_amount, model_percent, operator_percent, studio_percent")
+      .from("commission_rates")
+      .select("scheme_id, party, min_amount, percent")
       .order("min_amount", { ascending: true }),
   ]);
 
@@ -63,16 +63,11 @@ export default async function SchemesPage() {
   const accounts = accountsRes.data ?? [];
   const platforms = platformsRes.data ?? [];
 
-  const tiersByScheme = new Map<string, SchemeTier[]>();
-  for (const tier of tiersRes.data ?? []) {
-    const ladder = tiersByScheme.get(tier.scheme_id) ?? [];
-    ladder.push({
-      min_amount: tier.min_amount,
-      model_percent: tier.model_percent,
-      operator_percent: tier.operator_percent,
-      studio_percent: tier.studio_percent,
-    });
-    tiersByScheme.set(tier.scheme_id, ladder);
+  const ratesByScheme = new Map<string, RateRow[]>();
+  for (const rate of ratesRes.data ?? []) {
+    const card = ratesByScheme.get(rate.scheme_id) ?? [];
+    card.push({ party: rate.party, min_amount: rate.min_amount, percent: rate.percent });
+    ratesByScheme.set(rate.scheme_id, card);
   }
 
   const modelName = new Map(models.map((m) => [m.id, m.stage_name]));
@@ -109,7 +104,7 @@ export default async function SchemesPage() {
         isDefault: scope === "default",
         model_id: s.model_id,
         platform_account_id: s.platform_account_id,
-        tiers: tiersByScheme.get(s.id) ?? [],
+        rates: ratesByScheme.get(s.id) ?? [],
       } satisfies SchemeRowView;
     })
     .sort((a, b) => {

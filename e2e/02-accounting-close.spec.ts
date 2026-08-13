@@ -17,8 +17,12 @@ const PERIOD_START = "2026-08-10"; // ≥ default scheme effective_from
 const PERIOD_END = "2026-08-11";
 const GROSS = "1000";
 const NET = "1000"; // fee 0 keeps the reconciliation arithmetic exact
-const EXPECTED_MODEL_SHARE = 600.0; // 60% of net
-const EXPECTED_OPERATOR_SHARE = 100.0; // 10% pool × 100% share
+// The studio rate card (025) prices this: a $1,000 Sunday–Saturday week for a
+// model WITH AN OPERATOR sits in the lowest bracket, so she takes 45% and the
+// operator 25% — not the scheme's own 60/10/30, which now only applies to
+// schemes carrying no card.
+const EXPECTED_MODEL_SHARE = 450.0; // model_with_operator @ <=1500
+const EXPECTED_OPERATOR_SHARE = 250.0; // operator @ <=1500
 
 test.describe.configure({ mode: "serial" });
 

@@ -88,6 +88,8 @@ The generalized table was rejected because the two entities only look similar at
 
 ## 4. Commission schemes: the split rules
 
+> **Superseded for the studio default by §4.5.** The three-way split below is still the schema and still the fallback for schemes without a rate card; the studio's live rates are the per-role card of migration 025.
+
 The `commission_schemes` table (columns, CHECKs, and exclusion constraints specified in [04](04-database-erd.md)) holds three-way split rules — `model_percent + operator_percent + studio_percent = 100` — each scoped and effective-dated. `operator_percent` is a *pool*, not an individual's share; individuals get weighted slices of it (§4.3).
 
 The legacy `models.commission_percent` column remains only as a display default; schemes supersede it for all ledger math ([04](04-database-erd.md) documents this note on the column itself).
@@ -138,6 +140,32 @@ The per-model constraint that active assignments' `pool_share_percent` values su
 
 - **Under-assignment** (weights sum to less than 100, including zero assigned operators): the unassigned remainder of the pool **falls to the studio**. Nothing is ever posted to a phantom payee, and the invariant "posted credits + studio residue = net_amount" holds by construction.
 - **Multiple operators**: each gets an independent `earning_share` entry with its own weight applied — shares are per-payee ledger facts, not a bundled pool entry needing later division.
+
+### 4.5 The studio rate card (migration 025) — how the studio actually pays
+
+The three-way split above is the ORIGINAL mechanism and remains the fallback. The studio's real structure, supplied by the owner on 2026-08-13, does not fit it: every role earns its **own** percentage of the model's weekly net, with its **own** brackets, and the model's own rate depends on who is around her.
+
+| Weekly net (Sun–Sat) | Model alone | Model + coach | Model + operator | Operator | Coach | Team leader |
+|---|---|---|---|---|---|---|
+| up to 1500 | 80% | 60% | 45% | 25% | 7% | 2% |
+| 1501–2499 | 80% | 65% | 50% | 28% | 7% | 3% |
+| 2500–2999 | 80% | 70% | 55% | 28% | 7% | 3% |
+| 3000+ | 80% | 70% | 55% | 30% | 7% | 4% |
+
+A single pool split by fixed weights cannot express this: the operator's slice of a combined pool would drift as different roles cross different thresholds. So `commission_rates` stores one row per `(party, threshold)` and the close pays each person their own rate. Six parties exist — three of them are the model's, and exactly one applies per composition.
+
+The rules, each a money decision someone will audit:
+
+* **Week** — **Sunday through Saturday**, per the owner. Implemented as `date_trunc('week', period_end + 1 day)`, since Postgres' own week is ISO (Monday).
+* **Basis** — the model's TOTAL net for that week, every statement summed. Four payouts reach a bracket the same as one large one.
+* **Style** — flat, not progressive: reaching a bracket re-prices the whole week. There is a cliff at each threshold; that is what was asked for.
+* **Brackets** — read exactly as written: `up to 1500` then `1501–`, so a week of 1500.99 is still the low bracket. `2500+` and `3000+` are inclusive.
+* **Composition** — an operator's presence selects the with-operator row **even when a coach is also assigned** (more support staff, lower model rate); the coach still earns her 7%. A coach alone selects the with-coach row. Anyone else — including a team leader alone — leaves the model independent, and the team leader still earns their own cut.
+* **Studio** — the remainder, never posted (the studio has no payee row). `fn_set_commission_rates` refuses to save a card where any composition exceeds 100% at any threshold, so the remainder can never go negative; the dialog previews the same arithmetic before saving.
+* **Same role twice** — two operators on one model split the *operator* rate by their assignment weights, normalized within the role.
+
+A scheme with no card rows keeps the §4.3 pool behaviour unchanged, which is what scoped overrides still use.
+
 
 ## 5. The ledger
 

@@ -15,6 +15,8 @@ import {
   type SqlStateMessages,
 } from "@/lib/forms";
 
+import { COMMISSION_PARTIES, type CommissionParty } from "./rate-card";
+
 /**
  * Commission-scheme writes — Super Admin only (docs/03 §3: schemes are `CRUD`
  * for SA, `read` for MGR/FIN, denied to models/operators; docs/09 §4.2: "Scheme
@@ -385,85 +387,89 @@ export async function deleteScheme(input: { id: string }): Promise<ActionResult>
   }
 }
 
-/* ------------------------------------------------------------------- tiers --- */
+/* --------------------------------------------------------------- rate card --- */
 
 /**
- * Income tiers (023): a scheme's percentages are not fixed — the more the model
- * earns in a WEEK, the better her split, and the team pool and studio share move
- * with it.
+ * The studio rate card (025): each party's percentage of the model's WEEKLY
+ * (Sunday–Saturday) net, per bracket. Replaces the three-way tier ladder that
+ * briefly shipped as 023 — the owner's real structure gives every role its own
+ * percentage with its own thresholds, which a single split cannot express.
  *
- * The whole ladder saves at once, through `fn_set_commission_tiers` (024), which
- * replaces it inside ONE transaction. Doing this as a DELETE then an INSERT over
- * two requests would, on a failed second call, leave the scheme silently back on
- * its base rates — no error, just quietly wrong money at the next close.
+ * The whole card saves at once through `fn_set_commission_rates`, which
+ * replaces it inside ONE transaction AND proves no composition can pay out
+ * more than 100% of a week at any threshold. Doing this as a DELETE then an
+ * INSERT over two requests would, on a failed second call, silently drop the
+ * scheme back to the old pool percentages.
  *
- * An empty ladder is a legitimate save: it clears the tiers and returns the
- * scheme to its own percentages.
+ * An empty card is a legitimate save: it clears the rows and returns the
+ * scheme to its own model/operator/studio split.
  */
-const tierRow = (d: Dictionary) =>
-  z
-    .object({
-      min_amount: z.coerce
-        .number({ invalid_type_error: d.money.schemes.tiers.errMinRequired })
-        .min(0, d.money.schemes.tiers.errMinNegative),
-      model_percent: percentField(d, "model"),
-      operator_percent: percentField(d, "operator"),
-      studio_percent: percentField(d, "studio"),
-    })
-    // Same 100% rule and the same 2-decimal rounding as a scheme's own split,
-    // but stated separately: a tier has no effective window, so it does not
-    // carry `refineSplit`'s date-ordering check.
-    .refine(
-      (v) =>
-        Math.round((v.model_percent + v.operator_percent + v.studio_percent) * 100) / 100 === 100,
-      { message: d.money.schemes.tiers.errSumNot100, path: ["studio_percent"] },
-    );
+const rateRow = (d: Dictionary) =>
+  z.object({
+    party: z.enum(COMMISSION_PARTIES as unknown as [CommissionParty, ...CommissionParty[]], {
+      errorMap: () => ({ message: d.money.schemes.rates.errParty }),
+    }),
+    min_amount: z.coerce
+      .number({ invalid_type_error: d.money.schemes.rates.errMinRequired })
+      .min(0, d.money.schemes.rates.errMinNegative),
+    percent: z.coerce
+      .number({ invalid_type_error: d.money.schemes.rates.errPercentRequired })
+      .min(0, d.money.schemes.rates.errPercentNegative)
+      .max(100, d.money.schemes.rates.errPercentMax),
+  });
 
-const tiersSchema = (d: Dictionary) =>
+const rateCardSchema = (d: Dictionary) =>
   z
     .object({
       scheme_id: z.string().uuid(),
-      tiers: z.array(tierRow(d)).max(20, d.money.schemes.tiers.errTooMany),
+      rates: z.array(rateRow(d)).max(60, d.money.schemes.rates.errTooMany),
     })
     .refine(
-      (v) => new Set(v.tiers.map((t) => t.min_amount)).size === v.tiers.length,
-      { message: d.money.schemes.tiers.errDuplicateMin, path: ["tiers"] },
+      (v) =>
+        new Set(v.rates.map((r) => `${r.party}|${r.min_amount}`)).size === v.rates.length,
+      { message: d.money.schemes.rates.errDuplicate, path: ["rates"] },
+    )
+    .refine(
+      // A party with brackets but no row at 0 is unpayable below its lowest
+      // threshold — the close raises 23502 rather than paying nothing, so
+      // catch it here where the message can name the problem.
+      (v) => {
+        const parties = new Set(v.rates.map((r) => r.party));
+        return [...parties].every((p) =>
+          v.rates.some((r) => r.party === p && r.min_amount === 0),
+        );
+      },
+      { message: d.money.schemes.rates.errNeedsZeroRow, path: ["rates"] },
     );
 
-export type TierInput = {
+export type RateInput = {
+  party: CommissionParty;
   min_amount: string | number;
-  model_percent: string | number;
-  operator_percent: string | number;
-  studio_percent: string | number;
+  percent: string | number;
 };
 
-export async function saveSchemeTiers(input: {
+export async function saveRateCard(input: {
   scheme_id: string;
-  tiers: TierInput[];
+  rates: RateInput[];
 }): Promise<ActionResult> {
   const { supabase, profile } = await requireRole("super_admin");
   const d = dict(toLocale(profile.locale));
 
-  const parsed = tiersSchema(d).safeParse(input);
+  const parsed = rateCardSchema(d).safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error, d.money.schemes.tiers.errCheckForm) };
+    return { ok: false, error: firstIssue(parsed.error, d.money.schemes.rates.errCheckForm) };
   }
 
-  // Ascending on the way in, so the table reads as a ladder regardless of the
-  // order the rows were typed in.
-  const tiers = [...parsed.data.tiers]
-    .sort((a, b) => a.min_amount - b.min_amount)
-    .map((t) => ({
-      min_amount: t.min_amount,
-      model_percent: t.model_percent,
-      operator_percent: t.operator_percent,
-      studio_percent: t.studio_percent,
-    }));
+  // Ascending per party on the way in, so the stored card reads as a ladder
+  // regardless of the order the rows were typed.
+  const rates = [...parsed.data.rates]
+    .sort((a, b) => a.party.localeCompare(b.party) || a.min_amount - b.min_amount)
+    .map((r) => ({ party: r.party, min_amount: r.min_amount, percent: r.percent }));
 
   try {
-    const { error } = await supabase.rpc("fn_set_commission_tiers", {
+    const { error } = await supabase.rpc("fn_set_commission_rates", {
       p_scheme_id: parsed.data.scheme_id,
-      p_tiers: tiers,
+      p_rates: rates,
     });
 
     if (error) {
@@ -473,11 +479,12 @@ export async function saveSchemeTiers(input: {
           error.code,
           {
             "23503": d.money.schemes.errGone,
-            "23505": d.money.schemes.tiers.errDuplicateMin,
-            "23514": d.money.schemes.tiers.errDbCheck,
+            "23505": d.money.schemes.rates.errDuplicate,
+            // The solvency proof inside the function raises this.
+            "23514": d.money.schemes.rates.errOverHundred,
             "42501": d.money.schemes.errNotAuthorized,
           },
-          d.money.schemes.tiers.errSaveFailed,
+          d.money.schemes.rates.errSaveFailed,
         ),
       };
     }
@@ -486,13 +493,14 @@ export async function saveSchemeTiers(input: {
       action: "scheme.update",
       entityType: "commission_scheme",
       entityId: parsed.data.scheme_id,
-      metadata: { op: "tiers", count: tiers.length, tiers },
+      metadata: { op: "rates", count: rates.length, rates },
     });
 
     revalidatePath("/schemes");
     return {
       ok: true,
-      message: tiers.length === 0 ? d.money.schemes.tiers.okCleared : d.money.schemes.tiers.okSaved,
+      message:
+        rates.length === 0 ? d.money.schemes.rates.okCleared : d.money.schemes.rates.okSaved,
     };
   } catch (error) {
     if (isAuthzError(error)) {

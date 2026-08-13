@@ -1,6 +1,6 @@
 import type { BadgeVariant } from "@/components/ui/badge";
 
-import type { SchemeTier } from "./tier-dialog";
+import type { RateRow } from "./rate-card";
 
 /**
  * Shared, client-safe vocabulary for commission schemes (docs/09 §4, docs/04 §4.9).
@@ -40,10 +40,10 @@ export type SchemeRowView = {
   model_id: string | null;
   platform_account_id: string | null;
   /**
-   * The scheme's income ladder (023), ascending. Empty means the percentages
-   * above always apply, which is how every scheme behaved before tiers existed.
+   * The scheme's rate card (025), ascending. Empty means the three-way split
+   * above always applies — the pool behavior every scheme had before the card.
    */
-  tiers: SchemeTier[];
+  rates: RateRow[];
 };
 
 export const SCOPE_META: Record<SchemeScope, { badge: BadgeVariant; order: number }> = {

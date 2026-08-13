@@ -5,6 +5,7 @@ import { expect, test as setup, type Page } from "@playwright/test";
 import {
   ensureModelRow,
   ensureOperatorRow,
+  linkProfileToBusinessRow,
   findUserByEmail,
   generateInviteLink,
   getProfile,
@@ -161,8 +162,14 @@ setup("seed all five role users with forced TOTP", async ({ page }) => {
   const operatorId = await ensureOperatorRow(sa.userId);
   writeRun({ modelId, operatorId });
 
-  await seedRole(page, "model", users, { modelId });
-  await seedRole(page, "operator", users, { operatorId });
+  const modelUser = await seedRole(page, "model", users, { modelId });
+  const operatorUser = await seedRole(page, "operator", users, { operatorId });
+
+  // The self-read policies compare `profile_id` to `auth.uid()`. Invitations
+  // set that link once; a recreated fixture row loses it. Re-assert it here so
+  // scenario 01's isolation assertions test RLS, not fixture drift.
+  await linkProfileToBusinessRow("models", modelId, modelUser.userId);
+  await linkProfileToBusinessRow("operators", operatorId, operatorUser.userId);
 
   // Sanity: exactly our five e2e users hold the expected roles.
   for (const role of ROLES) {

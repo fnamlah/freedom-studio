@@ -164,6 +164,27 @@ export async function ensureModelRow(createdBy: string): Promise<string> {
   return data.id;
 }
 
+/**
+ * Re-establish the business-row → login link.
+ *
+ * `profile_id` is what the model/operator self-read policies compare against
+ * (`models.profile_id = auth.uid()`), and it is normally set once when an
+ * invitation is accepted. A fixture row that was deleted and recreated — by a
+ * cleanup, a wipe, or the manager UI in scenario 02 — comes back with a NULL
+ * link, and every self-read assertion then reads zero rows for reasons that
+ * look like an RLS regression. Re-linking on every seed makes the suite
+ * self-healing instead of dependent on a row created many runs ago.
+ */
+export async function linkProfileToBusinessRow(
+  table: "models" | "operators",
+  rowId: string,
+  profileId: string,
+): Promise<void> {
+  const db = serviceDb();
+  const { error } = await db.from(table).update({ profile_id: profileId }).eq("id", rowId);
+  if (error) throw new Error(`linkProfileToBusinessRow(${table}, ${rowId}): ${error.message}`);
+}
+
 /** Ensure the E2E operator business row exists; returns its id. */
 export async function ensureOperatorRow(createdBy: string): Promise<string> {
   const db = serviceDb();

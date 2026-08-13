@@ -284,6 +284,51 @@ export type Database = {
         }
         Relationships: []
       }
+      commission_rates: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          min_amount: number
+          party: Database["public"]["Enums"]["commission_party"]
+          percent: number
+          scheme_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          min_amount: number
+          party: Database["public"]["Enums"]["commission_party"]
+          percent: number
+          scheme_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          min_amount?: number
+          party?: Database["public"]["Enums"]["commission_party"]
+          percent?: number
+          scheme_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commission_rates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commission_rates_scheme_id_fkey"
+            columns: ["scheme_id"]
+            isOneToOne: false
+            referencedRelation: "commission_schemes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       commission_schemes: {
         Row: {
           created_at: string
@@ -365,54 +410,6 @@ export type Database = {
             columns: ["platform_account_id"]
             isOneToOne: false
             referencedRelation: "platform_accounts"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      commission_tiers: {
-        Row: {
-          created_at: string
-          created_by: string | null
-          id: string
-          min_amount: number
-          model_percent: number
-          operator_percent: number
-          scheme_id: string
-          studio_percent: number
-        }
-        Insert: {
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          min_amount: number
-          model_percent: number
-          operator_percent: number
-          scheme_id: string
-          studio_percent: number
-        }
-        Update: {
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          min_amount?: number
-          model_percent?: number
-          operator_percent?: number
-          scheme_id?: string
-          studio_percent?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "commission_tiers_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "commission_tiers_scheme_id_fkey"
-            columns: ["scheme_id"]
-            isOneToOne: false
-            referencedRelation: "commission_schemes"
             referencedColumns: ["id"]
           },
         ]
@@ -2769,6 +2766,14 @@ export type Database = {
           total_net: number
         }[]
       }
+      fn_rate_at: {
+        Args: {
+          p_party: Database["public"]["Enums"]["commission_party"]
+          p_scheme_id: string
+          p_week_net: number
+        }
+        Returns: number
+      }
       fn_semantic_search: {
         Args: {
           p_embedding: string
@@ -2782,8 +2787,8 @@ export type Database = {
           subject_name: string
         }[]
       }
-      fn_set_commission_tiers: {
-        Args: { p_scheme_id: string; p_tiers: Json }
+      fn_set_commission_rates: {
+        Args: { p_rates: Json; p_scheme_id: string }
         Returns: number
       }
       fn_snapshot_forecast: {
@@ -2856,6 +2861,13 @@ export type Database = {
         | "overridden"
         | "skipped"
         | "failed"
+      commission_party:
+        | "model_independent"
+        | "model_with_coach"
+        | "model_with_operator"
+        | "operator"
+        | "coach"
+        | "team_leader"
       doc_extraction_kind:
         | "earnings"
         | "sessions"
@@ -3045,6 +3057,14 @@ export const Constants = {
         "skipped",
         "failed",
       ],
+      commission_party: [
+        "model_independent",
+        "model_with_coach",
+        "model_with_operator",
+        "operator",
+        "coach",
+        "team_leader",
+      ],
       doc_extraction_kind: [
         "earnings",
         "sessions",
@@ -3133,5 +3153,4 @@ export type HermesApprovalRow = PublicSchema["Tables"]["hermes_approvals"]["Row"
 export type HermesRunRow = PublicSchema["Tables"]["hermes_runs"]["Row"];
 export type HermesJobRunRow = PublicSchema["Tables"]["hermes_job_runs"]["Row"];
 export type HermesChannelRow = PublicSchema["Tables"]["hermes_channels"]["Row"];
-
-export type CommissionTierRow = PublicSchema["Tables"]["commission_tiers"]["Row"];
+export type CommissionRateRow = PublicSchema["Tables"]["commission_rates"]["Row"];

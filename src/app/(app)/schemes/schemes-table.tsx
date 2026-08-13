@@ -22,7 +22,8 @@ import {
   STATUS_VARIANT,
   type SchemeRowView,
 } from "./scheme-meta";
-import { TierDialog } from "./tier-dialog";
+import { RateCardDialog } from "./rate-card-dialog";
+import { isModelParty, rateAt, type CommissionParty } from "./rate-card";
 
 /**
  * Schemes grouped by scope, in resolution order (account → model → default, most
@@ -41,17 +42,59 @@ export function SchemesTable({
   const fm = fmt(useLocale());
 
   /**
-   * A percentage column, honestly. With income tiers (023) a scheme has no
-   * single model share — it has a range that the week's earnings pick from — so
-   * the cell shows the whole span rather than a base rate that may never be the
-   * one actually paid. Schemes without tiers read exactly as they always did.
+   * A percentage column, honestly. Under a rate card (025) a scheme has no
+   * single model share: the rate depends on the week's size AND on who is
+   * assigned to her, so the cell shows the whole span the card can pay. The
+   * studio column is the remainder, so its span is derived the same way but
+   * inverted. Schemes with no card read exactly as they always did.
    */
-  function span(row: SchemeRowView, key: "model_percent" | "operator_percent" | "studio_percent") {
-    if (row.tiers.length === 0) return fm.percent(row[key]);
-    const values = [row[key], ...row.tiers.map((t) => t[key])];
+  function span(row: SchemeRowView, column: "model" | "operator" | "studio") {
+    const key = `${column}_percent` as const;
+    if (row.rates.length === 0) return fm.percent(row[key]);
+
+    const parties: CommissionParty[] =
+      column === "model"
+        ? ["model_independent", "model_with_coach", "model_with_operator"]
+        : column === "operator"
+          ? ["operator", "coach", "team_leader"]
+          : [];
+
+    // The studio keeps whatever the biggest and smallest payouts leave.
+    const values =
+      column === "studio"
+        ? studioSpan(row)
+        : row.rates.filter((r) => parties.includes(r.party)).map((r) => r.percent);
+
+    if (values.length === 0) return fm.percent(row[key]);
     const low = Math.min(...values);
     const high = Math.max(...values);
     return low === high ? fm.percent(low) : `${fm.percent(low)} – ${fm.percent(high)}`;
+  }
+
+  /** Studio remainder across the card's own thresholds and each composition. */
+  function studioSpan(row: SchemeRowView): number[] {
+    const weeks = [...new Set([0, ...row.rates.map((r) => r.min_amount)])];
+    const out: number[] = [];
+    for (const week of weeks) {
+      const model = Math.max(
+        rateAt(row.rates, "model_independent", week) ?? 0,
+        rateAt(row.rates, "model_with_coach", week) ?? 0,
+        rateAt(row.rates, "model_with_operator", week) ?? 0,
+      );
+      const modelMin = Math.min(
+        ...row.rates
+          .filter((r) => isModelParty(r.party) && r.min_amount <= week)
+          .map((r) => r.percent)
+          .concat(model),
+      );
+      const team =
+        (rateAt(row.rates, "operator", week) ?? 0) +
+        (rateAt(row.rates, "coach", week) ?? 0) +
+        (rateAt(row.rates, "team_leader", week) ?? 0);
+      out.push(Math.round((100 - model) * 100) / 100);
+      out.push(Math.round((100 - modelMin - team) * 100) / 100);
+    }
+    return out;
   }
 
   if (rows.length === 0) {
@@ -99,9 +142,9 @@ export function SchemesTable({
                   return (
                     <TR key={row.id}>
                       <TD className="font-medium text-foreground">{row.scopeLabel}</TD>
-                      <TD numeric>{span(row, "model_percent")}</TD>
-                      <TD numeric>{span(row, "operator_percent")}</TD>
-                      <TD numeric>{span(row, "studio_percent")}</TD>
+                      <TD numeric>{span(row, "model")}</TD>
+                      <TD numeric>{span(row, "operator")}</TD>
+                      <TD numeric>{span(row, "studio")}</TD>
                       <TD className="text-muted whitespace-nowrap">
                         {fm.date(row.effective_from)}
                         {" – "}
@@ -115,18 +158,13 @@ export function SchemesTable({
                       {canWrite ? (
                         <TD align="right">
                           <div className="flex items-center justify-end gap-2">
-                            <TierDialog
+                            <RateCardDialog
                               schemeId={row.id}
                               scopeLabel={schemeHeading(
                                 d.money.schemes.scope[row.scope].label,
                                 row.scopeLabel,
                               )}
-                              base={{
-                                model_percent: row.model_percent,
-                                operator_percent: row.operator_percent,
-                                studio_percent: row.studio_percent,
-                              }}
-                              tiers={row.tiers}
+                              rates={row.rates}
                             />
                             <SchemeForm mode="edit" scheme={toEditable(row)} />
                             {row.isDefault ? (

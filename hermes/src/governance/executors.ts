@@ -850,8 +850,13 @@ async function uploadDocument(
   let result = await saveStep({ document_id: data });
 
   // Index the new document's METADATA so search finds it immediately — a
-  // bonus, never a blocker: the document is saved regardless, and the fence
-  // keeps a later executor retry from re-embedding.
+  // bonus, never a blocker: the document is saved regardless.
+  //
+  // saveStep merges each patch onto the CLAIM-TIME snapshot, not the running
+  // row, so the LAST patch here is the WHOLE persisted execution_result. It
+  // must therefore carry document_id again — a bare { embedded: true } erased
+  // the id from every upload's audit row and blinded the "already recorded"
+  // retry guard above (review finding, 2026-08-14).
   if (result.embedded !== true) {
     try {
       const { embedDocumentMeta } = await import("../llm/embed.js");
@@ -863,7 +868,7 @@ async function uploadDocument(
         expires_at: typeof payload.expires_at === "string" ? payload.expires_at : null,
         model_id: modelId,
       });
-      result = await saveStep({ embedded: true });
+      result = await saveStep({ document_id: data, embedded: true });
     } catch (e) {
       console.warn("[upload] embed skipped:", e instanceof Error ? e.message : e);
     }

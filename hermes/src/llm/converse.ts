@@ -1,11 +1,12 @@
 import { commandAllowed } from "../telegram/access.js";
 import { assertUnderCostCap, computeCost, recordCostUsd, CostCapError } from "../lib/cost.js";
 import { trackDrain } from "../lib/shutdown.js";
-import { type Locale } from "../lib/i18n.js";
+import { hermesDict, type Locale } from "../lib/i18n.js";
 import { chat, ProviderNotConfiguredError, type ChatMessage } from "./provider.js";
 import { scrubText } from "./redact.js";
 import { PROPOSE_ACTION, specsForRole } from "./tool-catalog.js";
 import { canRecoverFromStall } from "./recovery.js";
+import { claimsProposalSent, REALITY_CHECK } from "./proposal-claims.js";
 import { runTool } from "./tools.js";
 
 /**
@@ -199,6 +200,11 @@ export async function converse(input: {
   // say so — otherwise "something went wrong" sits directly above a live
   // Approve button, and a rephrased retry can queue a second, different card.
   let proposalsSent = 0;
+  // Whether this turn already spent its one corrective round on an unbacked
+  // "card sent" claim (see proposal-claims.ts for the incidents that earned
+  // this). One nudge per turn: either the model files the card for real on
+  // the extra round, or its repeat claim is replaced with a retraction.
+  let realityChecked = false;
 
   const flush = () => {
     clearTimeout(turnTimer);
@@ -212,7 +218,8 @@ export async function converse(input: {
         `tool_ms=${toolMs} rounds=${rounds} tools=${toolRuns} ` +
         `cost=${costUsd.toFixed(6)} model=${lastModel}` +
         `${toolNames.length ? ` names=${toolNames.join(",")}` : ""}` +
-        `${recovered ? " recovered=1" : ""}`,
+        `${recovered ? " recovered=1" : ""}` +
+        `${realityChecked ? " reality_check=1" : ""}`,
     );
   };
 
@@ -291,6 +298,27 @@ export async function converse(input: {
 
       if (result.toolCalls.length === 0) {
         const text = (result.content ?? "").trim();
+        // THE FABRICATION GUARD. The model has twice answered "card sent" in
+        // turns whose logs read tools=0 — prompt rules alone do not hold (see
+        // proposal-claims.ts). If the reply claims a card went out but no
+        // proposal was actually sent this turn, spend ONE corrective round:
+        // show the model its own claim and the reality check, with tools still
+        // on offer, so it can file the card for real. A false positive (e.g.
+        // honestly describing an OLDER card) costs one extra round and lands
+        // on an answer grounded in a fresh tool result — strictly better than
+        // trusting the phrasing.
+        if (text && proposalsSent === 0 && claimsProposalSent(text)) {
+          if (!realityChecked && rounds < MAX_ROUNDS) {
+            realityChecked = true;
+            messages.push({ role: "assistant", content: text });
+            messages.push({ role: "system", content: REALITY_CHECK });
+            continue;
+          }
+          // Nudged already (or out of rounds) and it STILL claims a card was
+          // sent: retract deterministically rather than deliver the lie.
+          flush();
+          return { kind: "answered", text: hermesDict(input.locale).cardNotSent };
+        }
         flush();
         return text
           ? { kind: "answered", text: text.slice(0, MAX_REPLY_CHARS) }
@@ -387,7 +415,14 @@ export async function converse(input: {
     // Round cap or cost ceiling hit: ask for a final answer with no tools on
     // offer, so the model must conclude from what it already has.
     const final = await callProvider(false);
-    const text = (final.content ?? "").trim();
+    let text = (final.content ?? "").trim();
+    // Same guard on the no-tools final: there is no corrective round to give
+    // here (tools are off the table), so an unbacked "card sent" claim is
+    // retracted outright instead of delivered.
+    if (text && proposalsSent === 0 && claimsProposalSent(text)) {
+      realityChecked = true;
+      text = hermesDict(input.locale).cardNotSent;
+    }
     flush();
     return text
       ? { kind: "answered", text: text.slice(0, MAX_REPLY_CHARS) }

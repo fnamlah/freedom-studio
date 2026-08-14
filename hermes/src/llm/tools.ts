@@ -2169,7 +2169,14 @@ async function extractEarnings(ctx: ToolContext, a: Record<string, unknown>) {
     out.push({ status: "skipped", reason: `${overflow} more rows over the ${MAX_ROWS}-row cap — send another screenshot` });
   }
 
-  consumeAttachment(ctx.chatId);
+  // Consume ONLY when at least one card went out. When every row came back
+  // unmatched/invalid, the result text itself tells the sender to answer a
+  // question («say whose it is»); consuming here made that follow-up throw
+  // "There is no image in this chat" and forced a re-send plus a second paid
+  // vision call. The 15-minute shelf TTL still bounds a never-claimed image.
+  if (out.some((r) => r.status === "awaiting_approval" || r.status === "already_waiting")) {
+    consumeAttachment(ctx.chatId);
+  }
   return redactToolResult("hermes_extract_earnings", out);
 }
 

@@ -144,6 +144,11 @@ export const hermesEn = {
     "Note: the approval card above is still real and still waiting — it will execute if approved. Ask again only if you want something different.",
   cardSuperseded:
     "⛔ Superseded by a newer request below — these buttons no longer apply.",
+  // The fabrication guard's retraction (converse.ts): the model claimed a card
+  // was sent, no propose tool ran, and a corrective round didn't fix it. An
+  // honest "not sent" beats a confident lie about money.
+  cardNotSent:
+    "Correction: that approval card was NOT actually sent — nothing has been recorded. Please repeat the request in one message with all the details and I'll file it properly.",
 
   // --- Telegram: pairing and access --------------------------------------
   paired: "Paired. Freedom Hermes is now connected to this chat.",
@@ -382,6 +387,8 @@ export const hermesRu: typeof hermesEn = {
     "Обратите внимание: карточка подтверждения выше всё ещё действительна и ждёт решения — при одобрении действие выполнится. Спрашивайте снова, только если хотите что-то другое.",
   cardSuperseded:
     "⛔ Заменено более новым запросом ниже — эти кнопки больше не действуют.",
+  cardNotSent:
+    "Поправка: заявка на самом деле НЕ отправлена — ничего не записано. Повторите, пожалуйста, запрос одним сообщением со всеми данными, и я оформлю её по-настоящему.",
 
   paired: "Готово. Freedom Hermes подключён к этому чату.",
   sendPairingCode: "Отправьте код привязки, чтобы подключить этот чат.",

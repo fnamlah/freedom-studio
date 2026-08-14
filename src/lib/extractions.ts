@@ -3,7 +3,12 @@ import { z } from "zod";
 import type { AiSupabaseClient } from "./ai/types";
 import type { Enums, Json } from "./database.types";
 import type { Dictionary } from "./i18n";
-import { isValidYmd } from "./forms";
+// The `.js` extension is REQUIRED, not style: the Hermes worker imports this
+// module and runs it under plain Node ESM, which rejects extensionless
+// relative specifiers at runtime. TypeScript maps `.js` back to `forms.ts`;
+// Next resolves it via the extensionAlias in next.config.ts. Same contract as
+// every module in `src/lib/fields/`.
+import { isValidYmd } from "./forms.js";
 
 /**
  * Proposed records from uploaded documents (migration 021).
@@ -65,7 +70,16 @@ const isoDateTime = z
   .refine((value) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
     if (!m) return false;
-    const [y, mo, day, h, mi, sec] = [m[1], m[2], m[3], m[4], m[5], m[6] ?? "0"].map(Number);
+    // Indexed accesses are guarded by the regex match above; the ?? fallbacks
+    // exist for the stricter noUncheckedIndexedAccess the worker compiles with.
+    const [y, mo, day, h, mi, sec] = [
+      m[1] ?? "",
+      m[2] ?? "",
+      m[3] ?? "",
+      m[4] ?? "",
+      m[5] ?? "",
+      m[6] ?? "0",
+    ].map(Number) as [number, number, number, number, number, number];
     const dt = new Date(Date.UTC(y, mo - 1, day, h, mi, sec));
     return (
       dt.getUTCFullYear() === y &&
@@ -232,7 +246,7 @@ export function matchAccount(
   if (!username) return null;
 
   const byUsername = accounts.filter((a) => normalizeHandle(a.username) === username);
-  if (byUsername.length === 1) return byUsername[0].id;
+  if (byUsername.length === 1) return byUsername[0]?.id ?? null;
   if (byUsername.length === 0) return null;
 
   const platform = normalizeHandle(printed.platform);
@@ -241,7 +255,7 @@ export function matchAccount(
     const name = normalizeHandle(a.platformName);
     return name === platform || name.includes(platform) || platform.includes(name);
   });
-  return byPlatform.length === 1 ? byPlatform[0].id : null;
+  return byPlatform.length === 1 ? (byPlatform[0]?.id ?? null) : null;
 }
 
 /* ------------------------------------------------------------ staging row --- */

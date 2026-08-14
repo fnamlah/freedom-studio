@@ -17,6 +17,8 @@ export interface TelegramMessage {
   photo?: { file_id: string; file_size?: number; width: number; height: number }[];
   /** Text accompanying an attachment. */
   caption?: string;
+  /** A voice note — OPUS in OGG, always ours to transcribe, never to store. */
+  voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
 }
 
 export interface TelegramCallbackQuery {

@@ -134,7 +134,10 @@ async function createPayout(
 
   const db = getAdminClient();
 
-  // Never stack a second open payout on the same payee/period.
+  // Never stack a second open payout on the same payee/period/currency. The
+  // currency term matters: balances are per (payee, currency), and a guard
+  // blind to it answered an approved card with the WRONG currency's payout.
+  const currency = typeof payload.currency === "string" ? payload.currency : "USD";
   const { data: existing } = await db
     .from("payouts")
     .select("id")
@@ -142,6 +145,7 @@ async function createPayout(
     .eq("payee_id", payeeId)
     .eq("period_start", periodStart)
     .eq("period_end", periodEnd)
+    .eq("currency", currency)
     .in("status", ["pending", "approved"])
     .maybeSingle();
 
@@ -162,7 +166,7 @@ async function createPayout(
       studio_fee_amount: typeof payload.studio_fee_amount === "number" ? payload.studio_fee_amount : 0,
       deductions: typeof payload.deductions === "number" ? payload.deductions : 0,
       net_amount: net,
-      currency: typeof payload.currency === "string" ? payload.currency : "USD",
+      currency,
       status: "pending",
       created_by: approver,
       notes: h.payoutNote,
@@ -209,8 +213,11 @@ async function recordEarning(
   }
 
   // Claim the attempt BEFORE the write. A crash between the insert and the
-  // marker would otherwise re-run the insert on retry, and `earnings` has no
-  // unique key that would stop a second identical row.
+  // marker would otherwise re-run the insert on retry. `earnings` DOES carry
+  // earnings_stmt_unique (account, period_start, period_end) — 002:211 — so a
+  // true duplicate dies on 23505; the marker exists for the human-readable
+  // refusal and for rows that differ in amounts, which the constraint would
+  // happily accept as a second row on another period.
   await saveStep({ attempted: true });
 
   const { data, error } = await getAdminClient().rpc("fn_agent_record_earning", {
@@ -840,7 +847,28 @@ async function uploadDocument(
   });
   if (error) throw new Error(error.message);
 
-  const result = await saveStep({ document_id: data });
+  let result = await saveStep({ document_id: data });
+
+  // Index the new document's METADATA so search finds it immediately — a
+  // bonus, never a blocker: the document is saved regardless, and the fence
+  // keeps a later executor retry from re-embedding.
+  if (result.embedded !== true) {
+    try {
+      const { embedDocumentMeta } = await import("../llm/embed.js");
+      await embedDocumentMeta({
+        id: String(data),
+        title: str(payload, "title"),
+        doc_type: str(payload, "doc_type"),
+        issued_date: typeof payload.issued_date === "string" ? payload.issued_date : null,
+        expires_at: typeof payload.expires_at === "string" ? payload.expires_at : null,
+        model_id: modelId,
+      });
+      result = await saveStep({ embedded: true });
+    } catch (e) {
+      console.warn("[upload] embed skipped:", e instanceof Error ? e.message : e);
+    }
+  }
+
   return { message: h.execDocumentUploaded, result };
 }
 

@@ -152,6 +152,9 @@ export const PROPOSE_ACTION: Record<string, string> = {
   hermes_propose_snapshot_forecast: "snapshot_forecast",
   // A Telegram attachment becomes a compliance document (033).
   hermes_propose_upload_document: "upload_document",
+  // A screenshot's earnings rows become record_earning cards (QoL batch).
+  // Same action, executor and manager gate as the typed path.
+  hermes_extract_earnings: "record_earning",
 };
 
 /**
@@ -947,6 +950,21 @@ const DOCUMENT_FLOW_TOOLS: { reads: ToolSpec[]; proposes: ToolSpec[] } = {
     {
       type: "function",
       function: {
+        name: "hermes_setup_status",
+        description:
+          "Per-model setup and payout-readiness checklist: platform accounts, commission scheme (own or studio default), rate card, compliance documents, team assignments, Telegram handle, and whether earnings/balance exist yet. Use for 'is X fully set up', 'what's missing for Лена', 'why can't she be paid'. For each gap, offer the matching fix: account → hermes_propose_account, scheme → hermes_propose_scheme, document → send the file + hermes_propose_upload_document, team → hermes_propose_assignment, earnings → hermes_propose_earning.",
+        parameters: {
+          type: "object",
+          properties: {
+            model: { type: "string", description: "Optional: one model's stage name." },
+          },
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "hermes_search",
         description:
           "Semantic search across the studio's indexed knowledge: notes, document metadata, platform info. Use when a plain listing tool doesn't answer — 'which contract mentions X', 'notes about her schedule'. Returns snippets with similarity scores.",
@@ -963,6 +981,30 @@ const DOCUMENT_FLOW_TOOLS: { reads: ToolSpec[]; proposes: ToolSpec[] } = {
     },
   ],
   proposes: [
+    {
+      type: "function",
+      function: {
+        name: "hermes_extract_earnings",
+        description:
+          "Read an earnings screenshot or statement photo attached to this chat: a vision model extracts the rows, and each valid row is sent as its own Record-earning Approve card. Use when someone sends a dashboard/statement image and asks to record the numbers. Nothing is written until each card is approved. Requires an attached image.",
+        parameters: {
+          type: "object",
+          properties: {
+            model: {
+              type: "string",
+              description: "Optional fallback: whose account, when the image prints no username.",
+            },
+            platform: { type: "string", description: "Optional: the platform the caption names." },
+            period_start: {
+              type: "string",
+              description: "Optional YYYY-MM-DD when the caption states the period.",
+            },
+            period_end: { type: "string", description: "Optional YYYY-MM-DD." },
+          },
+          additionalProperties: false,
+        },
+      },
+    },
     {
       type: "function",
       function: {
@@ -1044,6 +1086,8 @@ const READ_TOOL_COMMAND: Record<string, string> = {
   hermes_person_details: "/documents",
   // Search snippets can carry note and document text — SA/MGR, like the shelf.
   hermes_search: "/documents",
+  // Reads document counts and identity-adjacent setup — SA/MGR, like the shelf.
+  hermes_setup_status: "/documents",
 };
 
 for (const spec of READ_TOOLS) {

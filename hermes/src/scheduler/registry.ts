@@ -48,6 +48,19 @@ export function jobs(): HermesJob[] {
       },
     },
     {
+      // Payday: Wednesday, with Thu–Sat catch-up runs so a close approved
+      // late still gets its payout drafts the next morning, not next week.
+      // Registered DAILY; the Wed–Sat window lives inside the job as a pure,
+      // tested function. HERMES_PAYOUT_WATCH_HOUR_UTC finally has a consumer.
+      name: "payday_watch",
+      gate: { hourUtc: env.HERMES_PAYOUT_WATCH_HOUR_UTC },
+      usesLlm: false,
+      handler: async () => {
+        const { runPaydayWatch } = await import("../jobs/payday-watch.js");
+        return runPaydayWatch();
+      },
+    },
+    {
       // Proposes only. Nothing here can close a period on its own — the
       // proposal waits in the approvals queue for a human.
       name: "period_close_watch",

@@ -501,3 +501,30 @@ test("supersede keys exist only for actions that target one entity — creates n
     assert.ok(ACTION_POLICIES[action], `${action} in SUPERSEDE_ID_FIELD is not a declared action`);
   }
 });
+
+test("the screenshot-extraction tool cannot be steered to arbitrary files or rows", () => {
+  // Mirror of the upload tool's injection pin: the image comes ONLY from the
+  // chat's own attachment context; a prompt-injected call cannot name a
+  // Telegram file or smuggle pre-fabricated rows past the vision model.
+  const spec = TOOL_SPECS.find((s) => s.function.name === "hermes_extract_earnings");
+  assert.ok(spec, "extract tool missing");
+  const props = Object.keys(
+    (spec!.function.parameters as { properties?: Record<string, unknown> }).properties ?? {},
+  );
+  assert.ok(!props.includes("file_id"), "the model must never supply a file id");
+  assert.ok(!props.includes("rows"), "the model must never supply the rows");
+  // Same action, executor and manager gate as the typed earning path.
+  assert.equal(PROPOSE_ACTION.hermes_extract_earnings, "record_earning");
+  // Its rows leave through a registered, blocklist-clean projection.
+  for (const field of PROJECTIONS.hermes_extract_earnings ?? []) {
+    assert.ok(!BLOCKED_KEYS.has(field), `${field} is blocklisted`);
+  }
+  assert.ok(PROJECTIONS.hermes_extract_earnings, "projection missing");
+});
+
+test("the setup checklist is gated like the document shelf", () => {
+  assert.equal(TOOL_COMMAND.hermes_setup_status, "/documents");
+  const offered = specsForRole("finance", commandAllowed).map((s) => s.function.name);
+  assert.ok(!offered.includes("hermes_setup_status"), "finance must not see the checklist");
+  assert.ok(!offered.includes("hermes_extract_earnings"), "finance must not extract earnings");
+});

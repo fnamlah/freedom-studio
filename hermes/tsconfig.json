@@ -17,7 +17,13 @@
     "outDir": "dist",
     "rootDir": "..",
     "baseUrl": ".",
-    "paths": { "@studio/*": ["../src/*"] }
+    "paths": {
+      "@studio/*": ["../src/*"],
+      // Type-only resolution for app modules the worker imports relatively
+      // (extractions.ts type-imports ./ai/types, which uses @/). These erase
+      // at emit; the mapping exists so tsc can CHECK them.
+      "@/*": ["../src/*"]
+    }
   },
   "include": [
     "src/**/*.ts",

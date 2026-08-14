@@ -79,3 +79,62 @@ export async function embedQuery(scrubbedText: string): Promise<number[]> {
   }
   return vec;
 }
+
+/**
+ * Embed ONE document's metadata right after a Telegram upload, so the new
+ * document is searchable without waiting for a portal reindex that (today)
+ * has no button anywhere.
+ *
+ * The content string is BYTE-IDENTICAL to the app's reindex builder
+ * (src/lib/ai/embeddings.ts, document_meta branch: Title/Type/Issued/Expires,
+ * scrubbed) and the upsert key is the app's own
+ * (source_type,source_id,embedding_model) — so if the strings ever drift, a
+ * later reindex simply re-embeds on hash mismatch into the same row. Metadata
+ * ONLY, per docs/11 §6.1: never file contents, storage_path, or file_name.
+ *
+ * Callers treat failure as a shrug: the document is saved either way; the
+ * index is a bonus.
+ */
+export async function embedDocumentMeta(doc: {
+  id: string;
+  title: string;
+  doc_type: string;
+  issued_date?: string | null;
+  expires_at?: string | null;
+  model_id: string;
+}): Promise<void> {
+  const { scrubText } = await import("./redact.js");
+  const { createHash } = await import("node:crypto");
+  const { getAdminClient } = await import("../lib/supabase.js");
+
+  const content = scrubText(
+    [
+      `Title: ${doc.title}`,
+      `Type: ${doc.doc_type}`,
+      doc.issued_date ? `Issued: ${doc.issued_date}` : "",
+      doc.expires_at ? `Expires: ${doc.expires_at}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+
+  const vector = await embedQuery(content);
+  const model = (await readSetting("ai.embedding.model")) ?? "text-embedding-3-large";
+
+  const { error } = await getAdminClient()
+    .from("embeddings")
+    .upsert(
+      {
+        source_type: "document_meta",
+        source_id: doc.id,
+        model_id: doc.model_id,
+        operator_id: null,
+        content,
+        content_hash: createHash("sha256").update(content).digest("hex"),
+        embedding: `[${vector.join(",")}]`,
+        embedding_model: model,
+      },
+      { onConflict: "source_type,source_id,embedding_model" },
+    );
+  if (error) throw new Error(`embed upsert failed: ${error.message}`);
+}

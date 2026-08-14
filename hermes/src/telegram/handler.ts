@@ -1,4 +1,6 @@
+import { assertUnderCostCap, recordCostUsd } from "../lib/cost.js";
 import { enqueueKeyed } from "../lib/keyed-queue.js";
+import { trackDrain } from "../lib/shutdown.js";
 import { hermesDict, toLocale, DEFAULT_LOCALE, type Locale } from "../lib/i18n.js";
 import { getAdminClient } from "../lib/supabase.js";
 import { commandAllowed, roleMayUseBot } from "./access.js";
@@ -10,8 +12,10 @@ import {
 } from "./attachments.js";
 import {
   answerCallbackQuery,
+  downloadFile,
   editMessageText,
   escapeHtml,
+  getFile,
   sendChatAction,
   sendMessage,
   type TelegramUpdate,
@@ -19,6 +23,12 @@ import {
 import { handleCommand } from "./commands.js";
 import { converse } from "../llm/converse.js";
 import { buildHistory } from "../llm/history.js";
+import {
+  MAX_VOICE_SECONDS,
+  transcribeVoice,
+  transcriptionCostUsd,
+  TranscriptionNotConfiguredError,
+} from "../llm/transcribe.js";
 import { scrubText } from "../llm/redact.js";
 import { env } from "../config/env.js";
 
@@ -232,7 +242,10 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
   const isCallback = Boolean(update.callback_query);
   const text =
     update.message?.text ?? update.message?.caption ?? update.callback_query?.data ?? "";
-  const seen = await markSeen(update, isCallback ? "callback" : "text");
+  const seen = await markSeen(
+    update,
+    isCallback ? "callback" : update.message?.voice ? "voice" : "text",
+  );
   if (!seen.fresh) return;
 
   await enqueueKeyed(`chat:${chatId}`, async () => {
@@ -299,18 +312,72 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
     }
     const pending = recallAttachment(chatId);
 
-    // A message with no text at all — a sticker, voice note, or a group
-    // service event. Telegram delivers these as updates with no `text`, and
-    // before this they hit the static command list for free; sending an empty
-    // prompt to a provider would bill a round trip per sticker. A FILE with no
-    // caption is the one exception: the model should ask whose it is.
-    if (!text.trim() && !attachment) {
+    // A VOICE NOTE becomes the turn's text. Transcription runs only here —
+    // after findVerifiedChannel — so a stranger's audio never costs an OpenAI
+    // call and is never persisted. The audio itself crosses to OpenAI (see
+    // transcribe.ts for the stated egress decision); the transcript then takes
+    // exactly the typed-text path: scrubbed, stored, answered.
+    let turnText = text;
+    const voice = update.message?.voice;
+    if (voice && !isCallback) {
+      const h = hermesDict(channel.locale);
+      if (voice.duration > MAX_VOICE_SECONDS) {
+        await sendMessage(chatId, h.voiceTooLong(MAX_VOICE_SECONDS));
+        return;
+      }
+      if ((voice.file_size ?? 0) > 20 * 1024 * 1024) {
+        await sendMessage(chatId, h.voiceFailed);
+        return;
+      }
+      try {
+        await assertUnderCostCap();
+      } catch {
+        await sendMessage(chatId, h.chatOverCap);
+        return;
+      }
+      let transcript = "";
+      try {
+        const { file_path } = await getFile(voice.file_id);
+        if (!file_path) throw new Error("no file path");
+        const bytes = await downloadFile(file_path);
+        transcript = await transcribeVoice(bytes, {
+          mimeType: voice.mime_type ?? "audio/ogg",
+          language: channel.locale,
+        });
+      } catch (e) {
+        if (e instanceof TranscriptionNotConfiguredError) {
+          await sendMessage(chatId, h.voiceNotConfigured);
+        } else {
+          console.warn("[voice] transcription failed:", e instanceof Error ? e.message : e);
+          await sendMessage(chatId, h.voiceFailed);
+        }
+        return;
+      }
+      // The spend happened even if the turn later fails.
+      void trackDrain(recordCostUsd(transcriptionCostUsd(voice.duration)).catch(() => undefined));
+      if (!transcript) {
+        await sendMessage(chatId, h.voiceEmpty);
+        return;
+      }
+      // Echoed as its OWN message, permanently: the transcript can drive a
+      // card that moves money, and the approver needs the record of what was
+      // heard to survive next to it — the placeholder gets overwritten.
+      await sendMessage(chatId, h.voiceHeard(transcript.slice(0, 250))).catch(() => undefined);
+      turnText = text.trim() ? `${text}\n${transcript}` : transcript;
+    }
+
+    // A message with no text at all — a sticker or a group service event.
+    // (Voice notes USED to be eaten here; they are transcribed above now.)
+    // Sending an empty prompt to a provider would bill a round trip per
+    // sticker. A FILE with no caption is the one exception: the model should
+    // ask whose it is.
+    if (!turnText.trim() && !attachment) {
       await sendMessage(chatId, hermesDict(channel.locale).commandList);
       return;
     }
 
     // Free text from a verified member of senior staff — talk.
-    await converse_(chatId, text, channel, seen.rowId, pending);
+    await converse_(chatId, turnText, channel, seen.rowId, pending);
   });
 }
 

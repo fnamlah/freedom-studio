@@ -17,6 +17,15 @@ import {
   resolvePlatform,
 } from "./resolve.js";
 import { embedQuery, EmbeddingNotConfiguredError } from "./embed.js";
+import { EARNINGS_VISION_PROMPT, extractJsonObject, MAX_IMAGE_BYTES, visionExtract } from "./vision.js";
+import {
+  earningRecordSchema,
+  matchAccount,
+  type AccountCandidate,
+} from "../../../src/lib/extractions.js";
+import { assertUnderCostCap, computeCost, recordCostUsd } from "../lib/cost.js";
+import { trackDrain } from "../lib/shutdown.js";
+import { downloadFile, getFile } from "../telegram/api.js";
 import { readSetting } from "../lib/settings.js";
 import {
   isAllowedMime,
@@ -284,6 +293,10 @@ export async function runTool(
       return proposeSnapshotForecast(ctx!, args);
     case "hermes_propose_upload_document":
       return proposeUploadDocument(ctx!, args);
+    case "hermes_extract_earnings":
+      return extractEarnings(ctx!, args);
+    case "hermes_setup_status":
+      return readSetupStatus(args);
     case "hermes_search":
       return searchEverything(args);
 
@@ -1981,4 +1994,260 @@ async function searchEverything(args: Record<string, unknown>): Promise<Record<s
     }
   }
   return redactToolResult(projectionFor("hermes_search"), rows);
+}
+
+/* ======================================================================== *
+ * Earnings from a screenshot (QoL batch).
+ * ======================================================================== */
+
+/**
+ * Read an attached earnings screenshot and turn every valid row into its own
+ * Record-earning Approve card, deterministically, in this one call.
+ *
+ * The rejected alternative — returning rows for the model to re-type through
+ * hermes_propose_earning — would re-introduce exactly the transcription
+ * errors the vision call avoids, and burn the round budget. The CARD is the
+ * review step; the model only narrates what was found.
+ */
+async function extractEarnings(ctx: ToolContext, a: Record<string, unknown>) {
+  const att = ctx.attachment;
+  if (!att) {
+    throw new Error("There is no image in this chat — send the earnings screenshot first.");
+  }
+  if (!att.mimeType.startsWith("image/")) {
+    throw new Error("That attachment isn't an image — send a screenshot or photo of the statement.");
+  }
+  if (att.sizeBytes > MAX_IMAGE_BYTES) {
+    throw new Error("That image is over 10 MB — send a smaller screenshot.");
+  }
+  // FRESHNESS GATE (review finding B4): this tool sends the image to the
+  // vision provider on the model's initiative, before any card exists. The
+  // attachment memory holds files for 15 minutes — long enough that a passport
+  // photo sent earlier for FILING could be sitting there when an earnings ask
+  // arrives. Only a recently sent image may cross; anything older must be
+  // re-sent, which is the sender restating exactly what should be read.
+  const ageMs = att.receivedAt ? Date.now() - att.receivedAt : 0;
+  if (ageMs > 5 * 60_000) {
+    throw new Error(
+      "That image was sent a while ago — re-send the earnings screenshot so I'm reading the right file.",
+    );
+  }
+
+  await assertUnderCostCap();
+
+  // Reading requires the bytes NOW. The propose-then-download rule guards
+  // STORING a file; this is a read the sender explicitly asked for, and
+  // nothing is written before each row's Approve tap.
+  const { file_path } = await getFile(att.fileId);
+  if (!file_path) throw new Error("Telegram no longer has that image — send it again.");
+  const bytes = await downloadFile(file_path);
+  const dataUrl = `data:${att.mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
+
+  const hints: string[] = [];
+  if (typeof a.platform === "string" && a.platform.trim()) hints.push(`platform ${a.platform}`);
+  if (typeof a.period_start === "string" && typeof a.period_end === "string") {
+    hints.push(`period ${a.period_start} to ${a.period_end}`);
+  }
+  const result = await visionExtract({
+    dataUrl,
+    prompt: EARNINGS_VISION_PROMPT,
+    userText:
+      "Extract the earnings rows from this image." +
+      (hints.length ? ` The sender says: ${hints.join(", ")}.` : ""),
+  });
+  void trackDrain(recordCostUsd(computeCost(result.model, result.usage)).catch(() => undefined));
+
+  const parsed = extractJsonObject(result.content) as { rows?: unknown[] } | null;
+  const rawRows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+  if (rawRows.length === 0) {
+    throw new Error(
+      "I couldn't read any earnings rows off that image — try a sharper screenshot or type the figures.",
+    );
+  }
+
+  const MAX_ROWS = 6;
+  const overflow = Math.max(0, rawRows.length - MAX_ROWS);
+
+  // One query pass for account matching — the account decides the model,
+  // exactly as the manual and inbox paths enforce.
+  const db = getAdminClient();
+  const [accountsRes, platformsRes] = await Promise.all([
+    db.from("platform_accounts").select("id, username, platform_id"),
+    db.from("platforms").select("id, name"),
+  ]);
+  const pfName = new Map(orThrow("hermes_extract_earnings", platformsRes).map((p) => [p.id, p.name]));
+  const candidates: AccountCandidate[] = orThrow("hermes_extract_earnings", accountsRes).map((r) => ({
+    id: r.id,
+    username: r.username,
+    platformName: pfName.get(r.platform_id) ?? "",
+  }));
+
+  const out: Record<string, unknown>[] = [];
+  for (const raw of rawRows.slice(0, MAX_ROWS)) {
+    const check = earningRecordSchema.safeParse({ kind: "earning", ...(raw as object) });
+    if (!check.success) {
+      const r = raw as Record<string, unknown>;
+      out.push({
+        // Unvalidated vision output — clamp before it travels anywhere.
+        platform: typeof r.platform === "string" ? r.platform.slice(0, 80) : null,
+        username: typeof r.username === "string" ? r.username.slice(0, 120) : null,
+        status: "invalid",
+        reason: check.error.issues[0]?.message ?? "unreadable row",
+      });
+      continue;
+    }
+    const row = check.data;
+
+    let accountId = matchAccount(row, candidates);
+    // The caption-model fallback exists for images that print NO handle. A row
+    // that PRINTED a username which matched no account must stay unmatched —
+    // binding it to a different username's account is exactly the wrong-model
+    // booking the card could never reveal (review finding B3).
+    if (!accountId && !row.username && typeof a.model === "string" && a.model.trim()) {
+      const fallback = await resolveAccount(a.model, row.platform ?? (a.platform as string | undefined));
+      if (fallback.ok) accountId = fallback.value.id;
+    }
+    // A unique username match on the WRONG platform is a mismatch, not a match:
+    // matchAccount's platform tiebreak only runs on multi-match, so re-check.
+    if (accountId && row.platform) {
+      const cand = candidates.find((c) => c.id === accountId);
+      const printed = row.platform.trim().toLowerCase();
+      const actual = (cand?.platformName ?? "").trim().toLowerCase();
+      if (actual && printed && !actual.includes(printed) && !printed.includes(actual)) {
+        accountId = null;
+      }
+    }
+    if (!accountId) {
+      out.push({
+        platform: row.platform ?? null,
+        username: row.username ?? null,
+        period_start: row.period_start,
+        period_end: row.period_end,
+        net_amount: row.net_amount,
+        status: "unmatched",
+        reason: "no matching platform account — say whose it is",
+      });
+      continue;
+    }
+
+    // The card must name the RESOLVED account — the one thing that decides
+    // whose balance this money lands on — not just what the image printed.
+    const resolved = candidates.find((c) => c.id === accountId);
+    const resolvedLabel = resolved ? `${resolved.platformName} · @${resolved.username}` : "?";
+    const cur = row.currency ?? "USD";
+    const payload = {
+      platform_account_id: accountId,
+      period_start: row.period_start,
+      period_end: row.period_end,
+      gross_amount: row.gross_amount,
+      fee_amount: row.fee_amount ?? 0,
+      net_amount: row.net_amount,
+      // The image's own denomination — dropping it booked EUR rows as USD.
+      currency: cur,
+    };
+    const proposal = await propose(
+      ctx,
+      "record_earning",
+      payload,
+      `Record earning to account ${resolvedLabel}: ${row.net_amount} ${cur} net, ${row.period_start} to ${row.period_end}? (image printed: ${row.username ? `@${row.username}` : "no handle"} ${row.platform ?? ""})`,
+      `Записать доход на счёт ${resolvedLabel}: ${row.net_amount} ${cur} нетто, ${row.period_start} — ${row.period_end}? (на снимке: ${row.username ? `@${row.username}` : "без ника"} ${row.platform ?? ""})`,
+      "Считано с изображения ИИ — сверьте цифры с оригиналом перед подтверждением. / Read off a screenshot by a vision model — check against the original before approving.",
+    );
+    out.push({
+      platform: row.platform ?? null,
+      username: row.username ?? null,
+      period_start: row.period_start,
+      period_end: row.period_end,
+      gross_amount: row.gross_amount,
+      fee_amount: row.fee_amount ?? 0,
+      net_amount: row.net_amount,
+      currency: row.currency ?? "USD",
+      status: (proposal[0]?.status as string) ?? "awaiting_approval",
+    });
+  }
+  if (overflow > 0) {
+    out.push({ status: "skipped", reason: `${overflow} more rows over the ${MAX_ROWS}-row cap — send another screenshot` });
+  }
+
+  consumeAttachment(ctx.chatId);
+  return redactToolResult("hermes_extract_earnings", out);
+}
+
+/**
+ * The onboarding checklist: one row per model, every column a readiness fact.
+ * The tool DESCRIPTION carries the steering — for each gap, the model offers
+ * the propose tool that fixes it. Matches the phase the studio is in: setup.
+ */
+async function readSetupStatus(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  let modelFilter: string | null = null;
+  if (typeof args.model === "string" && args.model.trim()) {
+    const m = await resolveModel(args.model);
+    if (!m.ok) throw new Error(explain(m, "models"));
+    modelFilter = m.value.id;
+  }
+
+  let modelsQuery = db
+    .from("models")
+    .select("id, stage_name, telegram_username, status")
+    .neq("status", "terminated");
+  if (modelFilter) modelsQuery = db.from("models").select("id, stage_name, telegram_username, status").eq("id", modelFilter);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const [modelsRes, accountsRes, schemesRes, ratesRes, docsRes, assignRes, earningsRes, balancesRes] =
+    await Promise.all([
+      modelsQuery,
+      db.from("platform_accounts").select("id, model_id"),
+      db.from("commission_schemes").select("id, model_id, platform_account_id"),
+      db.from("commission_rates").select("scheme_id"),
+      db.from("v_document_compliance").select("model_id, status"),
+      db.from("operator_assignments").select("model_id, assigned_from, assigned_to"),
+      db.from("earnings").select("id, model_id").limit(2000),
+      db.from("v_payee_balances").select("payee_type, payee_id, balance"),
+    ]);
+
+  const models = orThrow("hermes_setup_status", modelsRes);
+  const accounts = orThrow("hermes_setup_status", accountsRes);
+  const schemes = orThrow("hermes_setup_status", schemesRes);
+  const ratedSchemes = new Set(orThrow("hermes_setup_status", ratesRes).map((r) => r.scheme_id));
+  const docs = orThrow("hermes_setup_status", docsRes);
+  const assigns = orThrow("hermes_setup_status", assignRes);
+  const earnings = orThrow("hermes_setup_status", earningsRes);
+  const balances = orThrow("hermes_setup_status", balancesRes);
+
+  const defaultScheme = schemes.find((s) => s.model_id === null && s.platform_account_id === null);
+  const defaultHasCard = defaultScheme ? ratedSchemes.has(defaultScheme.id) : false;
+
+  return redactToolResult(
+    projectionFor("hermes_setup_status"),
+    models.map((m) => {
+      const own = schemes.find((s) => s.model_id === m.id);
+      const myDocs = docs.filter((d) => d.model_id === m.id);
+      const balance = balances.find((b) => b.payee_type === "model" && b.payee_id === m.id);
+      return {
+        stage_name: m.stage_name,
+        accounts_count: accounts.filter((a) => a.model_id === m.id).length,
+        scheme: own ? "own" : defaultScheme ? "default" : "none",
+        rate_card: own
+          ? ratedSchemes.has(own.id)
+            ? "own"
+            : "none"
+          : defaultHasCard
+            ? "default"
+            : "none",
+        docs_valid: myDocs.filter((d) => d.status === "valid").length,
+        docs_expiring: myDocs.filter((d) => d.status === "expiring").length,
+        docs_expired: myDocs.filter((d) => d.status === "expired").length,
+        team_count: assigns.filter(
+          (x) =>
+            x.model_id === m.id &&
+            (x.assigned_from ?? "") <= today &&
+            (x.assigned_to === null || (x.assigned_to ?? "") >= today),
+        ).length,
+        has_telegram: Boolean(m.telegram_username),
+        has_earnings: earnings.some((e) => e.model_id === m.id),
+        balance: Number(balance?.balance ?? 0),
+      };
+    }),
+  );
 }

@@ -59,6 +59,24 @@ export const hermesEn = {
   execDeleted: "Deleted.",
   execAlreadyGone: "That record was already gone — nothing to delete.",
 
+  paydayTitle: (from: string, to: string) => `Payday — week ${from} → ${to}`,
+  paydayTotals: (gross: string, net: string) => `Week total: ${gross} gross · ${net} net`,
+  paydayPerModel: "By model (net):",
+  paydayToPay: (amount: string, n: number) => `Owed overall: ${amount} to ${n} payee(s)`,
+  paydayCards: (n: number) => `${n} approval card(s) sent today.`,
+  paydayAwaitingClose:
+    "The week must be closed first — card above. I'll draft the payouts as soon as it's approved (I check daily until Saturday).",
+  paydayNothing: "Nothing to do: the week is closed and no balances are outstanding.",
+  payoutSummary: (payee: string, net: number, from: string, to: string) =>
+    `Create payout for ${payee}: ${net} — their ENTIRE outstanding balance (week ${from} → ${to} and anything before it)?`,
+  payoutCardTitle: "Payout ready to draft",
+  voiceNotConfigured:
+    "Voice notes aren't set up yet — no transcription key on the worker. Type it instead.",
+  voiceTooLong: (sec: number) =>
+    `That voice note is longer than ${sec}s — record a shorter one or type it.`,
+  voiceFailed: "Couldn't transcribe that voice note. Try again, or type it.",
+  voiceEmpty: "I couldn't make out any words in that voice note.",
+  voiceHeard: (text: string) => `🎙 Heard: "${text}"`,
   chatThinking: "Thinking…",
   chatLookingUp: "Looking that up…",
   chatStillWorking: "Still working on it…",
@@ -106,6 +124,8 @@ export const hermesEn = {
     hermes_propose_snapshot_forecast: "Preparing the forecast snapshot…",
     hermes_propose_upload_document: "Preparing the file to save…",
     hermes_search: "Searching the studio's knowledge…",
+    hermes_extract_earnings: "Reading the numbers off the screenshot…",
+    hermes_setup_status: "Checking her setup…",
   } as Record<string, string>,
   chatNotConfigured:
     "I can't think right now — no AI provider key is configured. The commands still work: /brief /balances /approvals /compliance /cost /status",
@@ -283,6 +303,24 @@ export const hermesRu: typeof hermesEn = {
   execDeleted: "Удалено.",
   execAlreadyGone: "Этой записи уже не было — удалять нечего.",
 
+  paydayTitle: (from: string, to: string) => `Среда — итоги недели ${from} → ${to}`,
+  paydayTotals: (gross: string, net: string) => `Итог недели: ${gross} брутто · ${net} нетто`,
+  paydayPerModel: "По моделям (нетто):",
+  paydayToPay: (amount: string, n: number) => `К выплате всего: ${amount} (${n} чел.)`,
+  paydayCards: (n: number) => `Отправлено карточек на подтверждение: ${n}.`,
+  paydayAwaitingClose:
+    "Сначала нужно закрыть неделю — карточка выше. Выплаты предложу сразу после закрытия (проверяю каждый день до субботы).",
+  paydayNothing: "Всё чисто: неделя закрыта, задолженностей нет.",
+  payoutSummary: (payee: string, net: number, from: string, to: string) =>
+    `Создать выплату для ${payee}: ${net} — ВЕСЬ остаток задолженности (неделя ${from} → ${to} и всё, что накопилось раньше)?`,
+  payoutCardTitle: "Выплата готова к оформлению",
+  voiceNotConfigured:
+    "Голосовые пока не подключены — на сервере нет ключа распознавания. Напишите текстом.",
+  voiceTooLong: (sec: number) =>
+    `Голосовое длиннее ${sec} сек — запишите короче или напишите текстом.`,
+  voiceFailed: "Не получилось распознать голосовое. Попробуйте ещё раз или напишите текстом.",
+  voiceEmpty: "В голосовом не удалось разобрать слова.",
+  voiceHeard: (text: string) => `🎙 Услышал: «${text}»`,
   chatThinking: "Думаю…",
   chatLookingUp: "Смотрю данные…",
   chatStillWorking: "Ещё работаю…",
@@ -329,6 +367,8 @@ export const hermesRu: typeof hermesEn = {
     hermes_propose_snapshot_forecast: "Готовлю срез прогноза…",
     hermes_propose_upload_document: "Готовлю файл к сохранению…",
     hermes_search: "Ищу по базе студии…",
+    hermes_extract_earnings: "Читаю цифры со скриншота…",
+    hermes_setup_status: "Проверяю, всё ли настроено…",
   } as Record<string, string>,
   chatNotConfigured:
     "Сейчас я не могу думать — не настроен ключ ИИ-провайдера. Команды по-прежнему работают: /brief /balances /approvals /compliance /cost /status",

@@ -1947,9 +1947,9 @@ async function searchEverything(args: Record<string, unknown>): Promise<Record<s
     vector = await embedQuery(scrubText(query));
   } catch (e) {
     if (e instanceof EmbeddingNotConfiguredError) {
-      throw new Error(
-        "Semantic search isn't switched on yet — the embedding provider key is missing on the worker.",
-      );
+      // The error itself says WHICH piece is missing (a key, or the provider
+      // not selling the model) — relay it rather than guessing.
+      throw new Error(`Semantic search isn't switched on yet — ${e.message}.`);
     }
     throw e;
   }

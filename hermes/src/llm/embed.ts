@@ -41,6 +41,17 @@ export async function embedQuery(scrubbedText: string): Promise<number[]> {
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
+    // z.ai's international platform sells NO embeddings product at all as of
+    // 2026-08 (their docs list zero embedding models; "Unknown Model" 1211 is
+    // what the configured default hits). That is a CONFIGURATION state, not a
+    // transient failure — say so, or the person hears a bare 400 and files a
+    // bug against a service that is working exactly as (not) sold.
+    const body = await res.text().catch(() => "");
+    if (res.status === 400 && /1211|Unknown Model/i.test(body)) {
+      throw new EmbeddingNotConfiguredError(
+        `the ${provider} platform does not offer the "${model}" embedding model — semantic search needs an embeddings vendor set up`,
+      );
+    }
     throw new Error(`embedding request failed: ${res.status}`);
   }
   const json = (await res.json()) as { data?: { embedding?: number[] }[] };

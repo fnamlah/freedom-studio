@@ -7,6 +7,14 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import {
+  assignmentFields,
+  endAfterStart,
+  endAfterStartMessage,
+  operatorProfileFields,
+  type AssignmentMessages,
+  type OperatorMessages,
+} from "@/lib/fields/operators";
 import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
@@ -40,77 +48,35 @@ type OperatorStatus = (typeof OPERATOR_STATUSES)[number];
 
 /* -------------------------------------------------------------- validation --- */
 
-/** Parses a strict `YYYY-MM-DD` and rejects impossible calendar dates. */
-function isValidYmd(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return false;
-  const y = Number(match[1]);
-  const m = Number(match[2]);
-  const d = Number(match[3]);
-  const asDate = new Date(Date.UTC(y, m - 1, d));
-  return (
-    asDate.getUTCFullYear() === y &&
-    asDate.getUTCMonth() === m - 1 &&
-    asDate.getUTCDate() === d
-  );
-}
-
-const emptyToNull = (value: unknown) =>
-  typeof value === "string" && value.trim() === "" ? null : value;
-
-const optionalEmail = (d: Dictionary) =>
-  z
-    .preprocess(
-      emptyToNull,
-      z.string().trim().email(d.studio.operators.errEmail).nullable(),
-    )
-    .optional();
-
-const optionalPhone = (d: Dictionary) =>
-  z
-    .preprocess(
-      emptyToNull,
-      z.string().trim().max(40, d.studio.operators.errPhoneLong).nullable(),
-    )
-    .optional();
-
-const optionalCountry = (d: Dictionary) =>
-  z
-    .preprocess(
-      (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null),
-      z.string().regex(/^[A-Z]{2}$/, d.studio.operators.errCountry).nullable(),
-    )
-    .optional();
-
-const optionalStartDate = (d: Dictionary) =>
-  z
-    .preprocess(
-      emptyToNull,
-      z.string().refine(isValidYmd, d.studio.operators.errDateInvalid).nullable(),
-    )
-    .optional();
-
-const optionalNotes = (d: Dictionary) =>
-  z
-    .preprocess(
-      emptyToNull,
-      z.string().trim().max(4000, d.studio.operators.errNotesLong).nullable(),
-    )
-    .optional();
-
-/** Shared operator profile fields (everything except lifecycle status). */
-const profileFields = (d: Dictionary) => ({
-  display_name: z.string().trim().min(1, d.studio.operators.errDisplayNameRequired).max(160),
-  // Which kind of team member. Payment is identical for all three (they share
-  // the scheme's team pool); this only records who someone is.
-  staff_role: z.enum(["operator", "coach", "team_leader"]).default("operator"),
-  legal_name: z.string().trim().min(1, d.studio.operators.errLegalNameRequired).max(200),
-  email: optionalEmail(d),
-  phone: optionalPhone(d),
-  country: optionalCountry(d),
-  start_date: optionalStartDate(d),
-  notes: optionalNotes(d),
+/**
+ * The rules live in `src/lib/fields/operators.ts`, shared with the Telegram
+ * bot's write path. They used to live here as private factories, which meant
+ * the bot could not reuse them and enforced almost nothing — `operators` has
+ * no CHECK constraints, so nothing downstream caught it either. Messages are
+ * still this module's, in the caller's language; only the rules are shared.
+ */
+const operatorMessages = (d: Dictionary): OperatorMessages => ({
+  displayNameRequired: d.studio.operators.errDisplayNameRequired,
+  legalNameRequired: d.studio.operators.errLegalNameRequired,
+  email: d.studio.operators.errEmail,
+  phoneLong: d.studio.operators.errPhoneLong,
+  country: d.studio.operators.errCountry,
+  dateInvalid: d.studio.operators.errDateInvalid,
+  notesLong: d.studio.operators.errNotesLong,
 });
+
+const assignmentMessages = (d: Dictionary): AssignmentMessages => ({
+  poolShareType: d.studio.operators.errPoolShareType,
+  poolShareMin: d.studio.operators.errPoolShareMin,
+  poolShareMax: d.studio.operators.errPoolShareMax,
+  modelRequired: d.studio.operators.errModelRequired,
+  startDateInvalid: d.studio.operators.errStartDateInvalid,
+  endDateInvalid: d.studio.operators.errEndDateInvalid,
+  endAfterStart: d.studio.operators.errEndAfterStart,
+  notesLong: d.studio.operators.errNotesLong,
+});
+
+const profileFields = (d: Dictionary) => operatorProfileFields(operatorMessages(d));
 
 const createOperatorSchema = (d: Dictionary) =>
   z.object({
@@ -131,41 +97,19 @@ const statusSchema = z.object({
 
 /* ------------------------------------------------------------ assignment IO --- */
 
-const poolShare = (d: Dictionary) =>
-  z.coerce
-    .number({ invalid_type_error: d.studio.operators.errPoolShareType })
-    .min(0, d.studio.operators.errPoolShareMin)
-    .max(100, d.studio.operators.errPoolShareMax);
-
 const assignmentBase = (d: Dictionary) => ({
   operator_id: z.string().uuid(),
   model_id: z.string().uuid(d.studio.operators.errModelRequired),
-  pool_share_percent: poolShare(d),
-  assigned_from: z.string().refine(isValidYmd, d.studio.operators.errStartDateInvalid),
-  assigned_to: z
-    .preprocess(
-      emptyToNull,
-      z.string().refine(isValidYmd, d.studio.operators.errEndDateInvalid).nullable(),
-    )
-    .optional(),
-  notes: optionalNotes(d),
-});
-
-/** Mirrors the DB CHECK `assigned_to > assigned_from` with a friendly message. */
-const endAfterStart = (data: { assigned_from: string; assigned_to?: string | null }) =>
-  !data.assigned_to || data.assigned_to > data.assigned_from;
-const endAfterStartMessage = (d: Dictionary) => ({
-  message: d.studio.operators.errEndAfterStart,
-  path: ["assigned_to"],
+  ...assignmentFields(assignmentMessages(d)),
 });
 
 const createAssignmentSchema = (d: Dictionary) =>
-  z.object(assignmentBase(d)).refine(endAfterStart, endAfterStartMessage(d));
+  z.object(assignmentBase(d)).refine(endAfterStart, endAfterStartMessage(assignmentMessages(d)));
 
 const updateAssignmentSchema = (d: Dictionary) =>
   z
     .object({ id: z.string().uuid(), ...assignmentBase(d) })
-    .refine(endAfterStart, endAfterStartMessage(d));
+    .refine(endAfterStart, endAfterStartMessage(assignmentMessages(d)));
 
 const deleteAssignmentSchema = z.object({
   id: z.string().uuid(),

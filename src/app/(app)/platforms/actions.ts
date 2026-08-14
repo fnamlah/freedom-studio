@@ -7,6 +7,12 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import {
+  ACCOUNT_STATUSES,
+  accountEditableFields,
+  platformFields,
+  type PlatformMessages,
+} from "@/lib/fields/platforms";
 import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
@@ -31,55 +37,38 @@ import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms"
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
-const ACCOUNT_STATUSES = ["active", "suspended", "closed"] as const;
 type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 
 /* -------------------------------------------------------------- validation --- */
 
-const emptyToNull = (value: unknown) =>
-  typeof value === "string" && value.trim() === "" ? null : value;
-
-/** Website URL: optional, normalized to include a scheme, then validated. */
-const optionalUrl = (d: Dictionary) =>
-  z
-    .preprocess((v) => {
-      if (typeof v !== "string") return v;
-      const trimmed = v.trim();
-      if (trimmed === "") return null;
-      return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-    }, z.string().url(d.studio.platforms.errUrl).max(2048, d.studio.platforms.errUrlLong).nullable())
-    .optional();
-
-/** Platform revenue cut: optional (nullable in the schema), 0–100 when present. */
-const optionalFeePercent = (d: Dictionary) =>
-  z
-    .preprocess(
-      emptyToNull,
-      z.coerce
-        .number({ invalid_type_error: d.studio.platforms.errFeeType })
-        .min(0, d.studio.platforms.errFeeMin)
-        .max(100, d.studio.platforms.errFeeMax)
-        .nullable(),
-    )
-    .optional();
-
-const platformName = (d: Dictionary) =>
-  z.string().trim().min(1, d.studio.platforms.errNameRequired).max(160);
-const accountUsername = (d: Dictionary) =>
-  z.string().trim().min(1, d.studio.platforms.errUsernameRequired).max(160);
+/**
+ * The rules live in `src/lib/fields/platforms.ts`, shared with the Telegram
+ * bot's write path. `platform_fee_percent` in particular has no CHECK on the
+ * table, so this bound is the only thing standing between a typo and every
+ * future net figure on that account being wrong.
+ */
+const messages = (d: Dictionary): PlatformMessages => ({
+  nameRequired: d.studio.platforms.errNameRequired,
+  url: d.studio.platforms.errUrl,
+  urlLong: d.studio.platforms.errUrlLong,
+  usernameRequired: d.studio.platforms.errUsernameRequired,
+  feeType: d.studio.platforms.errFeeType,
+  feeMin: d.studio.platforms.errFeeMin,
+  feeMax: d.studio.platforms.errFeeMax,
+  modelRequired: d.studio.platforms.errModelRequired,
+  platformRequired: d.studio.platforms.errPlatformRequired,
+});
 
 const createPlatformSchema = (d: Dictionary) =>
   z.object({
-    name: platformName(d),
-    website_url: optionalUrl(d),
+    ...platformFields(messages(d)),
     is_active: z.boolean(),
   });
 
 const updatePlatformSchema = (d: Dictionary) =>
   z.object({
     id: z.string().uuid(),
-    name: platformName(d),
-    website_url: optionalUrl(d),
+    ...platformFields(messages(d)),
   });
 
 const setPlatformActiveSchema = z.object({
@@ -91,16 +80,14 @@ const createAccountSchema = (d: Dictionary) =>
   z.object({
     model_id: z.string().uuid(d.studio.platforms.errModelRequired),
     platform_id: z.string().uuid(d.studio.platforms.errPlatformRequired),
-    username: accountUsername(d),
-    platform_fee_percent: optionalFeePercent(d),
+    ...accountEditableFields(messages(d)),
     status: z.enum(ACCOUNT_STATUSES),
   });
 
 const updateAccountSchema = (d: Dictionary) =>
   z.object({
     id: z.string().uuid(),
-    username: accountUsername(d),
-    platform_fee_percent: optionalFeePercent(d),
+    ...accountEditableFields(messages(d)),
   });
 
 const setAccountStatusSchema = z.object({

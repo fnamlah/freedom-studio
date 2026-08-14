@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/guard";
 import { dict, toLocale, type Dictionary } from "@/lib/i18n";
 import { isAuthzError } from "@/lib/supabase/admin";
+import { MODEL_STATUSES, modelProfileFields, type ModelMessages } from "@/lib/fields/models";
 import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms";
 
 /**
@@ -34,112 +35,32 @@ import { describeDbError, firstIssue, type SqlStateMessages } from "@/lib/forms"
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
-const MODEL_STATUSES = ["active", "inactive", "on_leave", "terminated"] as const;
 type ModelStatus = (typeof MODEL_STATUSES)[number];
 
 /* -------------------------------------------------------------- validation --- */
 
-type Ymd = { y: number; m: number; d: number };
-
-/** Parses a strict `YYYY-MM-DD` and rejects impossible calendar dates. */
-function parseYmd(value: string): Ymd | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return null;
-  const y = Number(match[1]);
-  const m = Number(match[2]);
-  const d = Number(match[3]);
-  const asDate = new Date(Date.UTC(y, m - 1, d));
-  if (
-    asDate.getUTCFullYear() !== y ||
-    asDate.getUTCMonth() !== m - 1 ||
-    asDate.getUTCDate() !== d
-  ) {
-    return null;
-  }
-  return { y, m, d };
-}
-
-/** Mirrors the DB CHECK: born on or before (today − 18 years). */
-function isAdult({ y, m, d }: Ymd): boolean {
-  const birth = Date.UTC(y, m - 1, d);
-  const now = new Date();
-  const cutoff = Date.UTC(now.getUTCFullYear() - 18, now.getUTCMonth(), now.getUTCDate());
-  return birth <= cutoff;
-}
-
-const emptyToNull = (value: unknown) =>
-  typeof value === "string" && value.trim() === "" ? null : value;
-
-const dateOfBirth = (d: Dictionary) =>
-  z
-    .string()
-    .refine((v) => parseYmd(v) !== null, d.studio.models.errDobInvalid)
-    .refine((v) => {
-      const parsed = parseYmd(v);
-      return parsed !== null && isAdult(parsed);
-    }, d.studio.models.errAdult);
-
-const optionalDate = (d: Dictionary) =>
-  z
-    .preprocess(
-      emptyToNull,
-      z
-        .string()
-        .refine((v) => parseYmd(v) !== null, d.studio.models.errDateInvalid)
-        .nullable(),
-    )
-    .optional();
-
-const optionalEmail = (d: Dictionary) =>
-  z
-    .preprocess(
-      emptyToNull,
-      z.string().trim().email(d.studio.models.errEmail).nullable(),
-    )
-    .optional();
-
-const optionalPhone = (d: Dictionary) =>
-  z
-    .preprocess(
-      emptyToNull,
-      z.string().trim().max(40, d.studio.models.errPhoneLong).nullable(),
-    )
-    .optional();
-
-const optionalCountry = (d: Dictionary) =>
-  z
-    .preprocess(
-      (v) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null),
-      z.string().regex(/^[A-Z]{2}$/, d.studio.models.errCountry).nullable(),
-    )
-    .optional();
-
-const optionalNotes = (d: Dictionary) =>
-  z
-    .preprocess(
-      emptyToNull,
-      z.string().trim().max(4000, d.studio.models.errNotesLong).nullable(),
-    )
-    .optional();
-
-const commissionPercent = (d: Dictionary) =>
-  z.coerce
-    .number({ invalid_type_error: d.studio.models.errCommissionType })
-    .min(0, d.studio.models.errCommissionMin)
-    .max(100, d.studio.models.errCommissionMax);
-
-/** Shared profile fields (everything except lifecycle status). */
-const profileFields = (d: Dictionary) => ({
-  stage_name: z.string().trim().min(1, d.studio.models.errStageNameRequired).max(160),
-  legal_name: z.string().trim().min(1, d.studio.models.errLegalNameRequired).max(200),
-  date_of_birth: dateOfBirth(d),
-  email: optionalEmail(d),
-  phone: optionalPhone(d),
-  country: optionalCountry(d),
-  start_date: optionalDate(d),
-  commission_percent: commissionPercent(d),
-  notes: optionalNotes(d),
+/**
+ * The rules live in `src/lib/fields/models.ts`, shared with the Telegram bot's
+ * write path so the 18+ gate, the country format and the length caps hold on
+ * both surfaces. Messages stay here, in the caller's language; a module-scope
+ * schema would be built at import time where no locale exists.
+ */
+const messages = (d: Dictionary): ModelMessages => ({
+  stageNameRequired: d.studio.models.errStageNameRequired,
+  legalNameRequired: d.studio.models.errLegalNameRequired,
+  dobInvalid: d.studio.models.errDobInvalid,
+  adult: d.studio.models.errAdult,
+  dateInvalid: d.studio.models.errDateInvalid,
+  email: d.studio.models.errEmail,
+  phoneLong: d.studio.models.errPhoneLong,
+  country: d.studio.models.errCountry,
+  commissionType: d.studio.models.errCommissionType,
+  commissionMin: d.studio.models.errCommissionMin,
+  commissionMax: d.studio.models.errCommissionMax,
+  notesLong: d.studio.models.errNotesLong,
 });
+
+const profileFields = (d: Dictionary) => modelProfileFields(messages(d));
 
 const createSchema = (d: Dictionary) =>
   z.object({

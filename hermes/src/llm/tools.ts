@@ -1,13 +1,33 @@
-import { enqueueApproval } from "../governance/approvals.js";
+import { enqueueApproval, recordCardMessage } from "../governance/approvals.js";
 import { resolvePolicy, roleSatisfies } from "../governance/policy.js";
 import { todaysCost } from "../lib/cost.js";
-import { type Locale } from "../lib/i18n.js";
+import { hermesDict, type Locale } from "../lib/i18n.js";
 import { getPolicyValue } from "../lib/policy-kv.js";
 import { getAdminClient } from "../lib/supabase.js";
-import { escapeHtml, sendApprovalCard } from "../telegram/api.js";
-import { PROPOSE_ACTION, TOOL_COMMAND } from "./tool-catalog.js";
+import { editMessageText, escapeHtml, sendApprovalCard } from "../telegram/api.js";
+import { PROPOSE_ACTION, TOOL_COMMAND, projectionFor } from "./tool-catalog.js";
 import { redactToolResult } from "./redact.js";
-import { explain, resolveAccount, resolveDocument, resolveModel } from "./resolve.js";
+import {
+  explain,
+  resolveAccount,
+  resolveDocument,
+  resolveModel,
+  resolveOperator,
+  resolvePlatform,
+} from "./resolve.js";
+import {
+  accountProposal,
+  assignmentProposal,
+  modelProposal,
+  monthsAheadProposal,
+  operatorProposal,
+  payoutProposal,
+  periodProposal,
+  platformProposal,
+  rateCardProposal,
+  schemeProposal,
+  validate,
+} from "./validate.js";
 
 /**
  * Executing a conversational tool.
@@ -201,6 +221,58 @@ export async function runTool(
       return proposeDelete(ctx!, args);
     case "hermes_propose_read_document":
       return proposeReadDocument(ctx!, args);
+
+    case "hermes_team":
+      return readTeam(args);
+    case "hermes_platforms":
+      return readPlatforms(args);
+    case "hermes_propose_operator":
+      return proposeOperator(ctx!, args);
+    case "hermes_propose_platform":
+      return proposePlatform(ctx!, args);
+    case "hermes_propose_account":
+      return proposeAccount(ctx!, args);
+    case "hermes_propose_assignment":
+      return proposeAssignment(ctx!, args);
+    case "hermes_propose_archive":
+      return proposeArchive(ctx!, args);
+    case "hermes_propose_scheme":
+      return proposeScheme(ctx!, args);
+    case "hermes_propose_rate_card":
+      return proposeRateCard(ctx!, args);
+    case "hermes_propose_approve_payout":
+      return proposeApprovePayout(ctx!, args);
+
+    case "hermes_earnings":
+      return readEarnings(args);
+    case "hermes_sessions":
+      return readSessions(args);
+    case "hermes_expenses":
+      return readExpenses(args);
+    case "hermes_payout_history":
+      return readPayoutHistory(args);
+    case "hermes_ledger":
+      return readLedger(args);
+    case "hermes_forecast":
+      return readForecast();
+    case "hermes_schemes":
+      return readSchemes();
+    case "hermes_person_details":
+      return readPersonDetails(ctx!, args);
+    case "hermes_propose_payout":
+      return proposePayout(ctx!, args);
+    case "hermes_propose_mark_paid":
+      return proposeMarkPaid(ctx!, args);
+    case "hermes_propose_cancel_payout":
+      return proposeCancelPayout(ctx!, args);
+    case "hermes_propose_delete_document":
+      return proposeDeleteDocument(ctx!, args);
+    case "hermes_propose_delete_entity":
+      return proposeDeleteEntity(ctx!, args);
+    case "hermes_propose_close_period":
+      return proposeClosePeriod(ctx!, args);
+    case "hermes_propose_snapshot_forecast":
+      return proposeSnapshotForecast(ctx!, args);
 
     default:
       throw new Error(`unhandled tool: ${name}`);
@@ -464,6 +536,40 @@ function preview(en: string, ru: string, risk?: string): Record<string, unknown>
 }
 
 /**
+ * The entity a proposal targets, as a supersede key — or undefined for a pure
+ * create, which has no stable id and must never supersede anything.
+ *
+ * This is what makes supersede safe: a newer "mark Alice's payout paid" retires
+ * only the older card for THAT payout, never Bob's. The id fields are the ones
+ * the propose builders actually put in payloads; the first present wins, and
+ * they are mutually exclusive per action in practice (a payload carries one
+ * entity's id). Prefixed with the action so mark-paid and cancel of the same
+ * payout — different intents — do not supersede each other.
+ */
+const ENTITY_ID_FIELDS = [
+  "payout_id",
+  "document_id",
+  "record_id",
+  "model_id",
+  "operator_id",
+  "platform_id",
+  "account_id",
+  "assignment_id",
+  "scheme_id",
+] as const;
+
+function supersedeKeyFor(
+  actionType: string,
+  payload: Record<string, unknown>,
+): string | undefined {
+  for (const field of ENTITY_ID_FIELDS) {
+    const v = payload[field];
+    if (typeof v === "string" && v) return `${actionType}:${field}:${v}`;
+  }
+  return undefined;
+}
+
+/**
  * Queue an approval and put the card in front of the person who asked.
  *
  * `enqueueApproval` reads `required_role` from ACTION_POLICIES, never from
@@ -477,18 +583,42 @@ async function propose(
   cardRu: string,
   risk?: string,
 ): Promise<Record<string, unknown>[]> {
-  const id = await enqueueApproval({
+  const { id, deduped, superseded } = await enqueueApproval({
     actionType,
     payload,
     preview: preview(cardEn, cardRu, risk),
+    sourceChatId: String(ctx.chatId),
+    supersedeKey: supersedeKeyFor(actionType, payload),
   });
+
+  // Neutralise the buttons on any card this one supersedes — a live Approve
+  // under a newer, different request was half of the S8 double-write.
+  const h = hermesDict(ctx.locale);
+  for (const old of superseded) {
+    if (old.cardMessageId) {
+      await editMessageText(ctx.chatId, Number(old.cardMessageId), h.cardSuperseded).catch(
+        () => undefined,
+      );
+    }
+  }
+
+  // An identical proposal is already pending: point at it instead of sending
+  // a second card for the same approval id — two live button rows for one
+  // decision read as two decisions.
+  if (deduped) {
+    return redactToolResult("hermes_proposal", [
+      { status: "already_waiting", action: actionType },
+    ]);
+  }
+
   const text = ctx.locale === "ru" ? cardRu : cardEn;
-  await sendApprovalCard(
+  const sent = (await sendApprovalCard(
     ctx.chatId,
     id,
     [escapeHtml(text), risk ? `<i>${escapeHtml(risk)}</i>` : ""].filter(Boolean).join("\n"),
     ctx.locale,
-  ).catch(() => undefined);
+  ).catch(() => null)) as { message_id?: number } | null;
+  if (sent?.message_id) await recordCardMessage(id, String(sent.message_id));
 
   // Projected like any other tool result — "nothing reaches a provider
   // unprojected" holds with no exceptions. It says "waiting" so the model
@@ -594,16 +724,15 @@ async function proposeModel(ctx: ToolContext, a: Record<string, unknown>) {
     existing = m.value.label;
   }
 
+  // The one propose path that used to skip `validate.ts` — the 18+ gate, the
+  // country format and the commission bounds now hold here like everywhere.
+  const fields = validate(modelProposal, present(a));
+  if (!modelId && (!fields.stage_name || !fields.legal_name || !fields.date_of_birth)) {
+    throw new Error("A new model needs a stage name, a legal name and a date of birth.");
+  }
   const payload = {
     ...(modelId ? { model_id: modelId } : {}),
-    ...(typeof a.stage_name === "string" ? { stage_name: a.stage_name } : {}),
-    ...(typeof a.legal_name === "string" ? { legal_name: a.legal_name } : {}),
-    ...(typeof a.date_of_birth === "string" ? { date_of_birth: a.date_of_birth } : {}),
-    ...(a.commission_percent === undefined
-      ? {}
-      : { commission_percent: Number(a.commission_percent) }),
-    ...(typeof a.status === "string" ? { status: a.status } : {}),
-    ...(typeof a.country === "string" ? { country: a.country } : {}),
+    ...present(fields),
   };
 
   // Name the values, not just the fields. "change status" is not something a
@@ -621,8 +750,8 @@ async function proposeModel(ctx: ToolContext, a: Record<string, unknown>) {
         ctx,
         "upsert_model",
         payload,
-        `Add a new model: ${a.stage_name}?`,
-        `Добавить новую модель: ${a.stage_name}?`,
+        `Add a new model: ${fields.stage_name}?`,
+        `Добавить новую модель: ${fields.stage_name}?`,
       );
 }
 
@@ -735,5 +864,1001 @@ async function proposeReadDocument(ctx: ToolContext, a: Record<string, unknown>)
     `Send ${doc.value.owner}'s "${doc.value.label}" to the AI provider so it can be read?`,
     `Отправить документ «${doc.value.label}» (${doc.value.owner}) ИИ-провайдеру для прочтения?`,
     `This is ${doc.value.owner}'s compliance document and may contain her identity data — name, date of birth, document number. Approving records consent, is audited, and can be revoked in the portal.`,
+  );
+}
+
+/* ======================================================================== *
+ * Setting the studio up (031).
+ *
+ * Same two rules as the surface above — names never ids, nothing here writes
+ * — plus a third that is new: EVERY proposal is validated with the app's own
+ * field rules before a card is queued. `validate.ts` imports the same schema
+ * objects `src/app/(app)/*_/actions.ts` use, so a value the web form would
+ * refuse is refused here too, in conversation, naming the reason — rather than
+ * surfacing as a SQLSTATE after someone has already tapped Approve.
+ * ======================================================================== */
+
+async function readTeam(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  let modelId: string | null = null;
+  if (typeof args.model === "string" && args.model.trim()) {
+    const m = await resolveModel(args.model);
+    if (!m.ok) throw new Error(explain(m, "models"));
+    modelId = m.value.id;
+  }
+
+  let q = db
+    .from("operator_assignments")
+    .select("pool_share_percent, assigned_from, assigned_to, operator_id, model_id");
+  if (modelId) q = q.eq("model_id", modelId);
+
+  const [assignments, operators, models] = await Promise.all([
+    q.order("assigned_from", { ascending: false }).limit(200),
+    db.from("operators").select("id, display_name, staff_role, status"),
+    db.from("models").select("id, stage_name"),
+  ]);
+
+  const rows = orThrow("hermes_team", assignments);
+  const staff = new Map(
+    orThrow("hermes_team", operators).map((o) => [o.id, o]),
+  );
+  const names = new Map(orThrow("hermes_team", models).map((m) => [m.id, m.stage_name]));
+
+  const attached = rows.map((r) => ({
+    team_member: staff.get(r.operator_id)?.display_name ?? "?",
+    staff_role: staff.get(r.operator_id)?.staff_role ?? "operator",
+    status: staff.get(r.operator_id)?.status ?? "?",
+    stage_name: names.get(r.model_id) ?? "?",
+    pool_share_percent: r.pool_share_percent,
+    assigned_from: r.assigned_from,
+    assigned_to: r.assigned_to,
+  }));
+
+  // Someone with no assignment yet is still on the team, and is exactly who
+  // Alina is about to attach to a model. Omitting them would make "who do we
+  // have?" answer with only the already-placed half.
+  if (!modelId) {
+    const placed = new Set(rows.map((r) => r.operator_id));
+    for (const o of staff.values()) {
+      if (!placed.has(o.id)) {
+        attached.push({
+          team_member: o.display_name,
+          staff_role: o.staff_role ?? "operator",
+          status: o.status,
+          stage_name: "—",
+          pool_share_percent: null as never,
+          assigned_from: null as never,
+          assigned_to: null as never,
+        });
+      }
+    }
+  }
+  return redactToolResult("hermes_team", attached);
+}
+
+async function readPlatforms(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  let modelId: string | null = null;
+  if (typeof args.model === "string" && args.model.trim()) {
+    const m = await resolveModel(args.model);
+    if (!m.ok) throw new Error(explain(m, "models"));
+    modelId = m.value.id;
+  }
+
+  let accountQuery = db
+    .from("platform_accounts")
+    .select("id, username, status, platform_fee_percent, model_id, platform_id");
+  if (modelId) accountQuery = accountQuery.eq("model_id", modelId);
+
+  const [platformsRes, accountsRes, modelsRes] = await Promise.all([
+    db.from("platforms").select("id, name, is_active, website_url").order("name"),
+    accountQuery.limit(300),
+    db.from("models").select("id, stage_name"),
+  ]);
+
+  const platforms = orThrow("hermes_platforms", platformsRes);
+  const accounts = orThrow("hermes_platforms", accountsRes);
+  const names = new Map(orThrow("hermes_platforms", modelsRes).map((m) => [m.id, m.stage_name]));
+  const byId = new Map(platforms.map((p) => [p.id, p]));
+
+  const rows: Record<string, unknown>[] = platforms.map((p) => ({
+    platform: p.name,
+    is_active: p.is_active,
+    website_url: p.website_url,
+    stage_name: "—",
+    username: null,
+    status: null,
+    platform_fee_percent: null,
+  }));
+  for (const a of accounts) {
+    rows.push({
+      platform: byId.get(a.platform_id)?.name ?? "?",
+      is_active: byId.get(a.platform_id)?.is_active ?? null,
+      website_url: null,
+      stage_name: names.get(a.model_id) ?? "?",
+      username: a.username,
+      status: a.status,
+      platform_fee_percent: a.platform_fee_percent,
+    });
+  }
+  return redactToolResult("hermes_platforms", rows);
+}
+
+/** Drop the keys a proposal did not name, so `coalesce` means "unchanged". */
+function present(o: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null));
+}
+
+async function proposeOperator(ctx: ToolContext, a: Record<string, unknown>) {
+  let operatorId: string | undefined;
+  let existing = "";
+  if (typeof a.person === "string" && a.person.trim()) {
+    const found = await resolveOperator(a.person);
+    if (!found.ok) throw new Error(explain(found, "team members"));
+    operatorId = found.value.id;
+    existing = `${found.value.staffRole.replace("_", " ")} ${found.value.label}`;
+  }
+
+  const fields = validate(operatorProposal, present(a));
+  if (!operatorId && (!fields.display_name || !fields.legal_name)) {
+    throw new Error("A new team member needs a display name and a legal name.");
+  }
+
+  const payload = { ...present(fields), ...(operatorId ? { operator_id: operatorId } : {}) };
+  const changed = describeChanges(payload, ["operator_id"]);
+  return operatorId
+    ? propose(
+        ctx,
+        "upsert_operator",
+        payload,
+        `Update ${existing} — change ${changed}?`,
+        `Изменить ${existing} — ${changed}?`,
+      )
+    : propose(
+        ctx,
+        "upsert_operator",
+        payload,
+        `Add ${fields.staff_role ?? "operator"} ${fields.display_name} to the team?`,
+        `Добавить в команду (${fields.staff_role ?? "operator"}): ${fields.display_name}?`,
+      );
+}
+
+async function proposePlatform(ctx: ToolContext, a: Record<string, unknown>) {
+  let platformId: string | undefined;
+  let existing = "";
+  if (typeof a.platform === "string" && a.platform.trim()) {
+    const found = await resolvePlatform(a.platform);
+    if (!found.ok) throw new Error(explain(found, "platforms"));
+    platformId = found.value.id;
+    existing = found.value.label;
+  }
+
+  const fields = validate(platformProposal, present(a));
+  if (!platformId && !fields.name) throw new Error("A new platform needs a name.");
+
+  const payload = { ...present(fields), ...(platformId ? { platform_id: platformId } : {}) };
+  const changed = describeChanges(payload, ["platform_id"]);
+  return platformId
+    ? propose(
+        ctx,
+        "upsert_platform",
+        payload,
+        `Update platform ${existing} — change ${changed}?`,
+        `Изменить площадку ${existing} — ${changed}?`,
+      )
+    : propose(
+        ctx,
+        "upsert_platform",
+        payload,
+        `Add platform ${fields.name}?`,
+        `Добавить площадку ${fields.name}?`,
+      );
+}
+
+async function proposeAccount(ctx: ToolContext, a: Record<string, unknown>) {
+  const model = await resolveModel(String(a.model ?? ""));
+  if (!model.ok) throw new Error(explain(model, "models"));
+  const platform = await resolvePlatform(String(a.platform ?? ""));
+  if (!platform.ok) throw new Error(explain(platform, "platforms"));
+
+  const fields = validate(accountProposal, present(a));
+
+  // Changing an existing account is opt-in and names WHICH one. Anything else
+  // creates; the wrapper's uniqueness check then refuses a duplicate rather
+  // than this path silently editing a row nobody pointed at.
+  if (typeof a.existing_username === "string" && a.existing_username.trim()) {
+    const acct = await resolveAccount(model.value.label, platform.value.label);
+    if (!acct.ok) throw new Error(explain(acct, "accounts"));
+    const payload = { account_id: acct.value.id, ...present(fields) };
+    const changed = describeChanges(payload, ["account_id"]);
+    return propose(
+      ctx,
+      "upsert_account",
+      payload,
+      `Update ${model.value.label}'s ${platform.value.label} account — change ${changed}?`,
+      `Изменить аккаунт ${model.value.label} на ${platform.value.label} — ${changed}?`,
+    );
+  }
+
+  if (!fields.username) throw new Error("A new account needs a username.");
+  const payload = {
+    model_id: model.value.id,
+    platform_id: platform.value.id,
+    ...present(fields),
+  };
+  return propose(
+    ctx,
+    "upsert_account",
+    payload,
+    `Add ${platform.value.label} account @${fields.username} for ${model.value.label}${
+      fields.platform_fee_percent != null ? `, ${fields.platform_fee_percent}% platform fee` : ""
+    }?`,
+    `Добавить аккаунт @${fields.username} на ${platform.value.label} для ${model.value.label}?`,
+  );
+}
+
+async function proposeAssignment(ctx: ToolContext, a: Record<string, unknown>) {
+  const person = await resolveOperator(String(a.person ?? ""));
+  if (!person.ok) throw new Error(explain(person, "team members"));
+  const model = await resolveModel(String(a.model ?? ""));
+  if (!model.ok) throw new Error(explain(model, "models"));
+
+  const fields = validate(assignmentProposal, present(a));
+
+  if (a.change_existing === true) {
+    const rows = orThrow(
+      "hermes_propose_assignment",
+      await getAdminClient()
+        .from("operator_assignments")
+        .select("id, assigned_from")
+        .eq("operator_id", person.value.id)
+        .eq("model_id", model.value.id)
+        .order("assigned_from", { ascending: false })
+        .limit(5),
+    );
+    if (!rows.length) throw new Error(`${person.value.label} is not attached to ${model.value.label}.`);
+    if (rows.length > 1) {
+      throw new Error(
+        `${person.value.label} has several attachments to ${model.value.label} — which start date? ${rows
+          .map((r) => String(r.assigned_from))
+          .join(", ")}`,
+      );
+    }
+    const payload = { assignment_id: rows[0]!.id, ...present(fields) };
+    const changed = describeChanges(payload, ["assignment_id"]);
+    return propose(
+      ctx,
+      "upsert_assignment",
+      payload,
+      `Change ${person.value.label}'s work with ${model.value.label} — ${changed}?`,
+      `Изменить работу ${person.value.label} с ${model.value.label} — ${changed}?`,
+    );
+  }
+
+  if (!fields.assigned_from) throw new Error("A new assignment needs a start date.");
+  const share = fields.pool_share_percent ?? 100;
+  const payload = {
+    operator_id: person.value.id,
+    model_id: model.value.id,
+    pool_share_percent: share,
+    assigned_from: fields.assigned_from,
+    ...(fields.assigned_to ? { assigned_to: fields.assigned_to } : {}),
+  };
+  return propose(
+    ctx,
+    "upsert_assignment",
+    payload,
+    `Put ${person.value.staffRole.replace("_", " ")} ${person.value.label} on ${
+      model.value.label
+    } at ${share}% of her team pool, from ${fields.assigned_from}?`,
+    `Назначить ${person.value.label} на ${model.value.label} — ${share}% командного пула, с ${fields.assigned_from}?`,
+  );
+}
+
+/** The retirement path. There is no delete here, deliberately. */
+async function proposeArchive(ctx: ToolContext, a: Record<string, unknown>) {
+  const kind = String(a.kind ?? "");
+  const name = String(a.name ?? "");
+  let recordId = "";
+  let what = "";
+  let status = typeof a.status === "string" ? a.status : "";
+
+  if (kind === "model") {
+    const m = await resolveModel(name);
+    if (!m.ok) throw new Error(explain(m, "models"));
+    recordId = m.value.id;
+    what = `model ${m.value.label}`;
+    status = status || "terminated";
+  } else if (kind === "operator") {
+    const o = await resolveOperator(name);
+    if (!o.ok) throw new Error(explain(o, "team members"));
+    recordId = o.value.id;
+    what = `${o.value.staffRole.replace("_", " ")} ${o.value.label}`;
+    status = status || "terminated";
+  } else if (kind === "platform") {
+    const p = await resolvePlatform(name);
+    if (!p.ok) throw new Error(explain(p, "platforms"));
+    recordId = p.value.id;
+    what = `platform ${p.value.label}`;
+    status = status || "inactive";
+  } else if (kind === "account") {
+    const acct = await resolveAccount(name, typeof a.platform === "string" ? a.platform : undefined);
+    if (!acct.ok) throw new Error(explain(acct, "accounts"));
+    recordId = acct.value.id;
+    what = `account ${acct.value.label}`;
+    status = status || "closed";
+  } else {
+    throw new Error("I can retire a model, a team member, a platform or an account.");
+  }
+
+  return propose(
+    ctx,
+    "set_status",
+    { kind, record_id: recordId, status },
+    `Retire ${what} — set status to ${status}? Their history and past earnings stay.`,
+    `Перевести в архив: ${what} — статус «${status}»? История и прошлые доходы сохраняются.`,
+  );
+}
+
+async function proposeScheme(ctx: ToolContext, a: Record<string, unknown>) {
+  const db = getAdminClient();
+  let modelId: string | null = null;
+  let accountId: string | null = null;
+  let scope = "the studio default";
+
+  if (typeof a.model === "string" && a.model.trim()) {
+    const m = await resolveModel(a.model);
+    if (!m.ok) throw new Error(explain(m, "models"));
+    if (typeof a.platform === "string" && a.platform.trim()) {
+      const acct = await resolveAccount(m.value.label, a.platform);
+      if (!acct.ok) throw new Error(explain(acct, "accounts"));
+      accountId = acct.value.id;
+      scope = `${m.value.label} on ${acct.value.platform}`;
+    } else {
+      modelId = m.value.id;
+      scope = m.value.label;
+    }
+  }
+
+  const fields = validate(schemeProposal, present(a));
+
+  if (a.change_existing === true) {
+    let q = db.from("commission_schemes").select("id, effective_from");
+    q = modelId ? q.eq("model_id", modelId) : q.is("model_id", null);
+    q = accountId ? q.eq("platform_account_id", accountId) : q.is("platform_account_id", null);
+    const rows = orThrow("hermes_propose_scheme", await q.order("effective_from", { ascending: false }).limit(5));
+    if (!rows.length) throw new Error(`There is no scheme for ${scope} yet.`);
+    if (rows.length > 1) {
+      throw new Error(
+        `Several schemes cover ${scope} — which start date? ${rows.map((r) => String(r.effective_from)).join(", ")}`,
+      );
+    }
+    const payload = { scheme_id: rows[0]!.id, ...present(fields) };
+    const changed = describeChanges(payload, ["scheme_id"]);
+    return propose(
+      ctx,
+      "upsert_scheme",
+      payload,
+      `Change the commission scheme for ${scope} — ${changed}?`,
+      `Изменить схему комиссии для ${scope} — ${changed}?`,
+      "This changes how future earnings are divided. Shares already posted to the ledger are not recalculated.",
+    );
+  }
+
+  if (
+    fields.model_percent === undefined ||
+    fields.operator_percent === undefined ||
+    fields.studio_percent === undefined
+  ) {
+    throw new Error("A new scheme needs all three percentages: model, team and studio.");
+  }
+  const payload = {
+    ...(modelId ? { model_id: modelId } : {}),
+    ...(accountId ? { platform_account_id: accountId } : {}),
+    model_percent: fields.model_percent,
+    operator_percent: fields.operator_percent,
+    studio_percent: fields.studio_percent,
+    effective_from: fields.effective_from,
+    ...(fields.effective_to ? { effective_to: fields.effective_to } : {}),
+  };
+  return propose(
+    ctx,
+    "upsert_scheme",
+    payload,
+    `New commission scheme for ${scope} from ${fields.effective_from}: model ${fields.model_percent}%, team ${fields.operator_percent}%, studio ${fields.studio_percent}%?`,
+    `Новая схема комиссии для ${scope} с ${fields.effective_from}: модель ${fields.model_percent}%, команда ${fields.operator_percent}%, студия ${fields.studio_percent}%?`,
+    "This decides how future earnings are divided.",
+  );
+}
+
+async function proposeRateCard(ctx: ToolContext, a: Record<string, unknown>) {
+  const db = getAdminClient();
+  let modelId: string | null = null;
+  let scope = "the studio default";
+  if (typeof a.model === "string" && a.model.trim()) {
+    const m = await resolveModel(a.model);
+    if (!m.ok) throw new Error(explain(m, "models"));
+    modelId = m.value.id;
+    scope = m.value.label;
+  }
+
+  const rates = validate(rateCardProposal, a.rates);
+
+  let q = db.from("commission_schemes").select("id, effective_from");
+  q = modelId ? q.eq("model_id", modelId) : q.is("model_id", null).is("platform_account_id", null);
+  const rows = orThrow("hermes_propose_rate_card", await q.order("effective_from", { ascending: false }).limit(5));
+  if (!rows.length) throw new Error(`There is no commission scheme for ${scope} to attach rates to.`);
+  if (rows.length > 1) {
+    throw new Error(
+      `Several schemes cover ${scope} — which start date? ${rows.map((r) => String(r.effective_from)).join(", ")}`,
+    );
+  }
+
+  // Name the rates on the card. "Replace the rate card" is not something a
+  // person can approve; the actual brackets are.
+  const summary = rates
+    .map((r) => `${r.party.replace(/_/g, " ")} from $${r.min_amount}: ${r.percent}%`)
+    .join("; ");
+  return propose(
+    ctx,
+    "set_rate_card",
+    { scheme_id: rows[0]!.id, rates },
+    `Replace the rate card for ${scope} with — ${summary}?`,
+    `Заменить тарифную сетку для ${scope} на — ${summary}?`,
+    "This REPLACES every rate on that scheme, not just the ones listed.",
+  );
+}
+
+async function proposeApprovePayout(ctx: ToolContext, a: Record<string, unknown>) {
+  const db = getAdminClient();
+  const name = String(a.payee ?? "");
+
+  // A payout names its payee by (payee_type, payee_id), so try both directories
+  // rather than assuming a model. A team member is paid the same way.
+  const model = await resolveModel(name);
+  const person = model.ok ? null : await resolveOperator(name);
+  if (!model.ok && !person?.ok) throw new Error(explain(model, "models or team members"));
+
+  const payeeId = model.ok ? model.value.id : person!.ok ? person!.value.id : "";
+  const label = model.ok ? model.value.label : person!.ok ? person!.value.label : name;
+
+  let q = db
+    .from("payouts")
+    .select("id, period_start, period_end, net_amount, currency, created_by")
+    .eq("payee_id", payeeId)
+    .eq("status", "pending");
+  if (typeof a.period_end === "string") q = q.eq("period_end", a.period_end);
+  const rows = orThrow("hermes_propose_approve_payout", await q.limit(5));
+
+  if (!rows.length) throw new Error(`${label} has no payout waiting for approval.`);
+  if (rows.length > 1) {
+    throw new Error(
+      `${label} has several payouts waiting — which period? ${rows.map((r) => String(r.period_end)).join(", ")}`,
+    );
+  }
+  const row = rows[0]!;
+
+  // WHO CREATED IT belongs on the card. This action relaxes the split that
+  // used to guarantee two different people were involved, so the one thing the
+  // approver must be able to see is whether that is still true here.
+  const creator = orThrow(
+    "hermes_propose_approve_payout",
+    await db.from("profiles").select("full_name").eq("id", row.created_by).limit(1),
+  );
+  const by = creator[0]?.full_name ?? "unknown";
+
+  return propose(
+    ctx,
+    "approve_payout",
+    { payout_id: row.id },
+    `Approve the payout to ${label}: ${row.net_amount} ${row.currency}, ${row.period_start} to ${row.period_end}, created by ${by}?`,
+    `Утвердить выплату ${label}: ${row.net_amount} ${row.currency}, ${row.period_start} — ${row.period_end}, создал(а) ${by}?`,
+    "Approving authorises the payment. Releasing the money is still a separate step in the app.",
+  );
+}
+
+/* ======================================================================== *
+ * Full access (032): the rest of the system.
+ *
+ * Reads bind to the app's own views and reuse its projections where the rows
+ * match (`TOOL_PROJECTION`), so the bot can never see a shape the app did not
+ * already define. Proposes follow the one rule that has held since 029: this
+ * file NEVER writes — it validates, resolves names, and queues a card.
+ * ======================================================================== */
+
+/** Months-ago cutoff as YYYY-MM-DD, clamped to something sane. */
+function monthsAgo(n: unknown, fallback: number): string {
+  const m = typeof n === "number" && Number.isFinite(n) ? Math.max(1, Math.min(24, n)) : fallback;
+  const d = new Date();
+  d.setUTCMonth(d.getUTCMonth() - m);
+  return d.toISOString().slice(0, 10);
+}
+
+async function nameMaps() {
+  const db = getAdminClient();
+  const [models, platforms] = await Promise.all([
+    db.from("models").select("id, stage_name"),
+    db.from("platforms").select("id, name"),
+  ]);
+  return {
+    model: new Map(orThrow("hermes_names", models).map((m) => [m.id, m.stage_name])),
+    platform: new Map(orThrow("hermes_names", platforms).map((p) => [p.id, p.name])),
+  };
+}
+
+async function readEarnings(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  let q = db.from("v_earnings_monthly").select("model_id, platform_id, month, gross_amount, net_amount");
+  if (typeof args.model === "string" && args.model.trim()) {
+    const m = await resolveModel(args.model);
+    if (!m.ok) throw new Error(explain(m, "models"));
+    q = q.eq("model_id", m.value.id);
+  }
+  const [rows, names] = await Promise.all([
+    q.gte("month", monthsAgo(args.months, 3)).order("month", { ascending: false }).limit(300),
+    nameMaps(),
+  ]);
+  return redactToolResult(
+    projectionFor("hermes_earnings"),
+    orThrow("hermes_earnings", rows).map((r) => ({
+      month: r.month,
+      stage_name: names.model.get(r.model_id ?? "") ?? "?",
+      platform: names.platform.get(r.platform_id ?? "") ?? "?",
+      gross_amount: r.gross_amount,
+      net_amount: r.net_amount,
+    })),
+  );
+}
+
+async function readSessions(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  let q = db.from("v_sessions_hours_monthly").select("model_id, month, hours, session_count");
+  if (typeof args.model === "string" && args.model.trim()) {
+    const m = await resolveModel(args.model);
+    if (!m.ok) throw new Error(explain(m, "models"));
+    q = q.eq("model_id", m.value.id);
+  }
+  const [rows, names] = await Promise.all([
+    q.gte("month", monthsAgo(args.months, 3)).order("month", { ascending: false }).limit(300),
+    nameMaps(),
+  ]);
+  return redactToolResult(
+    projectionFor("hermes_sessions"),
+    orThrow("hermes_sessions", rows).map((r) => ({
+      month: r.month,
+      stage_name: names.model.get(r.model_id ?? "") ?? "?",
+      hours: r.hours,
+      session_count: r.session_count,
+    })),
+  );
+}
+
+async function readExpenses(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const rows = orThrow(
+    "hermes_expenses",
+    await getAdminClient()
+      .from("expenses")
+      .select("incurred_on, vendor, amount, currency, category")
+      .gte("incurred_on", monthsAgo(args.months, 3))
+      .order("incurred_on", { ascending: false })
+      .limit(200),
+  );
+  return redactToolResult(projectionFor("hermes_expenses"), rows);
+}
+
+async function readPayoutHistory(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  let q = db
+    .from("v_payout_history")
+    .select("payee_name, payee_type, payee_id, period_start, period_end, net_amount, currency, status, paid_at");
+  if (typeof args.payee === "string" && args.payee.trim()) {
+    const model = await resolveModel(args.payee);
+    const person = model.ok ? null : await resolveOperator(args.payee);
+    if (!model.ok && !person?.ok) throw new Error(explain(model, "models or team members"));
+    q = q.eq("payee_id", model.ok ? model.value.id : person!.ok ? person!.value.id : "");
+  }
+  if (typeof args.status === "string") {
+    q = q.eq("status", args.status as "pending" | "approved" | "paid" | "cancelled");
+  }
+  const rows = orThrow(
+    "hermes_payout_history",
+    await q.order("period_end", { ascending: false }).limit(100),
+  );
+  return redactToolResult(projectionFor("hermes_payout_history"), rows);
+}
+
+async function readLedger(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  const name = String(args.payee ?? "");
+  const model = await resolveModel(name);
+  const person = model.ok ? null : await resolveOperator(name);
+  if (!model.ok && !person?.ok) throw new Error(explain(model, "models or team members"));
+
+  const { data, error } = await db.rpc("fn_payee_statement", {
+    p_payee_type: model.ok ? "model" : "operator",
+    p_payee_id: model.ok ? model.value.id : person!.ok ? person!.value.id : "",
+    p_from: typeof args.from === "string" ? args.from : monthsAgo(undefined, 3),
+    p_to: typeof args.to === "string" ? args.to : new Date().toISOString().slice(0, 10),
+  });
+  if (error) throw new Error(`statement lookup failed: ${error.message}`);
+  return redactToolResult(projectionFor("hermes_ledger"), (data ?? []) as Record<string, unknown>[]);
+}
+
+async function readForecast(): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  const [forecastRes, accuracyRes, names] = await Promise.all([
+    db.from("v_earnings_forecast").select("target_month, model_id, platform_id, predicted_net").limit(120),
+    db
+      .from("v_forecast_accuracy")
+      .select("target_month, model_id, predicted_net, actual_net, error_percent")
+      .order("target_month", { ascending: false })
+      .limit(60),
+    nameMaps(),
+  ]);
+  // Two projections, both registered: predictions leave as `forecast`,
+  // measured accuracy as `forecast_accuracy` — concatenated after redaction,
+  // so each row set passes its own allowlist.
+  const forecast = redactToolResult(
+    projectionFor("hermes_forecast"),
+    orThrow("hermes_forecast", forecastRes).map((r) => ({
+      target_month: r.target_month,
+      stage_name: r.model_id ? (names.model.get(r.model_id!) ?? "?") : "studio",
+      platform: r.platform_id ? (names.platform.get(r.platform_id!) ?? "?") : "all",
+      predicted_net: r.predicted_net,
+    })),
+  );
+  const accuracy = redactToolResult(
+    "forecast_accuracy",
+    orThrow("hermes_forecast", accuracyRes).map((r) => ({
+      target_month: r.target_month,
+      stage_name: r.model_id ? (names.model.get(r.model_id!) ?? "?") : "studio",
+      predicted_net: r.predicted_net,
+      actual_net: r.actual_net,
+      error_percent: r.error_percent,
+    })),
+  );
+  return [...forecast, ...accuracy];
+}
+
+async function readSchemes(): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  const [schemesRes, ratesRes, names, accounts] = await Promise.all([
+    db
+      .from("commission_schemes")
+      .select(
+        "id, model_id, platform_account_id, model_percent, operator_percent, studio_percent, effective_from, effective_to",
+      )
+      .order("effective_from", { ascending: false })
+      .limit(100),
+    db.from("commission_rates").select("scheme_id"),
+    nameMaps(),
+    db.from("platform_accounts").select("id, model_id, platform_id"),
+  ]);
+  const withCard = new Set(orThrow("hermes_schemes", ratesRes).map((r) => r.scheme_id));
+  const accountLabel = new Map(
+    orThrow("hermes_schemes", accounts).map((a) => [
+      a.id,
+      `${names.model.get(a.model_id) ?? "?"} on ${names.platform.get(a.platform_id) ?? "?"}`,
+    ]),
+  );
+  return redactToolResult(
+    projectionFor("hermes_schemes"),
+    orThrow("hermes_schemes", schemesRes).map((s) => ({
+      scope: s.model_id
+        ? (names.model.get(s.model_id) ?? "?")
+        : s.platform_account_id
+          ? (accountLabel.get(s.platform_account_id) ?? "?")
+          : "studio default",
+      model_percent: s.model_percent,
+      operator_percent: s.operator_percent,
+      studio_percent: s.studio_percent,
+      effective_from: s.effective_from,
+      effective_to: s.effective_to,
+      has_rate_card: withCard.has(s.id),
+    })),
+  );
+}
+
+/**
+ * One person's identity and contact details — the deliberate exception.
+ *
+ * The redactor's `PROJECTION_UNBLOCK` lets exactly this tool carry the fields
+ * `BLOCKED_KEYS` strips everywhere else, by owner decision: Alina asked for
+ * full access, and "what is her phone number" is a real question the studio
+ * answers daily. `payment_details` (bank data) rides only when the question
+ * explicitly asked for it AND the asker is super_admin — a second explicit
+ * ask, never part of a casual profile answer.
+ */
+async function readPersonDetails(
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>[]> {
+  const db = getAdminClient();
+  const name = String(args.person ?? "");
+  const includeBank = args.include_payment_details === true && ctx.role === "super_admin";
+
+  const model = await resolveModel(name);
+  if (model.ok) {
+    const rows = orThrow(
+      "hermes_person_details",
+      await db
+        .from("models")
+        .select(
+          "stage_name, legal_name, date_of_birth, email, phone, country, start_date, status, commission_percent",
+        )
+        .eq("id", model.value.id)
+        .limit(1),
+    );
+    return redactToolResult(
+      projectionFor("hermes_person_details"),
+      rows.map((r) => ({ ...r, kind: "model" })),
+    );
+  }
+
+  const person = await resolveOperator(name);
+  if (!person.ok) throw new Error(explain(person, "models or team members"));
+  const rows = orThrow(
+    "hermes_person_details",
+    await db
+      .from("operators")
+      .select(
+        "display_name, staff_role, legal_name, email, phone, country, start_date, status, payment_details",
+      )
+      .eq("id", person.value.id)
+      .limit(1),
+  );
+  return redactToolResult(
+    projectionFor("hermes_person_details"),
+    rows.map((r) => ({
+      ...r,
+      kind: "team member",
+      payment_details: includeBank ? r.payment_details : undefined,
+    })),
+  );
+}
+
+/** Resolve "who gets paid" to the polymorphic payee pair. */
+async function resolvePayee(
+  name: string,
+): Promise<{ type: "model" | "operator"; id: string; label: string }> {
+  const model = await resolveModel(name);
+  if (model.ok) return { type: "model", id: model.value.id, label: model.value.label };
+  const person = await resolveOperator(name);
+  if (!person.ok) throw new Error(explain(person, "models or team members"));
+  return { type: "operator", id: person.value.id, label: person.value.label };
+}
+
+async function proposePayout(ctx: ToolContext, a: Record<string, unknown>) {
+  const payee = await resolvePayee(String(a.payee ?? ""));
+  const fields = validate(payoutProposal, present(a));
+  const payload = {
+    payee_type: payee.type,
+    payee_id: payee.id,
+    period_start: fields.period_start,
+    period_end: fields.period_end,
+    net_amount: fields.net_amount,
+    ...(fields.gross_amount !== undefined ? { gross_amount: fields.gross_amount } : {}),
+    ...(fields.deductions !== undefined ? { deductions: fields.deductions } : {}),
+    ...(fields.currency ? { currency: fields.currency } : {}),
+  };
+  return propose(
+    ctx,
+    "create_payout",
+    payload,
+    `Create a payout for ${payee.label}: ${fields.net_amount} ${fields.currency ?? "USD"} net, ${fields.period_start} to ${fields.period_end}? It lands as pending and still needs approval.`,
+    `Создать выплату для ${payee.label}: ${fields.net_amount} ${fields.currency ?? "USD"} нетто, ${fields.period_start} — ${fields.period_end}? Она будет ожидать утверждения.`,
+  );
+}
+
+/** Find one payout in a given status for a payee, refusing ambiguity. */
+async function findPayout(
+  payeeName: string,
+  statuses: readonly string[],
+  periodEnd: unknown,
+): Promise<{ id: string; label: string; status: string; net: string; currency: string; period: string }> {
+  const payee = await resolvePayee(payeeName);
+  let q = getAdminClient()
+    .from("payouts")
+    .select("id, status, period_start, period_end, net_amount, currency")
+    .eq("payee_type", payee.type)
+    .eq("payee_id", payee.id)
+    .in("status", statuses as ("pending" | "approved" | "paid" | "cancelled")[]);
+  if (typeof periodEnd === "string") q = q.eq("period_end", periodEnd);
+  const rows = orThrow("hermes_payouts", await q.limit(5));
+
+  if (!rows.length) {
+    throw new Error(`${payee.label} has no ${statuses.join("/")} payout${typeof periodEnd === "string" ? " for that period" : ""}.`);
+  }
+  if (rows.length > 1) {
+    throw new Error(
+      `${payee.label} has several — which period? ${rows.map((r) => String(r.period_end)).join(", ")}`,
+    );
+  }
+  const row = rows[0]!;
+  return {
+    id: row.id,
+    label: payee.label,
+    status: String(row.status),
+    net: String(row.net_amount),
+    currency: String(row.currency),
+    period: `${row.period_start} to ${row.period_end}`,
+  };
+}
+
+async function proposeMarkPaid(ctx: ToolContext, a: Record<string, unknown>) {
+  const p = await findPayout(String(a.payee ?? ""), ["approved"], a.period_end);
+  const payload = {
+    payout_id: p.id,
+    ...(typeof a.reference === "string" ? { reference: a.reference } : {}),
+    ...(typeof a.payment_method === "string" ? { payment_method: a.payment_method } : {}),
+  };
+  return propose(
+    ctx,
+    "mark_payout_paid",
+    payload,
+    `Mark ${p.label}'s payout as PAID: ${p.net} ${p.currency}, ${p.period}?`,
+    `Отметить выплату ${p.label} как ВЫПЛАЧЕННУЮ: ${p.net} ${p.currency}, ${p.period}?`,
+    "This records the money as RELEASED and posts a permanent settlement entry to the ledger. It cannot be undone — only adjusted.",
+  );
+}
+
+async function proposeCancelPayout(ctx: ToolContext, a: Record<string, unknown>) {
+  const p = await findPayout(String(a.payee ?? ""), ["pending", "approved"], a.period_end);
+  return propose(
+    ctx,
+    "cancel_payout",
+    { payout_id: p.id },
+    `Cancel the ${p.status} payout to ${p.label}: ${p.net} ${p.currency}, ${p.period}?`,
+    `Отменить выплату (${p.status}) для ${p.label}: ${p.net} ${p.currency}, ${p.period}?`,
+  );
+}
+
+async function proposeDeleteDocument(ctx: ToolContext, a: Record<string, unknown>) {
+  const doc = await resolveDocument(
+    String(a.document ?? ""),
+    typeof a.model === "string" ? a.model : undefined,
+  );
+  if (!doc.ok) throw new Error(explain(doc, "documents"));
+  return propose(
+    ctx,
+    "delete_document",
+    { document_id: doc.value.id },
+    `PERMANENTLY delete ${doc.value.owner}'s document "${doc.value.label}" — the record and the stored file?`,
+    `БЕЗВОЗВРАТНО удалить документ «${doc.value.label}» (${doc.value.owner}) — запись и сам файл?`,
+    "The file is removed from storage. If it is her only copy of an identity document, it is gone.",
+  );
+}
+
+/**
+ * The hard-delete path. The DB wrapper re-checks everything post-tap; the
+ * dry-run counts here surface the same refusals BEFORE a card is queued, so
+ * Alina hears "she has 12 earnings and 3 documents" in conversation instead
+ * of tapping Approve on something that cannot happen.
+ */
+async function proposeDeleteEntity(ctx: ToolContext, a: Record<string, unknown>) {
+  const db = getAdminClient();
+  const kind = String(a.kind ?? "");
+  const name = String(a.name ?? a.model ?? "");
+  let recordId = "";
+  let what = "";
+  let extra = "";
+
+  if (kind === "model") {
+    const m = await resolveModel(name);
+    if (!m.ok) throw new Error(explain(m, "models"));
+    recordId = m.value.id;
+    what = `model ${m.value.label}`;
+    const [led, docs, accts, sess] = await Promise.all([
+      db.from("ledger_entries").select("id", { count: "exact", head: true }).eq("payee_type", "model").eq("payee_id", recordId),
+      db.from("documents").select("id", { count: "exact", head: true }).eq("model_id", recordId),
+      db.from("platform_accounts").select("id", { count: "exact", head: true }).eq("model_id", recordId),
+      db.from("work_sessions").select("id", { count: "exact", head: true }).eq("model_id", recordId),
+    ]);
+    if ((led.count ?? 0) > 0 || (docs.count ?? 0) > 0) {
+      throw new Error(
+        `${m.value.label} has ${led.count ?? 0} ledger entries and ${docs.count ?? 0} documents — she cannot be deleted. Archive her instead, or resolve those first.`,
+      );
+    }
+    extra = ` This also deletes her ${accts.count ?? 0} accounts and ${sess.count ?? 0} sessions.`;
+  } else if (kind === "operator") {
+    const o = await resolveOperator(name);
+    if (!o.ok) throw new Error(explain(o, "team members"));
+    recordId = o.value.id;
+    what = `${o.value.staffRole.replace("_", " ")} ${o.value.label}`;
+  } else if (kind === "platform") {
+    const pf = await resolvePlatform(name);
+    if (!pf.ok) throw new Error(explain(pf, "platforms"));
+    recordId = pf.value.id;
+    what = `platform ${pf.value.label}`;
+  } else if (kind === "account") {
+    const acct = await resolveAccount(name, typeof a.platform === "string" ? a.platform : undefined);
+    if (!acct.ok) throw new Error(explain(acct, "accounts"));
+    recordId = acct.value.id;
+    what = `account ${acct.value.label}`;
+  } else if (kind === "assignment") {
+    const person = await resolveOperator(name);
+    if (!person.ok) throw new Error(explain(person, "team members"));
+    const model = await resolveModel(String(a.model ?? ""));
+    if (!model.ok) throw new Error(explain(model, "models"));
+    const rows = orThrow(
+      "hermes_propose_delete_entity",
+      await db
+        .from("operator_assignments")
+        .select("id, assigned_from")
+        .eq("operator_id", person.value.id)
+        .eq("model_id", model.value.id)
+        .limit(5),
+    );
+    if (!rows.length) throw new Error(`${person.value.label} is not attached to ${model.value.label}.`);
+    if (rows.length > 1) {
+      throw new Error(
+        `Several attachments — which start date? ${rows.map((r) => String(r.assigned_from)).join(", ")}`,
+      );
+    }
+    recordId = rows[0]!.id;
+    what = `${person.value.label}'s attachment to ${model.value.label}`;
+    extra = " Re-running a past period's close after this may divide that period differently.";
+  } else if (kind === "scheme" || kind === "rate_card") {
+    let q = db.from("commission_schemes").select("id, effective_from");
+    if (typeof a.model === "string" && a.model.trim()) {
+      const m = await resolveModel(a.model);
+      if (!m.ok) throw new Error(explain(m, "models"));
+      q = q.eq("model_id", m.value.id);
+      what = `${kind === "scheme" ? "the commission scheme" : "the rate card"} for ${m.value.label}`;
+    } else {
+      q = q.is("model_id", null).is("platform_account_id", null);
+      what = kind === "scheme" ? "the studio default scheme" : "the studio default rate card";
+    }
+    const rows = orThrow("hermes_propose_delete_entity", await q.order("effective_from", { ascending: false }).limit(5));
+    if (!rows.length) throw new Error("No scheme matches that.");
+    if (rows.length > 1) {
+      throw new Error(`Several schemes — which start date? ${rows.map((r) => String(r.effective_from)).join(", ")}`);
+    }
+    recordId = rows[0]!.id;
+    if (kind === "scheme") {
+      extra = " Its rate card is deleted with it — future earnings then divide by whichever scheme takes its place.";
+    } else {
+      extra = " Without brackets, the scheme's flat three-way split applies to future earnings.";
+    }
+  } else if (kind === "payout") {
+    const p = await findPayout(name, ["pending", "cancelled"], a.period_end);
+    recordId = p.id;
+    what = `the ${p.status} payout to ${p.label} (${p.net} ${p.currency}, ${p.period})`;
+  } else {
+    throw new Error(
+      "I can permanently delete: model, operator, platform, account, assignment, scheme, rate_card, payout. The ledger and audit history can never be deleted.",
+    );
+  }
+
+  return propose(
+    ctx,
+    "delete_entity",
+    { kind: kind === "rate_card" ? "rate_card" : kind, record_id: recordId },
+    `PERMANENTLY delete ${what}?${extra} This cannot be undone.`,
+    `БЕЗВОЗВРАТНО удалить: ${what}?${extra ? " " + extra : ""} Это действие необратимо.`,
+    "Prefer archiving — it keeps history. Deletion is final and is itself recorded in the audit log.",
+  );
+}
+
+async function proposeClosePeriod(ctx: ToolContext, a: Record<string, unknown>) {
+  const fields = validate(periodProposal, present(a));
+  return propose(
+    ctx,
+    "close_period",
+    { period_start: fields.period_start, period_end: fields.period_end },
+    `Close the period ${fields.period_start} to ${fields.period_end} — post every share of its earnings to the ledger?`,
+    `Закрыть период ${fields.period_start} — ${fields.period_end} и провести все доли по журналу?`,
+    "Posted shares are permanent ledger entries; corrections afterwards are adjustments.",
+  );
+}
+
+async function proposeSnapshotForecast(ctx: ToolContext, a: Record<string, unknown>) {
+  const months = a.months_ahead === undefined ? 3 : validate(monthsAheadProposal, a.months_ahead);
+  return propose(
+    ctx,
+    "snapshot_forecast",
+    { months_ahead: months },
+    `Save a forecast snapshot ${months} months ahead?`,
+    `Сохранить срез прогноза на ${months} мес. вперёд?`,
   );
 }

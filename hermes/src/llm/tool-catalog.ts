@@ -129,7 +129,48 @@ export const PROPOSE_ACTION: Record<string, string> = {
   hermes_propose_document_update: "update_document",
   hermes_propose_delete: "delete_record",
   hermes_propose_read_document: "read_compliance_document",
+  // Setting the studio up (031).
+  hermes_propose_operator: "upsert_operator",
+  hermes_propose_platform: "upsert_platform",
+  hermes_propose_account: "upsert_account",
+  hermes_propose_assignment: "upsert_assignment",
+  hermes_propose_archive: "set_status",
+  // super_admin only — `specsForRole` reads that off the policy, so a manager
+  // is never even offered these two.
+  hermes_propose_scheme: "upsert_scheme",
+  hermes_propose_rate_card: "set_rate_card",
+  hermes_propose_approve_payout: "approve_payout",
+  // Full access (032): the last portal-only actions, now conversational.
+  hermes_propose_payout: "create_payout",
+  hermes_propose_mark_paid: "mark_payout_paid",
+  hermes_propose_cancel_payout: "cancel_payout",
+  hermes_propose_delete_document: "delete_document",
+  // Hard deletion of entities — a separate action from the manager's
+  // day-to-day delete_record, so policy.ts holds it to super_admin.
+  hermes_propose_delete_entity: "delete_entity",
+  hermes_propose_close_period: "close_period",
+  hermes_propose_snapshot_forecast: "snapshot_forecast",
 };
+
+/**
+ * Tool → egress projection key in the app redactor. Defaults to the tool's
+ * own name; named here when a tool reuses an app projection (same rows, same
+ * fields — a second, drifting copy would be worse than none). The governance
+ * suite iterates THIS map, so an unregistered projection is a failing test
+ * before it is a runtime throw.
+ */
+export const TOOL_PROJECTION: Record<string, string> = {
+  hermes_balances: "payee_balances",
+  hermes_earnings: "earnings_monthly",
+  hermes_payout_history: "payout_history",
+  hermes_ledger: "payee_statement",
+  hermes_forecast: "forecast",
+};
+
+/** The projection a read tool's rows leave through. */
+export function projectionFor(tool: string): string {
+  return TOOL_PROJECTION[tool] ?? tool;
+}
 
 const READ_TOOLS: ToolSpec[] = [
   {
@@ -338,6 +379,523 @@ const PROPOSE_TOOLS: ToolSpec[] = [
   },
 ];
 
+/* --------------------------------------------------------- setup surface --- */
+
+const SETUP_READ_TOOLS: ToolSpec[] = [
+  {
+    type: "function",
+    function: {
+      name: "hermes_team",
+      description:
+        "The studio's team — operators, coaches and team leaders — with who each one works with and their share of that model's team pool. Use for 'who is on the team', 'who works with X', or before changing an assignment.",
+      parameters: {
+        type: "object",
+        properties: {
+          model: { type: "string", description: "Optional: only this model's team." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_platforms",
+      description:
+        "The platforms the studio works with and the accounts on them. Use for 'which platforms do we use', 'what accounts does X have', or before adding an account.",
+      parameters: {
+        type: "object",
+        properties: {
+          model: { type: "string", description: "Optional: only this model's accounts." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+];
+
+const SETUP_PROPOSE_TOOLS: ToolSpec[] = [
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_operator",
+      description:
+        "Propose adding a team member — an operator, coach or team leader — or changing one's details. Sends an Approve card. To change someone, pass their current name. To retire them, use hermes_propose_archive instead.",
+      parameters: {
+        type: "object",
+        properties: {
+          person: { type: "string", description: "Existing name when changing someone." },
+          display_name: { type: "string", description: "New or changed display name." },
+          legal_name: { type: "string", description: "Full legal name." },
+          staff_role: {
+            type: "string",
+            enum: ["operator", "coach", "team_leader"],
+            description: "What kind of team member. Defaults to operator.",
+          },
+          email: { type: "string" },
+          phone: { type: "string" },
+          country: { type: "string", description: "Two-letter country code, e.g. PL." },
+          start_date: { type: "string", description: "YYYY-MM-DD." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_platform",
+      description:
+        "Propose adding a platform the studio works with, or renaming one. Sends an Approve card. To retire a platform, use hermes_propose_archive.",
+      parameters: {
+        type: "object",
+        properties: {
+          platform: { type: "string", description: "Existing platform name when changing one." },
+          name: { type: "string", description: "New or changed name." },
+          website_url: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_account",
+      description:
+        "Propose adding a model's account on a platform, or changing an existing account's username or platform fee. Sends an Approve card. An existing account cannot be moved to another model or platform — add a new one instead.",
+      parameters: {
+        type: "object",
+        properties: {
+          model: { type: "string", description: "The model's stage name." },
+          platform: { type: "string", description: "The platform name." },
+          username: { type: "string", description: "The account handle." },
+          platform_fee_percent: { type: "number", description: "The platform's cut, 0-100." },
+          existing_username: {
+            type: "string",
+            description: "Pass when CHANGING an account: its current username.",
+          },
+        },
+        required: ["model", "platform"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_assignment",
+      description:
+        "Propose attaching a team member to a model for a date range, with their share of that model's team pool, or changing an existing attachment. Shares across everyone on one model cannot exceed 100% on any date. Sends an Approve card.",
+      parameters: {
+        type: "object",
+        properties: {
+          person: { type: "string", description: "The team member's name." },
+          model: { type: "string", description: "The model's stage name." },
+          pool_share_percent: {
+            type: "number",
+            description: "Their weight in the model's team pool, 0-100. Defaults to 100.",
+          },
+          assigned_from: { type: "string", description: "Start date, YYYY-MM-DD." },
+          assigned_to: { type: "string", description: "Optional end date, YYYY-MM-DD." },
+          change_existing: {
+            type: "boolean",
+            description: "True to edit their current attachment rather than add one.",
+          },
+        },
+        required: ["person", "model"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_archive",
+      description:
+        "Propose retiring a model, team member, platform or account — the studio archives rather than deletes, so history and past earnings stay intact. Sends an Approve card. Use this whenever someone asks to remove or delete one of these.",
+      parameters: {
+        type: "object",
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["model", "operator", "platform", "account"],
+            description: "What to retire.",
+          },
+          name: { type: "string", description: "Their name, or the model's name for an account." },
+          platform: { type: "string", description: "For an account: which platform." },
+          status: {
+            type: "string",
+            enum: ["active", "inactive", "on_leave", "terminated", "suspended", "closed"],
+            description: "The new state. Defaults to retiring them.",
+          },
+        },
+        required: ["kind", "name"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_scheme",
+      description:
+        "Propose a commission scheme — how net earnings split between the model, the team pool and the studio. The three percentages must total 100. Leave model and account empty for the studio-wide default. Sends an Approve card.",
+      parameters: {
+        type: "object",
+        properties: {
+          model: { type: "string", description: "Optional: a scheme for one model." },
+          platform: { type: "string", description: "With model: a scheme for one account." },
+          model_percent: { type: "number" },
+          operator_percent: { type: "number", description: "The TEAM pool, split among the team." },
+          studio_percent: { type: "number" },
+          effective_from: { type: "string", description: "YYYY-MM-DD." },
+          effective_to: { type: "string", description: "Optional end date, YYYY-MM-DD." },
+          change_existing: {
+            type: "boolean",
+            description: "True to edit the scheme already covering that scope.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_rate_card",
+      description:
+        "Propose replacing a scheme's rate card: the percentage each role earns at each income bracket. Replaces the whole card, so send every bracket. Sends an Approve card.",
+      parameters: {
+        type: "object",
+        properties: {
+          model: { type: "string", description: "Whose scheme. Omit for the studio default." },
+          rates: {
+            type: "array",
+            description: "Every bracket for every role.",
+            items: {
+              type: "object",
+              properties: {
+                party: {
+                  type: "string",
+                  enum: [
+                    "model_with_operator",
+                    "model_with_coach",
+                    "model_independent",
+                    "operator",
+                    "coach",
+                    "team_leader",
+                  ],
+                },
+                min_amount: { type: "number", description: "Bracket floor in dollars." },
+                percent: { type: "number" },
+              },
+              required: ["party", "min_amount", "percent"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["rates"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_approve_payout",
+      description:
+        "Propose approving a payout that is waiting. Sends a card naming the payee, the amount, the period and who created it. Approving authorises it only — releasing the money is still a separate step in the app.",
+      parameters: {
+        type: "object",
+        properties: {
+          payee: { type: "string", description: "The model or team member being paid." },
+          period_end: { type: "string", description: "Optional: which period, YYYY-MM-DD." },
+        },
+        required: ["payee"],
+        additionalProperties: false,
+      },
+    },
+  },
+];
+
+/* ------------------------------------------------------- full access (032) --- */
+
+const FULL_READ_TOOLS: ToolSpec[] = [
+  {
+    type: "function",
+    function: {
+      name: "hermes_earnings",
+      description:
+        "Studio-wide earnings, month by month, per model and platform. Use for 'how did the studio do', 'earnings this month', or comparisons across models.",
+      parameters: {
+        type: "object",
+        properties: {
+          model: { type: "string", description: "Optional: only this model." },
+          months: { type: "number", description: "How many recent months. Default 3." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_sessions",
+      description:
+        "Hours worked and session counts, month by month. Use for 'who worked the most', 'hours in July'.",
+      parameters: {
+        type: "object",
+        properties: {
+          model: { type: "string", description: "Optional: only this model." },
+          months: { type: "number", description: "How many recent months. Default 3." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_expenses",
+      description:
+        "The studio's recorded expenses: date, vendor, amount, category. Use for 'what did we spend', 'expenses in July'.",
+      parameters: {
+        type: "object",
+        properties: {
+          months: { type: "number", description: "How many recent months. Default 3." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_payout_history",
+      description:
+        "Payouts — pending, approved, paid and cancelled — with payee, period and amount. Use for 'what payouts are waiting', 'was Лилия paid for July'.",
+      parameters: {
+        type: "object",
+        properties: {
+          payee: { type: "string", description: "Optional: one model or team member." },
+          status: {
+            type: "string",
+            enum: ["pending", "approved", "paid", "cancelled"],
+            description: "Optional: only this status.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_ledger",
+      description:
+        "One person's ledger statement: every credit, deduction and settlement with a running balance. Read-only — the ledger itself can never be edited or deleted. Use for 'why is her balance X', 'show Лилия's statement'.",
+      parameters: {
+        type: "object",
+        properties: {
+          payee: { type: "string", description: "The model or team member." },
+          from: { type: "string", description: "Start date YYYY-MM-DD. Default: 3 months ago." },
+          to: { type: "string", description: "End date YYYY-MM-DD. Default: today." },
+        },
+        required: ["payee"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_forecast",
+      description:
+        "The earnings forecast for coming months, plus how accurate past forecasts proved. Use for 'what do we expect next month'.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_schemes",
+      description:
+        "Every commission scheme: its scope (studio default, one model, or one account), the three-way split, effective dates, and whether a per-role rate card is attached.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_person_details",
+      description:
+        "One person's full details — legal name, date of birth, contacts, country, status. Pass include_payment_details true ONLY when asked specifically about payment or bank details.",
+      parameters: {
+        type: "object",
+        properties: {
+          person: { type: "string", description: "The model's stage name or team member's name." },
+          include_payment_details: {
+            type: "boolean",
+            description: "True only when payment/bank details were explicitly asked for.",
+          },
+        },
+        required: ["person"],
+        additionalProperties: false,
+      },
+    },
+  },
+];
+
+const FULL_PROPOSE_TOOLS: ToolSpec[] = [
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_payout",
+      description:
+        "Propose creating a payout for a model or team member — the amount owed for a period. It lands as pending and still needs approval. Sends an Approve card.",
+      parameters: {
+        type: "object",
+        properties: {
+          payee: { type: "string", description: "Who is being paid." },
+          period_start: { type: "string", description: "YYYY-MM-DD." },
+          period_end: { type: "string", description: "YYYY-MM-DD." },
+          net_amount: { type: "number", description: "What they receive." },
+          gross_amount: { type: "number" },
+          deductions: { type: "number" },
+          currency: { type: "string", description: "Default USD." },
+        },
+        required: ["payee", "period_start", "period_end", "net_amount"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_mark_paid",
+      description:
+        "Propose recording an APPROVED payout as paid — money released. This posts a permanent settlement entry to the ledger and cannot be undone, only adjusted. Sends an Approve card.",
+      parameters: {
+        type: "object",
+        properties: {
+          payee: { type: "string" },
+          period_end: { type: "string", description: "Which period, YYYY-MM-DD, when several." },
+          reference: { type: "string", description: "Optional payment reference." },
+          payment_method: { type: "string", description: "Optional: how it was paid." },
+        },
+        required: ["payee"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_cancel_payout",
+      description:
+        "Propose cancelling a pending or approved payout. Sends an Approve card.",
+      parameters: {
+        type: "object",
+        properties: {
+          payee: { type: "string" },
+          period_end: { type: "string", description: "Which period, YYYY-MM-DD, when several." },
+        },
+        required: ["payee"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_delete_document",
+      description:
+        "Propose PERMANENTLY deleting a compliance document — the record and the stored file both. Sends an Approve card naming whose document it is.",
+      parameters: {
+        type: "object",
+        properties: {
+          document: { type: "string", description: "The document title." },
+          model: { type: "string", description: "Optional: whose document." },
+        },
+        required: ["document"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_delete_entity",
+      description:
+        "Propose PERMANENTLY deleting a model, team member, platform, account, assignment, commission scheme, rate card, or an unpaid payout. Prefer hermes_propose_archive — use this only when someone explicitly asks to permanently delete. Anything with posted money history is refused with the reason; the ledger itself can never be deleted.",
+      parameters: {
+        type: "object",
+        properties: {
+          kind: {
+            type: "string",
+            enum: [
+              "model",
+              "operator",
+              "platform",
+              "account",
+              "assignment",
+              "scheme",
+              "rate_card",
+              "payout",
+            ],
+          },
+          name: {
+            type: "string",
+            description:
+              "The entity's name: the person, platform, or (for account/payout) the model/payee.",
+          },
+          model: { type: "string", description: "For assignment: which model. For scheme/rate_card: whose." },
+          platform: { type: "string", description: "For account: which platform." },
+          period_end: { type: "string", description: "For payout: which period, YYYY-MM-DD." },
+        },
+        required: ["kind"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_close_period",
+      description:
+        "Propose closing an earnings period: posts every model's and team member's share of that period's earnings to the ledger. Sends an Approve card.",
+      parameters: {
+        type: "object",
+        properties: {
+          period_start: { type: "string", description: "YYYY-MM-DD." },
+          period_end: { type: "string", description: "YYYY-MM-DD." },
+        },
+        required: ["period_start", "period_end"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hermes_propose_snapshot_forecast",
+      description:
+        "Propose saving a forecast snapshot, so future accuracy can be measured against it. Sends an Approve card.",
+      parameters: {
+        type: "object",
+        properties: {
+          months_ahead: { type: "number", description: "How many months forward. Default 3." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+];
+
+READ_TOOLS.push(...SETUP_READ_TOOLS, ...FULL_READ_TOOLS);
+PROPOSE_TOOLS.push(...SETUP_PROPOSE_TOOLS, ...FULL_PROPOSE_TOOLS);
+
 TOOL_SPECS.push(...READ_TOOLS, ...PROPOSE_TOOLS);
 
 /**
@@ -361,6 +919,24 @@ const READ_TOOL_COMMAND: Record<string, string> = {
   hermes_model_terms: "/balances",
   // SA/MGR only, mirroring `documents_admin_all` in 008.
   hermes_documents: "/documents",
+  // The team and the platform list are SA/MGR, like the entities themselves:
+  // 008 gives finance no policy on `operators` or `platforms` at all, so
+  // mapping these to /balances would repeat exactly the mistake the comment
+  // above records.
+  hermes_team: "/documents",
+  hermes_platforms: "/documents",
+  // Money reads go where finance already is: 008 grants finance SELECT on
+  // earnings, work_sessions, payouts, ledger_entries and schemes.
+  hermes_earnings: "/balances",
+  hermes_sessions: "/balances",
+  hermes_payout_history: "/balances",
+  hermes_ledger: "/balances",
+  hermes_forecast: "/balances",
+  hermes_schemes: "/balances",
+  // Expenses have NO finance policy in 008 (SA/MGR admin_all only), and person
+  // details are identity data — both stay SA/MGR.
+  hermes_expenses: "/documents",
+  hermes_person_details: "/documents",
 };
 
 for (const spec of READ_TOOLS) {

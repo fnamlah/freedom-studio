@@ -54,6 +54,35 @@ export const BLOCKED_KEYS: ReadonlySet<string> = new Set([
   "notes",
 ]);
 
+/**
+ * THE SECOND DOCUMENTED EXCEPTION (after `classificationChannel`): per-tool
+ * keys that survive the blocklist, verbatim.
+ *
+ * Owner decision, 2026-08-14: Alina runs the studio from Telegram with full
+ * access, and "what is her phone number?" is a real question the studio
+ * answers daily. For EXACTLY the tools named here, EXACTLY these keys are
+ * emitted unmasked — the value is copied verbatim, because scrubbing would
+ * redact the very answer the tool exists to give. Everything else about the
+ * row, and every other tool, is projected and scrubbed unchanged.
+ *
+ * What this means concretely: these values cross to the configured AI
+ * provider inside tool results. That is the price of answering identity
+ * questions in chat, and it was accepted knowingly.
+ *
+ * The governance suite pins this map to ONE entry with ONE field set — adding
+ * a tool or a key here is a failing test first, i.e. a governance decision,
+ * never a drive-by.
+ */
+export const PROJECTION_UNBLOCK: Record<string, ReadonlySet<string>> = {
+  hermes_person_details: new Set([
+    "legal_name",
+    "date_of_birth",
+    "email",
+    "phone",
+    "payment_details",
+  ]),
+};
+
 /* --------------------------------------------------------- 3. free-text scrub */
 
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
@@ -196,6 +225,60 @@ export const PROJECTIONS: Record<string, readonly string[]> = {
   // What a propose_* tool tells the MODEL it did. Not studio data, but still
   // provider-bound, so it is projected like everything else — the invariant is
   // "nothing reaches a provider unprojected", with no convenience exceptions.
+  /* The studio's setup, as the bot may see it (031). Both are deliberately
+   * thin. `hermes_team` names WHO is on a team and how the pool divides — not
+   * their legal name, contact details or country, none of which help answer
+   * "who works with Лилия" and all of which the blocklist strips regardless.
+   * `hermes_platforms` carries account usernames, which are public handles on
+   * the platform, and the fee percentage that the earnings maths uses. */
+  hermes_team: [
+    "team_member",
+    "staff_role",
+    "status",
+    "stage_name",
+    "pool_share_percent",
+    "assigned_from",
+    "assigned_to",
+  ],
+  hermes_platforms: [
+    "platform",
+    "is_active",
+    "website_url",
+    "stage_name",
+    "username",
+    "status",
+    "platform_fee_percent",
+  ],
+  /* Full access (032). `hermes_person_details` is the PROJECTION_UNBLOCK
+   * tool — its identity fields cross verbatim by owner decision; see that
+   * map's comment. `payment_details` additionally requires an explicit ask
+   * plus super_admin, enforced in the worker tool before the row gets here. */
+  hermes_person_details: [
+    "kind",
+    "stage_name",
+    "display_name",
+    "staff_role",
+    "legal_name",
+    "date_of_birth",
+    "email",
+    "phone",
+    "country",
+    "start_date",
+    "status",
+    "commission_percent",
+    "payment_details",
+  ],
+  hermes_sessions: ["month", "stage_name", "hours", "session_count"],
+  hermes_expenses: ["incurred_on", "vendor", "amount", "currency", "category"],
+  hermes_schemes: [
+    "scope",
+    "model_percent",
+    "operator_percent",
+    "studio_percent",
+    "effective_from",
+    "effective_to",
+    "has_rate_card",
+  ],
   hermes_proposal: ["status", "action"],
   hermes_compliance: ["valid_count", "expiring_count", "expired_count"],
   hermes_cost: ["spent_usd", "cap_usd", "currency"],
@@ -231,15 +314,50 @@ function sanitizeValue(value: unknown): unknown {
   return value; // number | boolean | null | undefined
 }
 
-function projectRow(row: unknown, allow: readonly string[]): Record<string, unknown> {
+function projectRow(
+  row: unknown,
+  allow: readonly string[],
+  unblock?: ReadonlySet<string>,
+): Record<string, unknown> {
   if (!isPlainObject(row)) return {};
   const out: Record<string, unknown> = {};
   for (const key of allow) {
+    if (unblock?.has(key) && key in row) {
+      // The documented per-tool exception: verbatim, not scrubbed — masking
+      // the phone number the tool exists to answer would return "[redacted]".
+      // A NESTED value (the `payment_details` jsonb) goes through
+      // `sanitizeValueUnblocked`, which deliberately does NOT strip BLOCKED_KEYS
+      // or scrub leaves either — the whole blob is owner-authorized verbatim,
+      // and it is already gated to super_admin + an explicit ask in the tool
+      // before it reaches here. It is depth-limited so it cannot recurse
+      // unboundedly, and it is reachable ONLY for this one unblocked tool.
+      const v = row[key];
+      out[key] = typeof v === "string" || typeof v === "number" || typeof v === "boolean" || v === null
+        ? v
+        : sanitizeValueUnblocked(v);
+      continue;
+    }
     if (BLOCKED_KEYS.has(key)) continue; // never emit a blocked key, even if listed
     if (!(key in row)) continue;
     out[key] = sanitizeValue(row[key]);
   }
   return out;
+}
+
+/**
+ * For an unblocked NESTED value (today: `payment_details` jsonb), keep its own
+ * keys but do not scrub its string leaves — the bank fields ARE the answer.
+ * Depth-limited so a pathological blob cannot recurse unboundedly.
+ */
+function sanitizeValueUnblocked(value: unknown, depth = 0): unknown {
+  if (depth > 3) return undefined;
+  if (Array.isArray(value)) return value.map((v) => sanitizeValueUnblocked(v, depth + 1));
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = sanitizeValueUnblocked(v, depth + 1);
+    return out;
+  }
+  return value;
 }
 
 /**
@@ -260,7 +378,7 @@ export function redactToolResult(
     );
   }
   const arr = Array.isArray(rows) ? rows : rows == null ? [] : [rows];
-  return arr.map((row) => projectRow(row, allow));
+  return arr.map((row) => projectRow(row, allow, PROJECTION_UNBLOCK[toolName]));
 }
 
 /* ------------------------------------------- THE classification carve-out */

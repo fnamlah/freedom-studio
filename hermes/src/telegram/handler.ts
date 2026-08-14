@@ -424,11 +424,28 @@ async function converse_(
           ? h.chatNotConfigured
           : outcome.kind === "over_cap"
             ? h.chatOverCap
-            : h.chatFailed;
+            : outcome.kind === "timed_out"
+              ? h.chatTookTooLong
+              : h.chatFailed;
 
     if (outcome.kind === "failed") {
       console.warn("[telegram] conversation failed:", outcome.error);
     }
+    // Logged at info, not warn: a slow upstream is a condition, not a fault of
+    // ours, and burying it in the same bucket as real failures is how the last
+    // incident looked like a bug in the studio for twenty minutes.
+    if (outcome.kind === "timed_out") {
+      console.info("[telegram] conversation timed out:", outcome.reason);
+    }
+
+    // S8: a card this turn already sent is REAL and stays live. The failure
+    // text must say so, or the person reads "something went wrong" directly
+    // above a working Approve button and rephrases — queueing a second card.
+    const withPendingNote =
+      (outcome.kind === "failed" || outcome.kind === "timed_out") &&
+      (outcome.pendingProposals ?? 0) > 0
+        ? `${reply}\n\n${h.chatCardStillPending}`
+        : reply;
 
     // Plain text on purpose: the model is told not to emit markup, and sending
     // unescaped model output as HTML would let a tool result's contents break
@@ -436,13 +453,13 @@ async function converse_(
     let sentId = placeholderId;
     if (placeholderId !== null) {
       try {
-        await editMessageText(chatId, placeholderId, reply);
+        await editMessageText(chatId, placeholderId, withPendingNote);
       } catch {
         // The one error path that must not lose the answer.
-        sentId = (await sendMessage(chatId, reply).catch(() => null))?.message_id ?? null;
+        sentId = (await sendMessage(chatId, withPendingNote).catch(() => null))?.message_id ?? null;
       }
     } else {
-      sentId = (await sendMessage(chatId, reply).catch(() => null))?.message_id ?? null;
+      sentId = (await sendMessage(chatId, withPendingNote).catch(() => null))?.message_id ?? null;
     }
 
     attachInboundBody(inboundRowId, channel.id, text);

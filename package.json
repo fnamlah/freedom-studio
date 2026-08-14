@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/lib/ai/redactor.test.ts src/lib/extractions.test.ts"
+    "test": "node --import tsx --test src/lib/ai/redactor.test.ts src/lib/extractions.test.ts src/lib/fields/fields.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",

@@ -7,6 +7,14 @@ WORKDIR /repo
 COPY hermes/package.json hermes/package-lock.json* ./hermes/
 RUN cd hermes && npm ci
 
+# The shared field modules (src/lib/fields/*, src/lib/forms.ts) import zod.
+# Node resolves a package from the IMPORTING FILE's directory upward, so files
+# under /repo/src/ never reach /repo/hermes/node_modules — they need a
+# node_modules on their own path. Locally the repo root has the app's; in this
+# container the worker's is the only one, so link it to the root. Runtime is
+# unaffected: dist/ lands beside /app/node_modules and resolves normally.
+RUN ln -s hermes/node_modules node_modules
+
 COPY src ./src
 COPY hermes ./hermes
 RUN cd hermes && npm run build

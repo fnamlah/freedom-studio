@@ -100,6 +100,42 @@ export async function resolveAccount(
   };
 }
 
+/**
+ * A team member — operator, coach or team leader — by display name.
+ *
+ * `staff_role` travels with them so a card can say "coach Marta" rather than
+ * "Marta", which is the difference between an approver noticing the wrong
+ * person and not.
+ */
+export async function resolveOperator(
+  name: string,
+): Promise<Resolved<{ id: string; label: string; staffRole: string }>> {
+  const { data, error } = await getAdminClient()
+    .from("operators")
+    .select("id, display_name, staff_role");
+  if (error) throw new Error(`team lookup failed: ${error.message}`);
+  return pick(
+    (data ?? []).map((o) => ({
+      id: o.id,
+      label: o.display_name,
+      staffRole: o.staff_role ?? "operator",
+    })),
+    name,
+  );
+}
+
+/** A platform by name. */
+export async function resolvePlatform(
+  name: string,
+): Promise<Resolved<{ id: string; label: string }>> {
+  const { data, error } = await getAdminClient().from("platforms").select("id, name");
+  if (error) throw new Error(`platform lookup failed: ${error.message}`);
+  return pick(
+    (data ?? []).map((p) => ({ id: p.id, label: p.name })),
+    name,
+  );
+}
+
 /** A compliance document by title, optionally scoped to one model. */
 export async function resolveDocument(
   title: string,

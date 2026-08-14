@@ -4,7 +4,8 @@ import { trackDrain } from "../lib/shutdown.js";
 import { type Locale } from "../lib/i18n.js";
 import { chat, ProviderNotConfiguredError, type ChatMessage } from "./provider.js";
 import { scrubText } from "./redact.js";
-import { specsForRole } from "./tool-catalog.js";
+import { PROPOSE_ACTION, specsForRole } from "./tool-catalog.js";
+import { canRecoverFromStall } from "./recovery.js";
 import { runTool } from "./tools.js";
 
 /**
@@ -71,6 +72,13 @@ const MAX_REPLY_CHARS = 3500;
 const TURN_DEADLINE_MS = 60_000;
 
 /**
+ * Don't start a recovery call we cannot finish. The per-request ceiling is 25s,
+ * so attempting one with less than that left would only trade a provider
+ * timeout for a turn-deadline abort — a different error, the same silence.
+ */
+const MIN_RECOVERY_BUDGET_MS = 26_000;
+
+/**
  * A per-turn spend ceiling. `assertUnderCostCap()` runs once, at the start, so
  * a single turn could previously make five provider calls with no budget check
  * between them — the daily cap only noticed on the NEXT turn. Batching the
@@ -114,7 +122,11 @@ export type ConverseOutcome =
   | { kind: "answered"; text: string }
   | { kind: "not_configured" }
   | { kind: "over_cap" }
-  | { kind: "failed"; error: string };
+  // Distinct from `failed`: nothing is broken, the AI service was too slow.
+  // Collapsing the two told Alina the bot had malfunctioned and advised her to
+  // "try again", which re-enters the same stall and bills another round.
+  | { kind: "timed_out"; reason: string; pendingProposals?: number }
+  | { kind: "failed"; error: string; pendingProposals?: number };
 
 /** What the turn is doing right now, so a caller can show its work. */
 export type ConverseStage = { kind: "thinking" } | { kind: "tools"; names: string[] };
@@ -154,7 +166,7 @@ export async function converse(input: {
   // One deadline for the whole turn, composed with the per-request timeout at
   // each call. `chat()` has always accepted a signal; nothing ever passed one.
   const turnAbort = new AbortController();
-  const turnTimer = setTimeout(() => turnAbort.abort(), TURN_DEADLINE_MS);
+  const turnTimer = setTimeout(() => turnAbort.abort(new Error("turn deadline")), TURN_DEADLINE_MS);
 
   // Cost accrues across rounds and is written ONCE, off the critical path. It
   // is accounting, not enforcement — the daily cap was checked above — so a
@@ -162,35 +174,107 @@ export async function converse(input: {
   // keeps SIGTERM waiting for the flush rather than losing it.
   let costUsd = 0;
   let providerMs = 0;
+  let providerFailMs = 0;
+  let providerCalls = 0;
+  let toolMs = 0;
   let rounds = 0;
   let toolRuns = 0;
   let lastModel = "";
+  let toolNames: string[] = [];
+  let recovered = false;
+  // S8: how many approval cards this turn ALREADY sent. A failed turn must
+  // say so — otherwise "something went wrong" sits directly above a live
+  // Approve button, and a rephrased retry can queue a second, different card.
+  let proposalsSent = 0;
 
   const flush = () => {
     clearTimeout(turnTimer);
     if (costUsd > 0) void trackDrain(recordCostUsd(costUsd).catch(() => undefined));
+    // `provider_ms` now includes failed calls, with `provider_fail_ms` naming
+    // how much of it was wasted, and `tool_ms` closing the last gap that used
+    // to be attributable only by arithmetic. A turn line should explain itself.
     console.info(
       `[converse] turn ms=${Date.now() - startedAt} provider_ms=${providerMs} ` +
-        `rounds=${rounds} tools=${toolRuns} cost=${costUsd.toFixed(6)} model=${lastModel}`,
+        `provider_fail_ms=${providerFailMs} provider_calls=${providerCalls} ` +
+        `tool_ms=${toolMs} rounds=${rounds} tools=${toolRuns} ` +
+        `cost=${costUsd.toFixed(6)} model=${lastModel}` +
+        `${toolNames.length ? ` names=${toolNames.join(",")}` : ""}` +
+        `${recovered ? " recovered=1" : ""}`,
     );
   };
 
   const callProvider = async (withTools: boolean) => {
     const t0 = Date.now();
-    const result = await chat({
-      messages,
-      ...(withTools ? { tools: specs } : {}),
-      signal: turnAbort.signal,
-    });
-    providerMs += Date.now() - t0;
-    lastModel = result.model;
-    costUsd += computeCost(result.model, result.usage);
-    return result;
+    // BANK THE TIME IN A `finally`. It used to accumulate after the await, so a
+    // call that threw contributed its full duration to the wall clock and ZERO
+    // to `provider_ms`. That is not a cosmetic accounting slip: it is what made
+    // a 25-second provider stall read as 26 seconds of mystery tool time and
+    // sent a whole investigation after the database. The same line also carried
+    // `costUsd`, so a failed turn under-reported spend — under-counting exactly
+    // the most expensive calls against the daily cap.
+    try {
+      const result = await chat({
+        messages,
+        ...(withTools ? { tools: specs } : {}),
+        signal: turnAbort.signal,
+      });
+      lastModel = result.model;
+      costUsd += computeCost(result.model, result.usage);
+      return result;
+    } catch (e) {
+      providerFailMs += Date.now() - t0;
+      throw e;
+    } finally {
+      providerCalls += 1;
+      providerMs += Date.now() - t0;
+    }
   };
+
+  /**
+   * A stalled round is not the end of the turn.
+   *
+   * `REQUEST_TIMEOUT_MS` is 25s against a 60s turn deadline, and provider.ts
+   * says why in as many words: "At 25s a stalled call still leaves room for the
+   * turn to recover and answer", "leave nothing for a retry or a final answer".
+   * That headroom was reserved and never used — nothing recovered, so a single
+   * stalled request killed a turn with ~29 seconds of budget unspent and a
+   * perfectly good tool result already sitting in `messages`.
+   *
+   * The recovery is deliberately a SMALLER request, not a repeat of the one
+   * that just failed: dropping the tool specs removes the largest block in the
+   * payload, which is the right move whether the cause was a slow model or a
+   * bad socket. The model concludes from what it already has, which is exactly
+   * what the round-cap path at the bottom of the loop does.
+   */
+  const isTimeout = (e: unknown) => e instanceof Error && e.name === "TimeoutError";
 
   try {
     for (rounds = 1; rounds <= MAX_ROUNDS; rounds++) {
-      const result = await callProvider(true);
+      let result;
+      try {
+        result = await callProvider(true);
+      } catch (e) {
+        // Only a per-request stall is recoverable, and only once, and only if
+        // we already have tool results worth concluding from. A round-1 stall
+        // has nothing in hand, so it falls through and is reported honestly
+        // rather than answered from thin air.
+        if (
+          !canRecoverFromStall({
+            errorName: e instanceof Error ? e.name : undefined,
+            turnAborted: turnAbort.signal.aborted,
+            toolRuns,
+            alreadyRecovered: recovered,
+            budgetLeftMs: TURN_DEADLINE_MS - (Date.now() - startedAt),
+            minBudgetMs: MIN_RECOVERY_BUDGET_MS,
+          })
+        ) {
+          throw e;
+        }
+
+        recovered = true;
+        input.onProgress?.({ kind: "thinking" });
+        break;
+      }
 
       if (result.toolCalls.length === 0) {
         const text = (result.content ?? "").trim();
@@ -220,6 +304,7 @@ export async function converse(input: {
       // still returns its `{error}` payload and the others still land. Results
       // are pushed in the model's original order, which some providers care
       // about when matching `tool_call_id`s.
+      const toolT0 = Date.now();
       const payloads = await Promise.all(
         result.toolCalls.map(async (call) => {
           try {
@@ -247,6 +332,12 @@ export async function converse(input: {
               },
               args,
             );
+            if (
+              call.function.name in PROPOSE_ACTION &&
+              rows.some((r) => r.status === "awaiting_approval")
+            ) {
+              proposalsSent += 1;
+            }
             return JSON.stringify(rows);
           } catch (e) {
             // A refused or unknown tool is reported back to the model as a
@@ -264,7 +355,9 @@ export async function converse(input: {
           }
         }),
       );
+      toolMs += Date.now() - toolT0;
       toolRuns += result.toolCalls.length;
+      toolNames = [...toolNames, ...result.toolCalls.map((c) => c.function.name)];
 
       result.toolCalls.forEach((call, i) => {
         messages.push({
@@ -289,7 +382,21 @@ export async function converse(input: {
     flush();
     if (e instanceof ProviderNotConfiguredError) return { kind: "not_configured" };
     if (e instanceof CostCapError) return { kind: "over_cap" };
-    if (turnAbort.signal.aborted) return { kind: "failed", error: "turn deadline" };
-    return { kind: "failed", error: e instanceof Error ? e.message : "unknown" };
+    if (turnAbort.signal.aborted) {
+      return { kind: "timed_out", reason: "turn deadline", pendingProposals: proposalsSent };
+    }
+    // A per-request stall reaching here means recovery was impossible (round 1,
+    // already used, or out of budget). It is NOT "something went wrong working
+    // that out" — it is the AI service being slow, and saying so is the
+    // difference between Alina retrying into the same stall and waiting a
+    // minute.
+    if (isTimeout(e)) {
+      return { kind: "timed_out", reason: "provider timeout", pendingProposals: proposalsSent };
+    }
+    return {
+      kind: "failed",
+      error: e instanceof Error ? e.message : "unknown",
+      pendingProposals: proposalsSent,
+    };
   }
 }

@@ -414,6 +414,347 @@ async function readComplianceDocument(
   return { message: h.execDocumentReadable, result };
 }
 
+/* ======================================================================== *
+ * Setting the studio up (031).
+ *
+ * Each of these is the same three moves as the executors above: map the
+ * payload onto the wrapper's parameters, save an idempotency marker BEFORE the
+ * call, then record the resulting id. Only supplied keys are forwarded, which
+ * is what makes the wrappers' `coalesce` semantics work — an absent key means
+ * "leave it alone", never "set it to null".
+ * ======================================================================== */
+
+/** Forward only the keys present, under the wrapper's parameter names. */
+function mapArgs(
+  payload: Record<string, unknown>,
+  approver: string,
+  map: Record<string, string>,
+): Record<string, unknown> {
+  const args: Record<string, unknown> = { p_approver: approver };
+  for (const [from, to] of Object.entries(map)) {
+    if (payload[from] !== undefined) args[to] = payload[from];
+  }
+  return args;
+}
+
+/**
+ * One shape for the five upserts. `idKey` is both the marker this executor
+ * replays on and the name the resulting id is stored under, so a retry after a
+ * network failure returns the first result rather than creating a twin.
+ */
+type RpcName = Parameters<ReturnType<typeof getAdminClient>["rpc"]>[0];
+
+function upsertExecutor(
+  // Derived from the client rather than widened to `string`: a typo in a
+  // function name is then a compile error, and a name the database does not
+  // have yet fails HERE rather than at the first Approve tap.
+  rpc: RpcName,
+  map: Record<string, string>,
+  idKey: string,
+  existingKey: string,
+  message: (h: ReturnType<typeof hermesDict>, updating: boolean) => string,
+) {
+  return async (
+    payload: Record<string, unknown>,
+    approver: string,
+    prior: Record<string, unknown>,
+    saveStep: SaveStep,
+    locale: Reader,
+  ): Promise<ExecutorResult> => {
+    const h = hermesDict(locale);
+    if (typeof prior[idKey] === "string") {
+      return { message: h.execAlreadyRecorded, result: prior };
+    }
+
+    await saveStep({ attempted: true });
+
+    const { data, error } = await getAdminClient().rpc(rpc, mapArgs(payload, approver, map) as never);
+    if (error) throw new Error(error.message);
+
+    const result = await saveStep({ [idKey]: data });
+    return { message: message(h, payload[existingKey] !== undefined), result };
+  };
+}
+
+const upsertOperator = upsertExecutor(
+  "fn_agent_upsert_operator",
+  {
+    operator_id: "p_operator_id",
+    display_name: "p_display_name",
+    legal_name: "p_legal_name",
+    staff_role: "p_staff_role",
+    email: "p_email",
+    phone: "p_phone",
+    country: "p_country",
+    start_date: "p_start_date",
+    notes: "p_notes",
+  },
+  "operator_id",
+  "operator_id",
+  (h, updating) => (updating ? h.execTeamUpdated : h.execTeamCreated),
+);
+
+const upsertPlatform = upsertExecutor(
+  "fn_agent_upsert_platform",
+  {
+    platform_id: "p_platform_id",
+    name: "p_name",
+    website_url: "p_website_url",
+    is_active: "p_is_active",
+  },
+  "platform_id",
+  "platform_id",
+  (h, updating) => (updating ? h.execPlatformUpdated : h.execPlatformCreated),
+);
+
+const upsertAccount = upsertExecutor(
+  "fn_agent_upsert_account",
+  {
+    account_id: "p_account_id",
+    model_id: "p_model_id",
+    platform_id: "p_platform_id",
+    username: "p_username",
+    platform_fee_percent: "p_fee_percent",
+  },
+  "account_id",
+  "account_id",
+  (h, updating) => (updating ? h.execAccountUpdated : h.execAccountCreated),
+);
+
+const upsertAssignment = upsertExecutor(
+  "fn_agent_upsert_assignment",
+  {
+    assignment_id: "p_assignment_id",
+    operator_id: "p_operator_id",
+    model_id: "p_model_id",
+    pool_share_percent: "p_pool_share",
+    assigned_from: "p_from",
+    assigned_to: "p_to",
+    clear_end: "p_clear_end",
+  },
+  "assignment_id",
+  "assignment_id",
+  (h, updating) => (updating ? h.execAssignmentUpdated : h.execAssignmentCreated),
+);
+
+const upsertScheme = upsertExecutor(
+  "fn_agent_upsert_scheme",
+  {
+    scheme_id: "p_scheme_id",
+    model_id: "p_model_id",
+    platform_account_id: "p_account_id",
+    model_percent: "p_model_pct",
+    operator_percent: "p_operator_pct",
+    studio_percent: "p_studio_pct",
+    effective_from: "p_from",
+    effective_to: "p_to",
+    notes: "p_notes",
+  },
+  "scheme_id",
+  "scheme_id",
+  (h, updating) => (updating ? h.execSchemeUpdated : h.execSchemeCreated),
+);
+
+async function setStatus(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (prior.changed !== undefined) return { message: h.execAlreadyRecorded, result: prior };
+
+  const { data, error } = await getAdminClient().rpc("fn_agent_set_status", {
+    p_approver: approver,
+    p_kind: str(payload, "kind"),
+    p_id: str(payload, "record_id"),
+    p_status: str(payload, "status"),
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ changed: data === true });
+  return { message: data === true ? h.execArchived : h.execAlreadyGone, result };
+}
+
+/**
+ * Replace a scheme's rate card. `fn_agent_set_rate_card` delegates to 025's
+ * `fn_set_commission_rates`, which deletes and re-inserts in one statement, so
+ * a retry that lands twice produces the same card rather than a doubled one —
+ * the marker is belt-and-braces here rather than the only protection.
+ */
+async function setRateCard(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (typeof prior.rows === "number") return { message: h.execAlreadyRecorded, result: prior };
+
+  const rates = payload.rates;
+  if (!Array.isArray(rates) || rates.length === 0) throw new Error("payload.rates missing");
+
+  const { data, error } = await getAdminClient().rpc("fn_agent_set_rate_card", {
+    p_approver: approver,
+    p_scheme_id: str(payload, "scheme_id"),
+    p_rates: rates as never,
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ rows: Number(data) });
+  return { message: h.execRateCardSet(Number(data)), result };
+}
+
+/**
+ * Move a payout pending → approved.
+ *
+ * See `policy.ts` for why this exists at all — it relaxes the origination /
+ * authorization split by owner decision. The wrapper refuses anything that is
+ * not currently `pending`, so a replayed approval cannot advance a payout that
+ * has since been paid or cancelled.
+ */
+async function approvePayout(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (typeof prior.payout_id === "string") {
+    return { message: h.execAlreadyRecorded, result: prior };
+  }
+
+  await saveStep({ attempted: true });
+
+  const { data, error } = await getAdminClient().rpc("fn_agent_approve_payout", {
+    p_approver: approver,
+    p_payout_id: str(payload, "payout_id"),
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ payout_id: data });
+  return { message: h.execPayoutApproved, result };
+}
+
+/* ======================================================================== *
+ * Full access (032): settlement, cancellation, document + entity deletion.
+ * ======================================================================== */
+
+async function markPayoutPaid(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (typeof prior.payout_id === "string") {
+    return { message: h.execAlreadyRecorded, result: prior };
+  }
+
+  await saveStep({ attempted: true });
+
+  // Status flip only — `payout_paid_settlement` (007) posts the one settlement
+  // ledger entry under the approver's claims, and its unique index makes a
+  // replayed execution a no-op rather than a double credit.
+  const { data, error } = await getAdminClient().rpc("fn_agent_mark_payout_paid", {
+    p_approver: approver,
+    p_payout_id: str(payload, "payout_id"),
+    p_reference: typeof payload.reference === "string" ? payload.reference : undefined,
+    p_method: typeof payload.payment_method === "string" ? payload.payment_method : undefined,
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ payout_id: data });
+  return { message: h.execPayoutPaid, result };
+}
+
+async function cancelPayout(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (typeof prior.payout_id === "string") {
+    return { message: h.execAlreadyRecorded, result: prior };
+  }
+
+  const { data, error } = await getAdminClient().rpc("fn_agent_cancel_payout", {
+    p_approver: approver,
+    p_payout_id: str(payload, "payout_id"),
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ payout_id: data });
+  return { message: h.execPayoutCancelled, result };
+}
+
+/**
+ * Delete a document: DB row first, storage object second.
+ *
+ * That order is deliberate. A row without an object is a broken document the
+ * portal still shows; an object without a row is invisible garbage a retry
+ * can clean. The wrapper returns the storage path (null = already gone), and
+ * the two saveStep markers mean a crash between the steps re-runs ONLY the
+ * storage removal — the row is not deleted twice, the file is not orphaned.
+ */
+async function deleteDocument(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (prior.storage_deleted === true) return { message: h.execAlreadyRecorded, result: prior };
+
+  const db = getAdminClient();
+  let path = typeof prior.storage_path === "string" ? prior.storage_path : null;
+
+  if (prior.row_deleted !== true) {
+    const { data, error } = await db.rpc("fn_agent_delete_document", {
+      p_approver: approver,
+      p_document_id: str(payload, "document_id"),
+    });
+    if (error) throw new Error(error.message);
+    path = typeof data === "string" ? data : null;
+    await saveStep({ row_deleted: true, storage_path: path });
+  }
+
+  if (path) {
+    // `storage_path` carries the bucket prefix (docs/06 §2.1); the SDK wants
+    // the key relative to the bucket — same strip the portal does.
+    const key = path.replace(/^\/+/, "").replace(/^model-documents\//, "");
+    const { error: storageError } = await db.storage.from("model-documents").remove([key]);
+    if (storageError) throw new Error(`document row deleted, storage removal failed: ${storageError.message}`);
+  }
+
+  const result = await saveStep({ storage_deleted: true });
+  return { message: h.execDocumentDeleted, result };
+}
+
+/**
+ * Entity deletion (032) reuses the same wrapper as day-to-day deletes — the
+ * per-kind role gate and the pre-checks live in the database function, where
+ * neither this process nor a confused model can skip them. The separate
+ * ACTION exists so policy.ts can hold entity deletion to super_admin without
+ * widening the manager's record-delete surface.
+ */
+async function deleteEntity(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  return deleteRecord(payload, approver, prior, saveStep, locale);
+}
+
 export async function runExecutor(
   actionType: string,
   payload: Record<string, unknown>,
@@ -443,6 +784,30 @@ export async function runExecutor(
       return upsertModel(payload, approver, prior, saveStep, locale);
     case "read_compliance_document":
       return readComplianceDocument(payload, approver, prior, saveStep, locale);
+    case "upsert_operator":
+      return upsertOperator(payload, approver, prior, saveStep, locale);
+    case "upsert_platform":
+      return upsertPlatform(payload, approver, prior, saveStep, locale);
+    case "upsert_account":
+      return upsertAccount(payload, approver, prior, saveStep, locale);
+    case "upsert_assignment":
+      return upsertAssignment(payload, approver, prior, saveStep, locale);
+    case "set_status":
+      return setStatus(payload, approver, prior, saveStep, locale);
+    case "upsert_scheme":
+      return upsertScheme(payload, approver, prior, saveStep, locale);
+    case "set_rate_card":
+      return setRateCard(payload, approver, prior, saveStep, locale);
+    case "approve_payout":
+      return approvePayout(payload, approver, prior, saveStep, locale);
+    case "mark_payout_paid":
+      return markPayoutPaid(payload, approver, prior, saveStep, locale);
+    case "cancel_payout":
+      return cancelPayout(payload, approver, prior, saveStep, locale);
+    case "delete_document":
+      return deleteDocument(payload, approver, prior, saveStep, locale);
+    case "delete_entity":
+      return deleteEntity(payload, approver, prior, saveStep, locale);
     default:
       throw new Error(`no executor for ${actionType}`);
   }

@@ -1063,6 +1063,9 @@ export type Database = {
           action_type: string
           attempt_count: number
           created_at: string
+          card_message_id: string | null
+          source_chat_id: string | null
+          supersede_key: string | null
           decided_at: string | null
           decided_by: string | null
           decided_via: string | null
@@ -1088,6 +1091,9 @@ export type Database = {
           action_type: string
           attempt_count?: number
           created_at?: string
+          card_message_id?: string | null
+          source_chat_id?: string | null
+          supersede_key?: string | null
           decided_at?: string | null
           decided_by?: string | null
           decided_via?: string | null
@@ -1113,6 +1119,9 @@ export type Database = {
           action_type?: string
           attempt_count?: number
           created_at?: string
+          card_message_id?: string | null
+          source_chat_id?: string | null
+          supersede_key?: string | null
           decided_at?: string | null
           decided_by?: string | null
           decided_via?: string | null
@@ -2725,6 +2734,37 @@ export type Database = {
         }
         Returns: undefined
       }
+      fn_agent_approve_payout: {
+        Args: { p_approver: string; p_payout_id: string }
+        Returns: string
+      }
+      fn_agent_audit_delete: {
+        Args: {
+          p_actor: string
+          p_id: string
+          p_kind: string
+          p_role: Database["public"]["Enums"]["user_role"]
+          p_snapshot: Json
+        }
+        Returns: undefined
+      }
+      fn_agent_cancel_payout: {
+        Args: { p_approver: string; p_payout_id: string }
+        Returns: string
+      }
+      fn_agent_delete_document: {
+        Args: { p_approver: string; p_document_id: string }
+        Returns: string
+      }
+      fn_agent_mark_payout_paid: {
+        Args: {
+          p_approver: string
+          p_method?: string
+          p_payout_id: string
+          p_reference?: string
+        }
+        Returns: string
+      }
       fn_agent_record_earning: {
         Args: {
           p_approver: string
@@ -2781,6 +2821,38 @@ export type Database = {
         }
         Returns: string
       }
+      fn_agent_set_rate_card: {
+        Args: { p_approver: string; p_rates: Json; p_scheme_id: string }
+        Returns: number
+      }
+      fn_agent_set_status: {
+        Args: { p_approver: string; p_id: string; p_kind: string; p_status: string }
+        Returns: boolean
+      }
+      fn_agent_upsert_account: {
+        Args: {
+          p_account_id?: string
+          p_approver: string
+          p_fee_percent?: number
+          p_model_id?: string
+          p_platform_id?: string
+          p_username?: string
+        }
+        Returns: string
+      }
+      fn_agent_upsert_assignment: {
+        Args: {
+          p_approver: string
+          p_assignment_id?: string
+          p_clear_end?: boolean
+          p_from?: string
+          p_model_id?: string
+          p_operator_id?: string
+          p_pool_share?: number
+          p_to?: string
+        }
+        Returns: string
+      }
       fn_agent_upsert_model: {
         Args: {
           p_approver: string
@@ -2793,6 +2865,46 @@ export type Database = {
           p_phone?: string
           p_stage_name?: string
           p_status?: Database["public"]["Enums"]["model_status"]
+        }
+        Returns: string
+      }
+      fn_agent_upsert_operator: {
+        Args: {
+          p_approver: string
+          p_country?: string
+          p_display_name?: string
+          p_email?: string
+          p_legal_name?: string
+          p_notes?: string
+          p_operator_id?: string
+          p_phone?: string
+          p_staff_role?: Database["public"]["Enums"]["staff_role"]
+          p_start_date?: string
+        }
+        Returns: string
+      }
+      fn_agent_upsert_platform: {
+        Args: {
+          p_approver: string
+          p_is_active?: boolean
+          p_name?: string
+          p_platform_id?: string
+          p_website_url?: string
+        }
+        Returns: string
+      }
+      fn_agent_upsert_scheme: {
+        Args: {
+          p_account_id?: string
+          p_approver: string
+          p_from?: string
+          p_model_id?: string
+          p_model_pct?: number
+          p_notes?: string
+          p_operator_pct?: number
+          p_scheme_id?: string
+          p_studio_pct?: number
+          p_to?: string
         }
         Returns: string
       }

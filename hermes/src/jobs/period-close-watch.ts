@@ -61,7 +61,7 @@ export async function runPeriodCloseWatch(now: Date = new Date()): Promise<strin
 
   // The idempotency key is the period itself, so re-running daily updates
   // nothing and does not stack duplicate proposals in the queue.
-  const approvalId = await enqueueApproval({
+  const { id: approvalId } = await enqueueApproval({
     actionType: "close_period",
     payload: { period_start: start, period_end: end },
     // The preview is written ONCE and read later by two surfaces in two

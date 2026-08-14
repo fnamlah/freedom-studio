@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   BLOCKED_KEYS,
   PROJECTIONS,
+  PROJECTION_UNBLOCK,
   redactToolResult,
   scrubText,
 } from "../../../src/lib/ai/redactor.js";
@@ -19,7 +20,14 @@ import {
   roleSatisfies,
 } from "./policy.js";
 import { BOT_ROLES, commandAllowed, roleMayUseBot } from "../telegram/access.js";
-import { PROPOSE_ACTION, specsForRole, TOOL_COMMAND, TOOL_SPECS } from "../llm/tool-catalog.js";
+import {
+  PROPOSE_ACTION,
+  projectionFor,
+  specsForRole,
+  TOOL_COMMAND,
+  TOOL_SPECS,
+  TOOL_PROJECTION,
+} from "../llm/tool-catalog.js";
 import { isIdleExpired, parseState, toMessages, withinBudget } from "../llm/history.js";
 import { hermesEn, hermesRu } from "../lib/i18n.js";
 
@@ -140,34 +148,28 @@ test("every conversational tool is registered in the redactor, fail-closed", () 
   // being forgotten: if a tool exists here but not in PROJECTIONS, its rows
   // could never be serialized — better to fail this test than to find out in
   // production that the projection was the missing piece.
+  // TOOL_PROJECTION is the single source for reuse (`hermes_balances` →
+  // `payee_balances` etc.); every propose_* tool returns the shared ack.
   for (const tool of Object.keys(TOOL_COMMAND)) {
-    // `hermes_balances` deliberately reuses the app's `payee_balances`
-    // projection: it is the same view, so it must not get a second, drifting
-    // definition of what may leave.
-    // `hermes_balances` reuses the app's `payee_balances` projection (same
-    // view, so no second drifting definition); every propose_* tool returns
-    // the shared proposal ack.
-    const projected = PROPOSE_ACTION[tool]
-      ? "hermes_proposal"
-      : tool === "hermes_balances"
-        ? "payee_balances"
-        : tool;
+    const projected = PROPOSE_ACTION[tool] ? "hermes_proposal" : projectionFor(tool);
     assert.ok(
       PROJECTIONS[projected],
       `${tool} has no egress projection — it would throw at run time`,
     );
+  }
+  // And the reuse map itself may only name projections that exist.
+  for (const [tool, projection] of Object.entries(TOOL_PROJECTION)) {
+    assert.ok(PROJECTIONS[projection], `${tool} maps to unregistered projection ${projection}`);
   }
 });
 
 test("conversational tools carry no identity fields into a projection", () => {
   const blocked = Array.isArray(BLOCKED_KEYS) ? BLOCKED_KEYS : [...BLOCKED_KEYS];
   for (const tool of Object.keys(TOOL_COMMAND)) {
-    const projected = PROPOSE_ACTION[tool]
-      ? "hermes_proposal"
-      : tool === "hermes_balances"
-        ? "payee_balances"
-        : tool;
+    const projected = PROPOSE_ACTION[tool] ? "hermes_proposal" : projectionFor(tool);
+    const unblocked = PROJECTION_UNBLOCK[tool] ?? new Set<string>();
     for (const field of PROJECTIONS[projected] ?? []) {
+      if (unblocked.has(field)) continue; // the one documented exception, below
       assert.ok(
         !blocked.includes(field),
         `${tool} projects "${field}", which is on the blocklist`,
@@ -176,14 +178,41 @@ test("conversational tools carry no identity fields into a projection", () => {
   }
 });
 
+test("the identity unblock is exactly one tool with exactly the agreed fields", () => {
+  // PROJECTION_UNBLOCK lets a tool emit blocklisted keys verbatim. It exists
+  // for ONE tool, by owner decision, with ONE field set. Growing either — a
+  // second tool, an extra key — is a governance decision, and this failing
+  // test is where it gets argued, never a drive-by edit.
+  assert.deepEqual(Object.keys(PROJECTION_UNBLOCK), ["hermes_person_details"]);
+  assert.deepEqual(
+    [...PROJECTION_UNBLOCK.hermes_person_details!].sort(),
+    ["date_of_birth", "email", "legal_name", "payment_details", "phone"],
+  );
+  // And it is only reachable behind the SA/MGR gate — never finance.
+  assert.equal(TOOL_COMMAND.hermes_person_details, "/documents");
+});
+
 test("a role is never offered a tool it may not run", () => {
   for (const role of ["super_admin", "manager", "finance"]) {
     const offered = specsForRole(role, commandAllowed).map((s) => s.function.name);
     for (const name of offered) {
-      assert.ok(
-        commandAllowed(role, TOOL_COMMAND[name]!),
-        `${role} was offered ${name} but may not run it`,
-      );
+      // The OFFER gate and the EXECUTION gate must agree, per tool class:
+      // proposals are gated by who could DECIDE them (the policy role, the
+      // same check decide_approval makes in the database); reads by the
+      // mirrored slash command. runTool enforces exactly this split.
+      const action = PROPOSE_ACTION[name];
+      if (action) {
+        const policy = resolvePolicy(action);
+        assert.ok(
+          policy.tier === "approval" && roleSatisfies(role, policy.requiredRole ?? "super_admin"),
+          `${role} was offered ${name} but may not run it`,
+        );
+      } else {
+        assert.ok(
+          commandAllowed(role, TOOL_COMMAND[name]!),
+          `${role} was offered ${name} but may not run it`,
+        );
+      }
     }
     // Every role that may hold a channel must get something to work with,
     // otherwise the conversation is decorative for them.
@@ -247,8 +276,30 @@ test("deleting cannot reach financial history", () => {
     properties?: { kind?: { enum?: string[] } };
   }).properties?.kind?.enum;
   assert.deepEqual(kinds, ["earning", "work_session", "expense"]);
-  for (const forbidden of ["ledger_entry", "audit_log", "payout", "document"]) {
+  for (const forbidden of ["ledger_entry", "audit_log"]) {
     assert.ok(!kinds?.includes(forbidden), `${forbidden} must not be deletable by the bot`);
+  }
+
+  // The ENTITY delete tool (032) is wider by owner directive — but pinned:
+  // these eight kinds, nothing more, and never the financial history. Its
+  // action is super_admin-only (asserted separately above).
+  const entitySpec = TOOL_SPECS.find((s) => s.function.name === "hermes_propose_delete_entity");
+  assert.ok(entitySpec, "the entity delete tool is missing");
+  const entityKinds = (entitySpec!.function.parameters as {
+    properties?: { kind?: { enum?: string[] } };
+  }).properties?.kind?.enum;
+  assert.deepEqual(entityKinds, [
+    "model",
+    "operator",
+    "platform",
+    "account",
+    "assignment",
+    "scheme",
+    "rate_card",
+    "payout",
+  ]);
+  for (const forbidden of ["ledger_entry", "audit_log", "profile", "user"]) {
+    assert.ok(!entityKinds?.includes(forbidden), `${forbidden} must not be entity-deletable`);
   }
 });
 
@@ -337,12 +388,39 @@ test("finance never reaches compliance documents through the bot", () => {
 
   const offered = specsForRole("finance", commandAllowed).map((s) => s.function.name);
   assert.ok(!offered.includes("hermes_documents"), "finance was offered the document reader");
-  assert.ok(
-    !offered.some((n) => n.startsWith("hermes_propose")),
-    "finance was offered a write proposal it could not approve",
-  );
+  assert.ok(!offered.includes("hermes_person_details"), "finance was offered identity details");
+  assert.ok(!offered.includes("hermes_expenses"), "finance has no 008 policy on expenses");
+  // Finance IS offered proposals now — but ONLY those it could itself approve
+  // (its own policy domain: payouts, period close, forecast). Everything else
+  // stays out of reach.
+  const financeProposals = offered.filter((n) => n.startsWith("hermes_propose")).sort();
+  assert.deepEqual(financeProposals, [
+    "hermes_propose_close_period",
+    "hermes_propose_payout",
+    "hermes_propose_snapshot_forecast",
+  ]);
   // …and the reads finance legitimately holds are still there.
   assert.ok(offered.includes("hermes_model_earnings"));
+});
+
+test("the destructive surface is super_admin only", () => {
+  for (const role of ["manager", "finance"]) {
+    const offered = specsForRole(role, commandAllowed).map((s) => s.function.name);
+    for (const tool of [
+      "hermes_propose_mark_paid",
+      "hermes_propose_delete_entity",
+      "hermes_propose_delete_document",
+      "hermes_propose_scheme",
+      "hermes_propose_rate_card",
+      "hermes_propose_approve_payout",
+    ]) {
+      assert.ok(!offered.includes(tool), `${role} was offered ${tool}`);
+    }
+  }
+  const sa = specsForRole("super_admin", commandAllowed).map((s) => s.function.name);
+  for (const tool of ["hermes_propose_mark_paid", "hermes_propose_delete_entity"]) {
+    assert.ok(sa.includes(tool), `super_admin missing ${tool}`);
+  }
 });
 
 test("no read tool inherits a gate wider than the surface it reads", () => {

@@ -27,12 +27,14 @@ export type ProviderId = Database["public"]["Enums"]["ai_provider"];
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   moonshot: "Kimi K3 · Moonshot",
   zhipu: "GLM 5.2 · Zhipu",
+  openai: "Embeddings · OpenAI",
 };
 
 /** The env var each provider's key is read from — shown when one is missing. */
 export const PROVIDER_KEY_ENV: Record<ProviderId, string> = {
   moonshot: "MOONSHOT_API_KEY",
   zhipu: "ZHIPU_API_KEY",
+  openai: "OPENAI_API_KEY",
 };
 
 /** Embedding source kinds (docs/11 §6.1). Tied to the DB enum. */

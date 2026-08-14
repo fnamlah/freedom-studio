@@ -52,17 +52,21 @@ export default async function AdminSettingsPage() {
     configured: {
       moonshot: providerHasKey("moonshot"),
       zhipu: providerHasKey("zhipu"),
+      openai: providerHasKey("openai"),
     },
     chatModel: {
       moonshot: str(settings["ai.chat_model.moonshot"], "kimi-k3"),
       zhipu: str(settings["ai.chat_model.zhipu"], "glm-5.2"),
+      // Embeddings-only in this studio; present because the type demands it.
+      openai: str(settings["ai.chat_model.openai"], "gpt-5.2"),
     },
     visionModel: {
       moonshot: str(settings["ai.vision_model.moonshot"], "kimi-k3-vision"),
       zhipu: str(settings["ai.vision_model.zhipu"], "glm-5.2v"),
+      openai: str(settings["ai.vision_model.openai"], "gpt-5.2"),
     },
-    embeddingProvider: prov(settings["ai.embedding.provider"], "zhipu"),
-    embeddingModel: str(settings["ai.embedding.model"], "embedding-3"),
+    embeddingProvider: prov(settings["ai.embedding.provider"], "openai"),
+    embeddingModel: str(settings["ai.embedding.model"], "text-embedding-3-large"),
     embeddingDim: int(settings["ai.embedding.dim"], 2048),
     limits: {
       requestsPerUserPerHour: int(settings["ai.limits.requests_per_user_per_hour"], 30),

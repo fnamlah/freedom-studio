@@ -23,11 +23,21 @@ export class EmbeddingNotConfiguredError extends Error {
 }
 
 export async function embedQuery(scrubbedText: string): Promise<number[]> {
-  const provider = (await readSetting("ai.embedding.provider")) ?? "zhipu";
-  const model = (await readSetting("ai.embedding.model")) ?? "embedding-3";
+  const provider = (await readSetting("ai.embedding.provider")) ?? "openai";
+  const model = (await readSetting("ai.embedding.model")) ?? "text-embedding-3-large";
 
-  const key = provider === "zhipu" ? env.ZHIPU_API_KEY : env.MOONSHOT_API_KEY;
-  const baseUrl = provider === "zhipu" ? env.ZHIPU_BASE_URL : env.MOONSHOT_BASE_URL;
+  const key =
+    provider === "openai"
+      ? env.OPENAI_API_KEY
+      : provider === "zhipu"
+        ? env.ZHIPU_API_KEY
+        : env.MOONSHOT_API_KEY;
+  const baseUrl =
+    provider === "openai"
+      ? env.OPENAI_BASE_URL
+      : provider === "zhipu"
+        ? env.ZHIPU_BASE_URL
+        : env.MOONSHOT_BASE_URL;
   if (!key) {
     throw new EmbeddingNotConfiguredError(
       `semantic search needs the ${provider.toUpperCase()}_API_KEY, which is not set on this worker`,
@@ -37,7 +47,15 @@ export async function embedQuery(scrubbedText: string): Promise<number[]> {
   const res = await fetch(`${baseUrl}/embeddings`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, input: [scrubbedText.slice(0, 2000)] }),
+    body: JSON.stringify({
+      model,
+      input: [scrubbedText.slice(0, 2000)],
+      // The studio's column is vector(2048); OpenAI's text-embedding-3-*
+      // models shorten to order. The APP's reindex pins the same number
+      // (openai adapter, embedDimensions) — the two sides must always embed
+      // into the same space or search returns geometry noise.
+      ...(provider === "openai" ? { dimensions: 2048 } : {}),
+    }),
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {

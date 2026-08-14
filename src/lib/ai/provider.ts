@@ -16,31 +16,38 @@
 import { getSetting } from "@/lib/settings";
 
 import { moonshotAdapter } from "./providers/moonshot";
+import { openaiAdapter } from "./providers/openai";
 import { zhipuAdapter } from "./providers/zhipu";
 import { NotConfiguredError, type ProviderAdapter, type ProviderId } from "./types";
 
 const ADAPTERS: Record<ProviderId, ProviderAdapter> = {
   moonshot: moonshotAdapter,
   zhipu: zhipuAdapter,
+  openai: openaiAdapter,
 };
 
 const KEY_ENV: Record<ProviderId, string> = {
   moonshot: "MOONSHOT_API_KEY",
   zhipu: "ZHIPU_API_KEY",
+  openai: "OPENAI_API_KEY",
 };
 
 const DEFAULT_CHAT_MODEL: Record<ProviderId, string> = {
   moonshot: "kimi-k3",
   zhipu: "glm-5.2",
+  // Embeddings-only in this studio; a chat default exists because the type
+  // demands one, not because chat is routed here.
+  openai: "gpt-5.2",
 };
 
 const DEFAULT_VISION_MODEL: Record<ProviderId, string> = {
   moonshot: "kimi-k3-vision",
   zhipu: "glm-5.2v",
+  openai: "gpt-5.2",
 };
 
 function coerceProvider(value: unknown, fallback: ProviderId): ProviderId {
-  return value === "moonshot" || value === "zhipu" ? value : fallback;
+  return value === "moonshot" || value === "zhipu" || value === "openai" ? value : fallback;
 }
 
 /** True when this provider's API key is present in the server environment. */

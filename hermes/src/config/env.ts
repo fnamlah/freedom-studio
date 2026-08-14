@@ -31,8 +31,10 @@ const schema = z.object({
   // used at runtime; these supply the keys and let a deploy pin a base URL.
   MOONSHOT_API_KEY: z.string().optional(),
   ZHIPU_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
   MOONSHOT_BASE_URL: z.string().url().default("https://api.moonshot.ai/v1"),
   ZHIPU_BASE_URL: z.string().url().default("https://api.z.ai/api/paas/v4"),
+  OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
 
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_API_BASE: z.string().url().default("https://api.telegram.org"),

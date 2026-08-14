@@ -3084,7 +3084,7 @@ export type Database = {
     Enums: {
       account_status: "active" | "suspended" | "closed"
       ai_message_role: "user" | "assistant" | "tool"
-      ai_provider: "moonshot" | "zhipu"
+      ai_provider: "moonshot" | "zhipu" | "openai"
       ai_request_kind:
         | "chat"
         | "embedding"

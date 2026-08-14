@@ -37,6 +37,13 @@ export interface OpenAiCompatibleConfig {
    * omits the field so the provider's default applies.
    */
   mapTemperature?: (requested: number) => number | undefined;
+  /**
+   * Fixed embedding dimensionality, for providers whose models can shorten
+   * their vectors (OpenAI's text-embedding-3-*). The studio's column is
+   * `vector(2048)`, so the OpenAI adapter pins 2048 — a vector of any other
+   * length would be refused by Postgres at insert.
+   */
+  embedDimensions?: number;
 }
 
 /* ------------------------------------------------------- wire-format shapes */
@@ -292,7 +299,11 @@ async function embed(
       "Content-Type": "application/json",
       Authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify({ model, input: texts }),
+    body: JSON.stringify({
+      model,
+      input: texts,
+      ...(config.embedDimensions ? { dimensions: config.embedDimensions } : {}),
+    }),
   });
   if (!res.ok) throw await toProviderError(config, res);
 

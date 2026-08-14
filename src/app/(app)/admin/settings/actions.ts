@@ -278,6 +278,7 @@ export async function refreshKeyStatus(): Promise<
     const configured: Record<ProviderId, boolean> = {
       moonshot: providerHasKey("moonshot"),
       zhipu: providerHasKey("zhipu"),
+      openai: providerHasKey("openai"),
     };
     return { ok: true, status: { active, configured, activeConfigured: configured[active] } };
   } catch (error) {

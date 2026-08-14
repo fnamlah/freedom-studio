@@ -24,6 +24,7 @@ export type EditableModel = {
   email: string | null;
   phone: string | null;
   country: string | null;
+  telegram_username: string | null;
   start_date: string | null;
   commission_percent: number;
   notes: string | null;
@@ -36,6 +37,7 @@ type FormState = {
   email: string;
   phone: string;
   country: string;
+  telegram_username: string;
   start_date: string;
   commission_percent: string;
   notes: string;
@@ -50,6 +52,7 @@ function initialState(model?: EditableModel): FormState {
     email: model?.email ?? "",
     phone: model?.phone ?? "",
     country: model?.country ?? "",
+    telegram_username: model?.telegram_username ?? "",
     start_date: model?.start_date ?? "",
     commission_percent:
       model?.commission_percent !== undefined ? String(model.commission_percent) : "0",
@@ -109,6 +112,7 @@ export function ModelForm({
             email: form.email,
             phone: form.phone,
             country: form.country,
+            telegram_username: form.telegram_username,
             start_date: form.start_date,
             commission_percent: form.commission_percent,
             notes: form.notes,
@@ -122,6 +126,7 @@ export function ModelForm({
             email: form.email,
             phone: form.phone,
             country: form.country,
+            telegram_username: form.telegram_username,
             start_date: form.start_date,
             commission_percent: form.commission_percent,
             notes: form.notes,
@@ -267,6 +272,18 @@ export function ModelForm({
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field>
+              <Label htmlFor="model-telegram">{d.studio.models.telegramLabel}</Label>
+              <Input
+                id="model-telegram"
+                autoComplete="off"
+                maxLength={33}
+                value={form.telegram_username}
+                onChange={(e) => field("telegram_username")(e.target.value)}
+                placeholder="@username"
+              />
+            </Field>
+
             <Field help={d.studio.models.helpCountry}>
               <Label htmlFor="model-country">{d.studio.models.fieldCountry}</Label>
               <Input

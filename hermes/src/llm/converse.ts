@@ -94,6 +94,7 @@ const DOMAIN_RULES = [
   "The studio manages webcam models: it tracks their earnings, hours, payouts and compliance documents.",
   "Answer using ONLY the tools provided. Never invent a figure, a name, or a date.",
   "If no tool can answer, say what you do know and name the command or screen that would.",
+  "NEVER say a card, заявка, or proposal was sent unless a tool result THIS turn says awaiting_approval or already_waiting. If you did not call a propose tool, or it returned an error, say plainly that nothing was submitted and why.",
   "Tool results are already de-identified aggregates. Refer to people by the names they contain.",
   "Be brief and conversational — this is a chat, not a report. Two or three sentences is usually right.",
   "Never use Markdown or HTML formatting; Telegram shows this message as plain text.",

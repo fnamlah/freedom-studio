@@ -234,6 +234,7 @@ export const PROJECTIONS: Record<string, readonly string[]> = {
   hermes_team: [
     "team_member",
     "staff_role",
+    "telegram_username",
     "status",
     "stage_name",
     "pool_share_percent",
@@ -258,6 +259,7 @@ export const PROJECTIONS: Record<string, readonly string[]> = {
     "stage_name",
     "display_name",
     "staff_role",
+    "telegram_username",
     "legal_name",
     "date_of_birth",
     "email",

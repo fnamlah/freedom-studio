@@ -66,7 +66,7 @@ export default async function ModelDetailPage({
   const { data: model } = await supabase
     .from("models")
     .select(
-      "id, stage_name, legal_name, date_of_birth, email, phone, country, start_date, status, commission_percent, notes, profile_id, created_at",
+      "id, stage_name, legal_name, date_of_birth, email, phone, country, start_date, status, commission_percent, notes, telegram_username, profile_id, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -126,6 +126,7 @@ export default async function ModelDetailPage({
     start_date: model.start_date,
     commission_percent: model.commission_percent,
     notes: model.notes,
+    telegram_username: model.telegram_username,
   };
 
   return (

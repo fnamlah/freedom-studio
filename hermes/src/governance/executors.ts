@@ -368,6 +368,7 @@ async function upsertModel(
     commission_percent: "p_commission_percent",
     status: "p_status",
     country: "p_country",
+    telegram_username: "p_telegram_username",
   };
   for (const [from, to] of Object.entries(map)) {
     if (payload[from] !== undefined) args[to] = payload[from];
@@ -492,6 +493,7 @@ const upsertOperator = upsertExecutor(
     country: "p_country",
     start_date: "p_start_date",
     notes: "p_notes",
+    telegram_username: "p_telegram_username",
   },
   "operator_id",
   "operator_id",

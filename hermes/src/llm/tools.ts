@@ -892,7 +892,7 @@ async function readTeam(args: Record<string, unknown>): Promise<Record<string, u
 
   const [assignments, operators, models] = await Promise.all([
     q.order("assigned_from", { ascending: false }).limit(200),
-    db.from("operators").select("id, display_name, staff_role, status"),
+    db.from("operators").select("id, display_name, staff_role, status, telegram_username"),
     db.from("models").select("id, stage_name"),
   ]);
 
@@ -905,6 +905,7 @@ async function readTeam(args: Record<string, unknown>): Promise<Record<string, u
   const attached = rows.map((r) => ({
     team_member: staff.get(r.operator_id)?.display_name ?? "?",
     staff_role: staff.get(r.operator_id)?.staff_role ?? "operator",
+    telegram_username: staff.get(r.operator_id)?.telegram_username ?? null,
     status: staff.get(r.operator_id)?.status ?? "?",
     stage_name: names.get(r.model_id) ?? "?",
     pool_share_percent: r.pool_share_percent,
@@ -922,6 +923,7 @@ async function readTeam(args: Record<string, unknown>): Promise<Record<string, u
         attached.push({
           team_member: o.display_name,
           staff_role: o.staff_role ?? "operator",
+          telegram_username: o.telegram_username ?? null,
           status: o.status,
           stage_name: "—",
           pool_share_percent: null as never,
@@ -1582,7 +1584,7 @@ async function readPersonDetails(
       await db
         .from("models")
         .select(
-          "stage_name, legal_name, date_of_birth, email, phone, country, start_date, status, commission_percent",
+          "stage_name, legal_name, date_of_birth, email, phone, country, start_date, status, commission_percent, telegram_username",
         )
         .eq("id", model.value.id)
         .limit(1),
@@ -1600,7 +1602,7 @@ async function readPersonDetails(
     await db
       .from("operators")
       .select(
-        "display_name, staff_role, legal_name, email, phone, country, start_date, status, payment_details",
+        "display_name, staff_role, legal_name, email, phone, country, start_date, status, payment_details, telegram_username",
       )
       .eq("id", person.value.id)
       .limit(1),

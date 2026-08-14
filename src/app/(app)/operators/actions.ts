@@ -63,6 +63,7 @@ const operatorMessages = (d: Dictionary): OperatorMessages => ({
   country: d.studio.operators.errCountry,
   dateInvalid: d.studio.operators.errDateInvalid,
   notesLong: d.studio.operators.errNotesLong,
+  telegramUsername: d.studio.operators.errTelegramUsername,
 });
 
 const assignmentMessages = (d: Dictionary): AssignmentMessages => ({
@@ -127,6 +128,7 @@ export type CreateOperatorInput = {
   country?: string | null;
   start_date?: string | null;
   notes?: string | null;
+  telegram_username?: string | null;
   status: string;
 };
 
@@ -212,6 +214,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Action
         country: data.country ?? null,
         start_date: data.start_date ?? null,
         notes: data.notes ?? null,
+        telegram_username: data.telegram_username ?? null,
         status: data.status as OperatorStatus,
         created_by: user.id,
       })
@@ -263,6 +266,7 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Action
         country: data.country ?? null,
         start_date: data.start_date ?? null,
         notes: data.notes ?? null,
+        telegram_username: data.telegram_username ?? null,
       })
       .eq("id", data.id)
       .select("id")

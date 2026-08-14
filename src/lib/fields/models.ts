@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { emptyToNull } from "../forms.js";
+import { optionalTelegramUsername } from "./operators.js";
 
 /**
  * Model validation, shared by the manual form and the Telegram bot.
@@ -31,6 +32,7 @@ export interface ModelMessages {
   commissionMin: string;
   commissionMax: string;
   notesLong: string;
+  telegramUsername: string;
 }
 
 export const MODEL_MESSAGES_EN: ModelMessages = {
@@ -46,6 +48,7 @@ export const MODEL_MESSAGES_EN: ModelMessages = {
   commissionMin: "Commission cannot be negative.",
   commissionMax: "Commission cannot exceed 100%.",
   notesLong: "Keep notes under 4000 characters.",
+  telegramUsername: "A Telegram username is 5–32 letters, digits or underscores.",
 };
 
 export const MODEL_STATUSES = ["active", "inactive", "on_leave", "terminated"] as const;
@@ -128,6 +131,7 @@ export const modelProfileFields = (m: ModelMessages) => ({
   start_date: optionalDate(m),
   commission_percent: commissionPercent(m),
   notes: optionalNotes(m),
+  telegram_username: optionalTelegramUsername(m.telegramUsername),
 });
 
 /**
@@ -144,4 +148,5 @@ export const modelPatchFields = (m: ModelMessages) => ({
   country: optionalCountry(m),
   commission_percent: commissionPercent(m).optional(),
   status: z.enum(MODEL_STATUSES).optional(),
+  telegram_username: optionalTelegramUsername(m.telegramUsername),
 });

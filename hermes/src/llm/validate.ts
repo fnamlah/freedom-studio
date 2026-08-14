@@ -59,6 +59,7 @@ export const operatorProposal = z.object({
   phone: op.phone,
   country: op.country,
   start_date: op.start_date,
+  telegram_username: op.telegram_username,
 });
 
 export const modelProposal = z.object(modelPatchFields(MODEL_MESSAGES_EN));

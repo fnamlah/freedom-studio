@@ -33,6 +33,7 @@ export interface OperatorMessages {
   country: string;
   dateInvalid: string;
   notesLong: string;
+  telegramUsername: string;
 }
 
 /** English defaults, used by the worker and as the fallback anywhere else. */
@@ -44,7 +45,20 @@ export const OPERATOR_MESSAGES_EN: OperatorMessages = {
   country: "Use a 2-letter country code, e.g. PL.",
   dateInvalid: "Enter a real date as YYYY-MM-DD.",
   notesLong: "Keep notes under 4000 characters.",
+  telegramUsername: "A Telegram username is 5–32 letters, digits or underscores.",
 };
+
+/**
+ * Telegram handle: a pasted @ is stripped, then Telegram's own rules apply.
+ * Stored bare so «найди @hahaub» and «найди hahaub» resolve identically.
+ */
+export const optionalTelegramUsername = (message: string) =>
+  z
+    .preprocess(
+      (v) => (typeof v === "string" && v.trim() ? v.trim().replace(/^@+/, "") : null),
+      z.string().regex(/^[A-Za-z0-9_]{5,32}$/, message).nullable(),
+    )
+    .optional();
 
 export const STAFF_ROLES = ["operator", "coach", "team_leader"] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
@@ -83,6 +97,7 @@ export const operatorProfileFields = (m: OperatorMessages) => ({
   country: optionalCountry(m),
   start_date: optionalStartDate(m),
   notes: optionalNotes(m),
+  telegram_username: optionalTelegramUsername(m.telegramUsername),
 });
 
 /* ------------------------------------------------------------ assignments --- */

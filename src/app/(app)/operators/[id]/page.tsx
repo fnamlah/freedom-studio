@@ -73,7 +73,7 @@ export default async function OperatorDetailPage({
     supabase
       .from("operators")
       .select(
-        "id, display_name, staff_role, legal_name, email, phone, country, start_date, notes, status, profile_id, created_at",
+        "id, display_name, staff_role, legal_name, email, phone, country, start_date, notes, status, telegram_username, profile_id, created_at",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -123,6 +123,7 @@ export default async function OperatorDetailPage({
     country: operator.country,
     start_date: operator.start_date,
     notes: operator.notes,
+    telegram_username: operator.telegram_username,
   };
 
   return (

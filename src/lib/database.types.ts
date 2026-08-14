@@ -1728,6 +1728,7 @@ export type Database = {
           id: string
           legal_name: string
           notes: string | null
+          telegram_username: string | null
           payment_details: Json | null
           phone: string | null
           profile_id: string | null
@@ -1746,6 +1747,7 @@ export type Database = {
           id?: string
           legal_name: string
           notes?: string | null
+          telegram_username?: string | null
           payment_details?: Json | null
           phone?: string | null
           profile_id?: string | null
@@ -1764,6 +1766,7 @@ export type Database = {
           id?: string
           legal_name?: string
           notes?: string | null
+          telegram_username?: string | null
           payment_details?: Json | null
           phone?: string | null
           profile_id?: string | null
@@ -1892,6 +1895,7 @@ export type Database = {
           id: string
           legal_name: string
           notes: string | null
+          telegram_username: string | null
           payment_details: Json | null
           phone: string | null
           profile_id: string | null
@@ -1909,6 +1913,7 @@ export type Database = {
           id?: string
           legal_name: string
           notes?: string | null
+          telegram_username?: string | null
           payment_details?: Json | null
           phone?: string | null
           profile_id?: string | null
@@ -1926,6 +1931,7 @@ export type Database = {
           id?: string
           legal_name?: string
           notes?: string | null
+          telegram_username?: string | null
           payment_details?: Json | null
           phone?: string | null
           profile_id?: string | null
@@ -2881,6 +2887,7 @@ export type Database = {
           p_phone?: string
           p_stage_name?: string
           p_status?: Database["public"]["Enums"]["model_status"]
+          p_telegram_username?: string
         }
         Returns: string
       }
@@ -2896,6 +2903,7 @@ export type Database = {
           p_phone?: string
           p_staff_role?: Database["public"]["Enums"]["staff_role"]
           p_start_date?: string
+          p_telegram_username?: string
         }
         Returns: string
       }

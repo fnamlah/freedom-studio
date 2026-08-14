@@ -24,6 +24,7 @@ export type EditableOperator = {
   email: string | null;
   phone: string | null;
   country: string | null;
+  telegram_username: string | null;
   start_date: string | null;
   notes: string | null;
 };
@@ -35,6 +36,7 @@ type FormState = {
   email: string;
   phone: string;
   country: string;
+  telegram_username: string;
   start_date: string;
   notes: string;
   status: OperatorStatus;
@@ -48,6 +50,7 @@ function initialState(operator?: EditableOperator): FormState {
     email: operator?.email ?? "",
     phone: operator?.phone ?? "",
     country: operator?.country ?? "",
+    telegram_username: operator?.telegram_username ?? "",
     start_date: operator?.start_date ?? "",
     notes: operator?.notes ?? "",
     status: "active",
@@ -104,6 +107,7 @@ export function OperatorForm({
             email: form.email,
             phone: form.phone,
             country: form.country,
+            telegram_username: form.telegram_username,
             start_date: form.start_date,
             notes: form.notes,
             status: form.status,
@@ -116,6 +120,7 @@ export function OperatorForm({
             email: form.email,
             phone: form.phone,
             country: form.country,
+            telegram_username: form.telegram_username,
             start_date: form.start_date,
             notes: form.notes,
           });
@@ -243,6 +248,18 @@ export function OperatorForm({
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field>
+              <Label htmlFor="operator-telegram">{d.studio.operators.telegramLabel}</Label>
+              <Input
+                id="operator-telegram"
+                autoComplete="off"
+                maxLength={33}
+                value={form.telegram_username}
+                onChange={(e) => field("telegram_username")(e.target.value)}
+                placeholder="@username"
+              />
+            </Field>
+
             <Field help={d.studio.operators.helpCountry}>
               <Label htmlFor="operator-country">{d.studio.operators.fieldCountry}</Label>
               <Input

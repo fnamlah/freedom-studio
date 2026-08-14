@@ -58,6 +58,7 @@ const messages = (d: Dictionary): ModelMessages => ({
   commissionMin: d.studio.models.errCommissionMin,
   commissionMax: d.studio.models.errCommissionMax,
   notesLong: d.studio.models.errNotesLong,
+  telegramUsername: d.studio.models.errTelegramUsername,
 });
 
 const profileFields = (d: Dictionary) => modelProfileFields(messages(d));
@@ -91,6 +92,7 @@ export type CreateModelInput = {
   start_date?: string | null;
   commission_percent: string | number;
   notes?: string | null;
+  telegram_username?: string | null;
   status: string;
 };
 
@@ -128,6 +130,7 @@ export async function createModel(input: CreateModelInput): Promise<ActionResult
         start_date: data.start_date ?? null,
         commission_percent: data.commission_percent,
         notes: data.notes ?? null,
+        telegram_username: data.telegram_username ?? null,
         status: data.status as ModelStatus,
         created_by: user.id,
       })
@@ -180,6 +183,7 @@ export async function updateModel(input: UpdateModelInput): Promise<ActionResult
         start_date: data.start_date ?? null,
         commission_percent: data.commission_percent,
         notes: data.notes ?? null,
+        telegram_username: data.telegram_username ?? null,
       })
       .eq("id", data.id)
       .select("id")

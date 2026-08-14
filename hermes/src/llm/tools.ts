@@ -454,7 +454,16 @@ async function readDocuments(args: Record<string, unknown>): Promise<Record<stri
 
   let libQuery = db
     .from("library_files")
-    .select("id, name, folder_path, ai_summary, ai_key_figures, created_at, doc_categories(name)")
+    // The embed MUST name its foreign key. `library_files` has TWO paths to
+    // `doc_categories` — `category_id` and `ai_suggested_category_id` (005) —
+    // so an unqualified `doc_categories(name)` is ambiguous and PostgREST
+    // refuses the whole query with "more than one relationship was found".
+    // That made this tool throw on every call: asking the bot about documents
+    // has never worked. Qualified to the CONFIRMED category, not the AI's
+    // suggestion, which is what the portal displays.
+    .select(
+      "id, name, folder_path, ai_summary, ai_key_figures, created_at, doc_categories!library_files_category_id_fkey(name)",
+    )
     .order("created_at", { ascending: false })
     .limit(25);
   if (typeof args.search === "string" && args.search.trim()) {

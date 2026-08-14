@@ -4,9 +4,10 @@ import { todaysCost } from "../lib/cost.js";
 import { hermesDict, type Locale } from "../lib/i18n.js";
 import { getPolicyValue } from "../lib/policy-kv.js";
 import { getAdminClient } from "../lib/supabase.js";
+import { consumeAttachment } from "../telegram/attachments.js";
 import { editMessageText, escapeHtml, sendApprovalCard } from "../telegram/api.js";
-import { PROPOSE_ACTION, TOOL_COMMAND, projectionFor } from "./tool-catalog.js";
-import { redactToolResult } from "./redact.js";
+import { PROPOSE_ACTION, TOOL_COMMAND, projectionFor, supersedeKeyFor } from "./tool-catalog.js";
+import { redactToolResult, scrubText } from "./redact.js";
 import {
   explain,
   resolveAccount,
@@ -15,10 +16,18 @@ import {
   resolveOperator,
   resolvePlatform,
 } from "./resolve.js";
+import { embedQuery, EmbeddingNotConfiguredError } from "./embed.js";
+import { readSetting } from "../lib/settings.js";
+import {
+  isAllowedMime,
+  sanitizeFilename,
+  TELEGRAM_MAX_FILE_BYTES,
+} from "../../../src/lib/fields/documents.js";
 import {
   accountProposal,
   assignmentProposal,
   modelProposal,
+  documentUploadProposal,
   monthsAheadProposal,
   operatorProposal,
   payoutProposal,
@@ -273,6 +282,10 @@ export async function runTool(
       return proposeClosePeriod(ctx!, args);
     case "hermes_propose_snapshot_forecast":
       return proposeSnapshotForecast(ctx!, args);
+    case "hermes_propose_upload_document":
+      return proposeUploadDocument(ctx!, args);
+    case "hermes_search":
+      return searchEverything(args);
 
     default:
       throw new Error(`unhandled tool: ${name}`);
@@ -294,6 +307,14 @@ export interface ToolContext {
   profileId: string;
   chatId: number | string;
   locale: Locale;
+  /** The file sent to this chat, when the turn carries one (upload flow). */
+  attachment?: {
+    fileId: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    receivedAt?: number;
+  };
 }
 
 /** Month bucket helper for the per-model views. */
@@ -545,44 +566,12 @@ function preview(en: string, ru: string, risk?: string): Record<string, unknown>
 }
 
 /**
- * The entity a proposal targets, as a supersede key — or undefined for a pure
- * create, which has no stable id and must never supersede anything.
- *
- * This is what makes supersede safe: a newer "mark Alice's payout paid" retires
- * only the older card for THAT payout, never Bob's. The id fields are the ones
- * the propose builders actually put in payloads; the first present wins, and
- * they are mutually exclusive per action in practice (a payload carries one
- * entity's id). Prefixed with the action so mark-paid and cancel of the same
- * payout — different intents — do not supersede each other.
- */
-const ENTITY_ID_FIELDS = [
-  "payout_id",
-  "document_id",
-  "record_id",
-  "model_id",
-  "operator_id",
-  "platform_id",
-  "account_id",
-  "assignment_id",
-  "scheme_id",
-] as const;
-
-function supersedeKeyFor(
-  actionType: string,
-  payload: Record<string, unknown>,
-): string | undefined {
-  for (const field of ENTITY_ID_FIELDS) {
-    const v = payload[field];
-    if (typeof v === "string" && v) return `${actionType}:${field}:${v}`;
-  }
-  return undefined;
-}
-
-/**
  * Queue an approval and put the card in front of the person who asked.
  *
  * `enqueueApproval` reads `required_role` from ACTION_POLICIES, never from
  * here — the defence against a proposal nominating itself an easier approver.
+ * `supersedeKeyFor` (tool-catalog) decides whether this proposal retires an
+ * older pending card for the SAME entity; creates never supersede.
  */
 async function propose(
   ctx: ToolContext,
@@ -651,10 +640,10 @@ function money2(v: unknown, field: string): number {
     throw new Error(`${field} is missing — say the amount and I will prepare it.`);
   }
   const n = Number(v);
-  if (!Number.isFinite(n)) throw new Error(`${field} is not a number I can record.`);
-  if (n < 0) throw new Error(`${field} cannot be negative.`);
-  if (n > 9_999_999_999) throw new Error(`${field} is larger than this system accepts.`);
-  return Math.round(n * 100) / 100;
+  if (!Number.isFinite(n)) {
+    throw new Error(`${field} is not a number I can use — say it as a plain number.`);
+  }
+  return n;
 }
 
 async function proposeEarning(ctx: ToolContext, a: Record<string, unknown>) {
@@ -1870,4 +1859,124 @@ async function proposeSnapshotForecast(ctx: ToolContext, a: Record<string, unkno
     `Save a forecast snapshot ${months} months ahead?`,
     `Сохранить срез прогноза на ${months} мес. вперёд?`,
   );
+}
+
+/* ======================================================================== *
+ * Documents by Telegram (033) + semantic search.
+ * ======================================================================== */
+
+/**
+ * File the attachment sitting in this chat as a compliance document.
+ *
+ * The card carries the metadata; the payload carries Telegram's file_id. The
+ * bytes move only AFTER the Approve tap — the executor downloads from
+ * Telegram, stores into the private bucket, and only then writes the row. A
+ * rejected card costs nothing and stores nothing.
+ */
+async function proposeUploadDocument(ctx: ToolContext, a: Record<string, unknown>) {
+  const att = ctx.attachment;
+  if (!att) {
+    throw new Error(
+      "There is no file waiting in this chat — send the document (photo or file) first, ideally with a caption saying whose it is.",
+    );
+  }
+  if (!isAllowedMime(att.mimeType)) {
+    throw new Error(
+      `That file type (${att.mimeType}) isn't accepted — send a PDF, a photo/scan, or an office document.`,
+    );
+  }
+  if (att.sizeBytes > TELEGRAM_MAX_FILE_BYTES) {
+    throw new Error(
+      "That file is over Telegram's 20 MB bot limit — upload it through the portal instead.",
+    );
+  }
+
+  const model = await resolveModel(String(a.model ?? ""));
+  if (!model.ok) throw new Error(explain(model, "models"));
+
+  const meta = validate(documentUploadProposal, present(a));
+
+  // The card names the FILE and its AGE, not just the metadata: the review's
+  // sharpest finding was a stale attachment (sent minutes ago, never filed)
+  // silently becoming "Vera's contract" when the file Alina meant never
+  // arrived. The approver can catch that mismatch only if the card shows
+  // which file, from when.
+  const ageMin = att.receivedAt ? Math.round((Date.now() - att.receivedAt) / 60_000) : 0;
+  const ageEn = ageMin >= 2 ? `, sent ${ageMin} min ago` : "";
+  const ageRu = ageMin >= 2 ? `, отправлен ${ageMin} мин назад` : "";
+  const fileLabel = sanitizeFilename(att.fileName);
+
+  const result = await propose(
+    ctx,
+    "upload_document",
+    {
+      file_id: att.fileId,
+      file_name: att.fileName,
+      mime_type: att.mimeType,
+      size_bytes: att.sizeBytes,
+      model_id: model.value.id,
+      title: meta.title,
+      doc_type: meta.doc_type ?? "other",
+      ...(meta.issued_date ? { issued_date: meta.issued_date } : {}),
+      ...(meta.expires_at ? { expires_at: meta.expires_at } : {}),
+    },
+    `Save the attached file ${fileLabel} (${(att.sizeBytes / 1_048_576).toFixed(1)} MB${ageEn}) as ${model.value.label}'s ${meta.doc_type ?? "other"} document "${meta.title}"${meta.expires_at ? `, expires ${meta.expires_at}` : ""}?`,
+    `Сохранить файл ${fileLabel} (${(att.sizeBytes / 1_048_576).toFixed(1)} МБ${ageRu}) как документ (${meta.doc_type ?? "other"}) «${meta.title}» для ${model.value.label}${meta.expires_at ? `, срок до ${meta.expires_at}` : ""}?`,
+    "The file is stored in the studio's private document vault. Its contents are NOT sent to the AI provider unless you separately consent later.",
+  );
+
+  // Off the shelf: the attachment is spoken for. A later "save this as..."
+  // must mean a NEW file, never this one again.
+  consumeAttachment(ctx.chatId);
+  return result;
+}
+
+/**
+ * Semantic search over the embedding index — scrubbed notes, document
+ * metadata, platform blurbs. The same `fn_semantic_search` the portal's
+ * assistant uses, behind the same registered projection. The query itself is
+ * scrubbed before it embeds, because embedding inputs transit the provider
+ * like any prompt.
+ */
+async function searchEverything(args: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const query = String(args.query ?? "").trim();
+  if (!query) throw new Error("Say what to search for.");
+
+  let vector: number[];
+  try {
+    vector = await embedQuery(scrubText(query));
+  } catch (e) {
+    if (e instanceof EmbeddingNotConfiguredError) {
+      throw new Error(
+        "Semantic search isn't switched on yet — the embedding provider key is missing on the worker.",
+      );
+    }
+    throw e;
+  }
+
+  const { data, error } = await getAdminClient().rpc("fn_semantic_search", {
+    p_embedding: `[${vector.join(",")}]`,
+    p_top_k: typeof args.top_k === "number" ? Math.max(1, Math.min(10, args.top_k)) : 5,
+  });
+  if (error) throw new Error(`search failed: ${error.message}`);
+
+  const rows = (data ?? []) as Record<string, unknown>[];
+  if (rows.length === 0) {
+    // An empty index reads identically to a miss; say which it is — but only
+    // when the probe itself succeeded, and only counting rows the SEARCH can
+    // actually see: fn_semantic_search filters by the configured embedding
+    // model, so an index built under an old model is "stranded", not "empty",
+    // and the difference is exactly what the person needs to hear.
+    const activeModel = (await readSetting("ai.embedding.model")) ?? "embedding-3";
+    const { count, error: probeError } = await getAdminClient()
+      .from("embeddings")
+      .select("id", { count: "exact", head: true })
+      .eq("embedding_model", activeModel);
+    if (!probeError && (count ?? 0) === 0) {
+      throw new Error(
+        "Nothing is indexed for the current embedding model — run the reindex from the portal's AI page, then search again.",
+      );
+    }
+  }
+  return redactToolResult(projectionFor("hermes_search"), rows);
 }

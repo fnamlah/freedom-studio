@@ -150,6 +150,8 @@ export const PROPOSE_ACTION: Record<string, string> = {
   hermes_propose_delete_entity: "delete_entity",
   hermes_propose_close_period: "close_period",
   hermes_propose_snapshot_forecast: "snapshot_forecast",
+  // A Telegram attachment becomes a compliance document (033).
+  hermes_propose_upload_document: "upload_document",
 };
 
 /**
@@ -161,6 +163,7 @@ export const PROPOSE_ACTION: Record<string, string> = {
  */
 export const TOOL_PROJECTION: Record<string, string> = {
   hermes_balances: "payee_balances",
+  hermes_search: "semantic_search",
   hermes_earnings: "earnings_monthly",
   hermes_payout_history: "payout_history",
   hermes_ledger: "payee_statement",
@@ -170,6 +173,50 @@ export const TOOL_PROJECTION: Record<string, string> = {
 /** The projection a read tool's rows leave through. */
 export function projectionFor(tool: string): string {
   return TOOL_PROJECTION[tool] ?? tool;
+}
+
+/**
+ * Which payload field names THE ENTITY BEING CHANGED, per action — the sole
+ * source of supersede keys.
+ *
+ * An adversarial review killed the previous design twice. A generic scan over
+ * "any id-looking field" first collided two DIFFERENT payouts (fixed by entity
+ * keys), then resurfaced through creates: an upload payload carries `model_id`,
+ * so two document uploads for the same model superseded each other — the
+ * second passport silently cancelled the first. The rule that survives both:
+ * only an action's own TARGET id may key a supersede, and a CREATE has no
+ * target id — it never supersedes anything. Absence from this map IS the
+ * create case: `upload_document` and every propose-new path stay out, and the
+ * upsert entries key on the row id that only an UPDATE payload carries.
+ */
+export const SUPERSEDE_ID_FIELD: Record<string, string> = {
+  upsert_model: "model_id",
+  upsert_operator: "operator_id",
+  upsert_platform: "platform_id",
+  upsert_account: "account_id",
+  upsert_assignment: "assignment_id",
+  upsert_scheme: "scheme_id",
+  set_rate_card: "scheme_id",
+  set_status: "record_id",
+  delete_record: "record_id",
+  delete_entity: "record_id",
+  update_document: "document_id",
+  delete_document: "document_id",
+  read_compliance_document: "document_id",
+  approve_payout: "payout_id",
+  mark_payout_paid: "payout_id",
+  cancel_payout: "payout_id",
+};
+
+/** The entity a proposal targets, or undefined for creates (never supersede). */
+export function supersedeKeyFor(
+  actionType: string,
+  payload: Record<string, unknown>,
+): string | undefined {
+  const field = SUPERSEDE_ID_FIELD[actionType];
+  if (!field) return undefined;
+  const v = payload[field];
+  return typeof v === "string" && v ? `${actionType}:${field}:${v}` : undefined;
 }
 
 const READ_TOOLS: ToolSpec[] = [
@@ -893,8 +940,64 @@ const FULL_PROPOSE_TOOLS: ToolSpec[] = [
   },
 ];
 
-READ_TOOLS.push(...SETUP_READ_TOOLS, ...FULL_READ_TOOLS);
-PROPOSE_TOOLS.push(...SETUP_PROPOSE_TOOLS, ...FULL_PROPOSE_TOOLS);
+const DOCUMENT_FLOW_TOOLS: { reads: ToolSpec[]; proposes: ToolSpec[] } = {
+  reads: [
+    {
+      type: "function",
+      function: {
+        name: "hermes_search",
+        description:
+          "Semantic search across the studio's indexed knowledge: notes, document metadata, platform info. Use when a plain listing tool doesn't answer — 'which contract mentions X', 'notes about her schedule'. Returns snippets with similarity scores.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Natural-language search query." },
+            top_k: { type: "number", description: "How many matches. Default 5, max 10." },
+          },
+          required: ["query"],
+          additionalProperties: false,
+        },
+      },
+    },
+  ],
+  proposes: [
+    {
+      type: "function",
+      function: {
+        name: "hermes_propose_upload_document",
+        description:
+          "Save the file attached to this chat as a compliance document for a model. Use when someone sends a photo/scan/PDF and says whose document it is. Sends an Approve card; the file is stored only after the tap. If no file is attached, ask them to send it.",
+        parameters: {
+          type: "object",
+          properties: {
+            model: { type: "string", description: "Whose document — the model's stage name." },
+            title: { type: "string", description: "A short title, e.g. 'Passport 2026'. Derive one from the document type and person if not stated." },
+            doc_type: {
+              type: "string",
+              enum: [
+                "government_id",
+                "passport",
+                "contract",
+                "model_release",
+                "consent_form",
+                "tax_form",
+                "other",
+              ],
+              description: "What kind of document. Default other.",
+            },
+            issued_date: { type: "string", description: "Optional, YYYY-MM-DD." },
+            expires_at: { type: "string", description: "Optional expiry, YYYY-MM-DD." },
+          },
+          required: ["model", "title"],
+          additionalProperties: false,
+        },
+      },
+    },
+  ],
+};
+
+READ_TOOLS.push(...SETUP_READ_TOOLS, ...FULL_READ_TOOLS, ...DOCUMENT_FLOW_TOOLS.reads);
+PROPOSE_TOOLS.push(...SETUP_PROPOSE_TOOLS, ...FULL_PROPOSE_TOOLS, ...DOCUMENT_FLOW_TOOLS.proposes);
 
 TOOL_SPECS.push(...READ_TOOLS, ...PROPOSE_TOOLS);
 
@@ -937,6 +1040,8 @@ const READ_TOOL_COMMAND: Record<string, string> = {
   // details are identity data — both stay SA/MGR.
   hermes_expenses: "/documents",
   hermes_person_details: "/documents",
+  // Search snippets can carry note and document text — SA/MGR, like the shelf.
+  hermes_search: "/documents",
 };
 
 for (const spec of READ_TOOLS) {

@@ -43,50 +43,22 @@ export function documentTypeLabel(d: Dictionary, value: string | null | undefine
 /* ------------------------------------------------------------- upload rules --- */
 
 /**
- * MIME allow-list for compliance documents. The studio holds identity documents,
- * contracts and tax forms — scans and PDFs, never media (docs/01, docs/06 §1).
- * This is a UX guard only; the private bucket's RLS is the real boundary.
+ * MIME allow-list and size caps live in `src/lib/fields/documents.ts` since the
+ * Telegram bot learned to accept attachments — ONE list, imported by both
+ * surfaces, so the portal and the bot can never drift on what an upload is.
+ * Re-exported here so every existing client import keeps working.
  */
-export const ALLOWED_MIME_TYPES = [
-  "application/pdf",
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "image/tiff",
-  // Office documents and spreadsheets (contracts, tax forms, statements).
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
-  "application/vnd.ms-excel", // .xls (legacy BIFF — the studio holds many)
-  "application/vnd.ms-excel.sheet.macroenabled.12", // .xlsm
-  "application/vnd.ms-excel.sheet.binary.macroenabled.12", // .xlsb
-  "application/vnd.oasis.opendocument.spreadsheet", // .ods
-  "application/msword", // .doc (legacy binary Word)
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
-  "text/csv",
-  "application/csv",
-] as const;
-
-export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];
-
-export function isAllowedMime(mime: string | null | undefined): mime is AllowedMimeType {
-  return typeof mime === "string" && (ALLOWED_MIME_TYPES as readonly string[]).includes(mime);
-}
-
-/**
- * Human-friendly accept summary for the file picker and hint text lives in the
- * dictionary as `d.documents.allowedMimeLabel` — the extensions are universal
- * but the sentence around them is not.
- */
+export {
+  ALLOWED_MIME_TYPES,
+  MAX_FILE_BYTES,
+  MAX_FILE_MB,
+  isAllowedMime,
+  type AllowedMimeType,
+} from "@/lib/fields/documents";
+import { ALLOWED_MIME_TYPES as _ALLOWED } from "@/lib/fields/documents";
 
 /** The `accept` attribute for the `<input type="file">`. */
-export const FILE_ACCEPT_ATTR = ALLOWED_MIME_TYPES.join(",");
-
-/** Largest accepted upload. Generous enough for a multi-page scanned contract. */
-export const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
-export const MAX_FILE_MB = 25;
+export const FILE_ACCEPT_ATTR = _ALLOWED.join(",");
 
 /* ------------------------------------------------------ compliance derivation --- */
 

@@ -140,6 +140,14 @@ export async function converse(input: {
   chatId: number | string;
   /** Prior turns to replay. Already scrubbed; never contains tool stubs. */
   history?: ChatMessage[];
+  /** A file waiting to be filed as a compliance document, when one was sent. */
+  attachment?: {
+    fileId: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    receivedAt?: number;
+  };
   onProgress?: (stage: ConverseStage) => void;
 }): Promise<ConverseOutcome> {
   const startedAt = Date.now();
@@ -150,10 +158,14 @@ export async function converse(input: {
   // before they can leave, exactly as the app does for chat input.
   const asked = scrubText(input.text).slice(0, 2000);
 
+  const attachmentNote = input.attachment
+    ? ` [A file is attached: ${input.attachment.mimeType}, ${(input.attachment.sizeBytes / 1_048_576).toFixed(1)} MB. If the person wants it saved as a compliance document, use hermes_propose_upload_document — it reads the file from this chat; you never see its contents. If you don't know whose document it is or what it is, ask.]`
+    : "";
+
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt(input.locale, input.role) },
     ...(input.history ?? []),
-    { role: "user", content: asked },
+    { role: "user", content: asked + attachmentNote },
   ];
 
   try {
@@ -329,6 +341,7 @@ export async function converse(input: {
                 profileId: input.profileId,
                 chatId: input.chatId,
                 locale: input.locale,
+                attachment: input.attachment,
               },
               args,
             );

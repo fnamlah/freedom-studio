@@ -2752,6 +2752,22 @@ export type Database = {
         Args: { p_approver: string; p_payout_id: string }
         Returns: string
       }
+      fn_agent_create_document: {
+        Args: {
+          p_approver: string
+          p_doc_type: Database["public"]["Enums"]["document_type"]
+          p_expires_at?: string
+          p_file_name: string
+          p_issued_date?: string
+          p_mime_type: string
+          p_model_id: string
+          p_sha256?: string
+          p_size_bytes: number
+          p_storage_path: string
+          p_title: string
+        }
+        Returns: string
+      }
       fn_agent_delete_document: {
         Args: { p_approver: string; p_document_id: string }
         Returns: string

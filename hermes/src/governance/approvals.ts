@@ -265,7 +265,10 @@ export async function executeApproval(
     const { runExecutor } = await import("./executors.js");
     const result = await runExecutor(
       claimed.action_type,
-      (claimed.payload ?? {}) as Record<string, unknown>,
+      // The approval's own id rides along so an executor can derive
+      // DETERMINISTIC artifact names from it (the upload executor's storage
+      // key) — a retry then reuses the same name instead of minting a twin.
+      { ...((claimed.payload ?? {}) as Record<string, unknown>), approval_id: approvalId },
       decidedBy,
       (claimed.execution_result ?? {}) as Record<string, unknown>,
       (patch) =>

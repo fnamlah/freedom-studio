@@ -24,6 +24,8 @@ import {
   PROPOSE_ACTION,
   projectionFor,
   specsForRole,
+  SUPERSEDE_ID_FIELD,
+  supersedeKeyFor,
   TOOL_COMMAND,
   TOOL_SPECS,
   TOOL_PROJECTION,
@@ -430,5 +432,72 @@ test("no read tool inherits a gate wider than the surface it reads", () => {
   assert.equal(TOOL_COMMAND.hermes_documents, "/documents");
   for (const tool of Object.keys(PROPOSE_ACTION)) {
     assert.equal(TOOL_COMMAND[tool], "/propose", `${tool} must sit behind /propose`);
+  }
+});
+
+test("the attachment upload is proposal-gated and its bytes move only post-tap", () => {
+  // The properties that make a Telegram file safe to accept: the action is
+  // approval-tier (a card, a human, a tap), manager-approvable like the
+  // portal's own upload gate (008 documents_admin_all), and the tool spec
+  // never asks the model for a file id — the id comes from the chat context,
+  // so a prompt-injected call cannot name an arbitrary Telegram file.
+  const policy = resolvePolicy("upload_document");
+  assert.equal(policy.tier, "approval");
+  assert.equal(policy.requiredRole, "manager");
+  assert.ok(EXECUTABLE_ACTIONS.has("upload_document"));
+
+  const spec = TOOL_SPECS.find((s) => s.function.name === "hermes_propose_upload_document");
+  assert.ok(spec, "upload propose tool missing");
+  const props = Object.keys(
+    (spec!.function.parameters as { properties?: Record<string, unknown> }).properties ?? {},
+  );
+  assert.ok(!props.includes("file_id"), "the model must never supply a file id");
+  assert.ok(!props.includes("file_name"), "the model must never supply a file name");
+});
+
+test("semantic search is gated like the document shelf, projected like the app's", () => {
+  assert.equal(TOOL_COMMAND.hermes_search, "/documents");
+  assert.equal(TOOL_PROJECTION.hermes_search, "semantic_search");
+  const offered = specsForRole("finance", commandAllowed).map((s) => s.function.name);
+  assert.ok(!offered.includes("hermes_search"), "finance must not see search snippets");
+});
+
+test("supersede keys exist only for actions that target one entity — creates never supersede", () => {
+  // Twice-burned contract. A generic id-field scan first collided two
+  // DIFFERENT payouts, then (rebuilt as an entity map that still scanned
+  // creates) made two document uploads for the same model cancel each other —
+  // the second passport silently dropped the first. The rule that survives:
+  // only an action's own TARGET id keys a supersede, and absence from the map
+  // IS the create case.
+  assert.equal(
+    supersedeKeyFor("upload_document", {
+      model_id: "11111111-1111-1111-1111-111111111111",
+      file_id: "AAA",
+    }),
+    undefined,
+    "an upload (create) must never supersede another upload",
+  );
+  // An upsert payload WITHOUT its row id is a create — no key.
+  assert.equal(
+    supersedeKeyFor("upsert_account", {
+      model_id: "11111111-1111-1111-1111-111111111111",
+      platform_id: "22222222-2222-2222-2222-222222222222",
+      username: "lily",
+    }),
+    undefined,
+    "a new account must not supersede an unrelated pending account",
+  );
+  // The same action WITH its row id is an update — keyed to that row alone.
+  assert.equal(
+    supersedeKeyFor("upsert_account", { account_id: "33333333-3333-3333-3333-333333333333" }),
+    "upsert_account:account_id:33333333-3333-3333-3333-333333333333",
+  );
+  // Two different payouts never collide (the original incident).
+  const alice = supersedeKeyFor("mark_payout_paid", { payout_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" });
+  const bob = supersedeKeyFor("mark_payout_paid", { payout_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" });
+  assert.ok(alice && bob && alice !== bob);
+  // And every mapped action must be a real declared action.
+  for (const action of Object.keys(SUPERSEDE_ID_FIELD)) {
+    assert.ok(ACTION_POLICIES[action], `${action} in SUPERSEDE_ID_FIELD is not a declared action`);
   }
 });

@@ -1,4 +1,5 @@
 import { executeApproval } from "../governance/approvals.js";
+import { sendMessage } from "../telegram/api.js";
 import { env } from "../config/env.js";
 import { alertOwner } from "../lib/owner.js";
 import { getAdminClient } from "../lib/supabase.js";
@@ -48,7 +49,7 @@ async function sweepOnce(): Promise<void> {
   const nowIso = new Date().toISOString();
   const { data, error } = await getAdminClient()
     .from("hermes_approvals")
-    .select("id, decided_by, profiles:decided_by(locale)")
+    .select("id, decided_by, source_chat_id, profiles:decided_by(locale)")
     .eq("state", "approved")
     .is("executed_at", null)
     .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
@@ -66,6 +67,15 @@ async function sweepOnce(): Promise<void> {
     const decider = row.profiles as unknown as { locale?: string } | null;
     const result = await executeApproval(row.id, toLocale(decider?.locale));
     console.info(`[approval-sweep] ${row.id}: ${result.ok ? "ok" : "failed"} — ${result.message}`);
+
+    // …and it must actually REACH them. This loop used to log the outcome and
+    // tell nobody: a sweep-driven execution (a retry, a deferred approval)
+    // finished with the approver still looking at their tapped card, unaware
+    // whether the thing happened. The chat that proposed it hears the result.
+    const chat = (row as { source_chat_id?: string | null }).source_chat_id;
+    if (chat) {
+      await sendMessage(chat, result.message).catch(() => undefined);
+    }
   }
 }
 

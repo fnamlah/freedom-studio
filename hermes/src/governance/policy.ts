@@ -88,6 +88,12 @@ export const ACTION_POLICIES: Record<string, ActionPolicy> = {
   // corrected with a reversing adjustment, which stays a deliberate human act.
   delete_record: { tier: "approval", requiredRole: "manager" },
 
+  // Adding a compliance document that arrived as a Telegram attachment (033).
+  // Manager tier, matching who may upload in the portal (008 documents_admin_all).
+  // The proposal carries only Telegram's file_id; the executor downloads AFTER
+  // the tap, so a rejected card never touches the file.
+  upload_document: { tier: "approval", requiredRole: "manager" },
+
   // Sending a compliance document's CONTENTS to the AI provider. Approval
   // tier because it is third parties' identity data (passports, IDs, dates of
   // birth) crossing to a semi-trusted processor: the tap IS the consent record
@@ -156,6 +162,7 @@ export const EXECUTABLE_ACTIONS: ReadonlySet<string> = new Set([
   "cancel_payout",
   "delete_document",
   "delete_entity",
+  "upload_document",
 ]);
 
 /** Unknown actions fail safe. This is the whole point of the function. */

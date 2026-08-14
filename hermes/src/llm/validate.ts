@@ -194,3 +194,13 @@ export const monthsAheadProposal = z
   .int("Whole months only.")
   .min(1, "At least one month ahead.")
   .max(12, "Twelve months is the furthest the forecast goes.");
+
+/* -------------------------------------------------------------- documents --- */
+
+import {
+  DOCUMENT_META_MESSAGES_EN,
+  documentMetaFields,
+} from "../../../src/lib/fields/documents.js";
+
+/** Metadata for a Telegram-attached upload; the file half is checked in the tool. */
+export const documentUploadProposal = z.object(documentMetaFields(DOCUMENT_META_MESSAGES_EN));

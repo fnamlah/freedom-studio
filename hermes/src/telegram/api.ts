@@ -11,6 +11,12 @@ export interface TelegramMessage {
   chat: { id: number };
   text?: string;
   from?: { id: number; username?: string };
+  /** A file sent as a document — the shape compliance uploads arrive in. */
+  document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
+  /** A photo — Telegram sends multiple sizes; the last is the largest. */
+  photo?: { file_id: string; file_size?: number; width: number; height: number }[];
+  /** Text accompanying an attachment. */
+  caption?: string;
 }
 
 export interface TelegramCallbackQuery {
@@ -163,6 +169,28 @@ export function sendApprovalCard(
       ],
     },
   });
+}
+
+/**
+ * Resolve a Telegram file_id to a downloadable path. file_ids are stable for
+ * the lifetime of the bot, so an approval executed hours after the attachment
+ * arrived can still fetch it — that is why the PROPOSAL carries the file_id
+ * and the download happens at execution time, not at propose time: a rejected
+ * card then costs no bandwidth and stores nothing.
+ *
+ * The Bot API refuses files over 20 MB here; callers pre-check the size the
+ * attachment declared so the refusal happens in conversation instead.
+ */
+export function getFile(fileId: string): Promise<{ file_path?: string; file_size?: number }> {
+  return call("getFile", { file_id: fileId });
+}
+
+/** Download a file's bytes. `filePath` comes from getFile, never from a user. */
+export async function downloadFile(filePath: string): Promise<Uint8Array> {
+  if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is not set");
+  const res = await fetch(`${env.TELEGRAM_API_BASE}/file/bot${env.TELEGRAM_BOT_TOKEN}/${filePath}`);
+  if (!res.ok) throw new Error(`file download failed: ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 export function answerCallbackQuery(id: string, text?: string): Promise<unknown> {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  documentUploadProposal,
   accountProposal,
   payoutProposal,
   assignmentProposal,
@@ -205,4 +206,21 @@ test("a well-formed payout passes", () => {
     net_amount: 1250.5,
   });
   assert.equal(ok.net_amount, 1250.5);
+});
+
+test("a document upload validates its dates and title like the portal", () => {
+  assert.match(
+    refusal(() => validate(documentUploadProposal, { title: "Passport", expires_at: "2027-02-30" })),
+    /real date/i,
+  );
+  assert.match(
+    refusal(() => validate(documentUploadProposal, { title: "   " })),
+    /title/i,
+  );
+  const ok = validate(documentUploadProposal, {
+    title: "Passport 2026",
+    doc_type: "passport",
+    expires_at: "2027-06-01",
+  });
+  assert.equal(ok.doc_type, "passport");
 });

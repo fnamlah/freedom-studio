@@ -38,6 +38,7 @@ export const hermesEn = {
   execPayoutPaid: "Recorded as paid — the settlement entry is in the ledger. Send the money through your usual channel if you haven't yet.",
   execPayoutCancelled: "Payout cancelled.",
   execDocumentDeleted: "Document deleted — the record and the stored file.",
+  execDocumentUploaded: "Document saved to the vault.",
   execTeamCreated: "Team member added.",
   execTeamUpdated: "Team member updated.",
   execPlatformCreated: "Platform added.",
@@ -103,6 +104,8 @@ export const hermesEn = {
     hermes_propose_delete_entity: "Preparing the deletion to confirm…",
     hermes_propose_close_period: "Preparing the period close to confirm…",
     hermes_propose_snapshot_forecast: "Preparing the forecast snapshot…",
+    hermes_propose_upload_document: "Preparing the file to save…",
+    hermes_search: "Searching the studio's knowledge…",
   } as Record<string, string>,
   chatNotConfigured:
     "I can't think right now — no AI provider key is configured. The commands still work: /brief /balances /approvals /compliance /cost /status",
@@ -259,6 +262,7 @@ export const hermesRu: typeof hermesEn = {
   execPayoutPaid: "Отмечено как выплачено — запись о расчёте в журнале. Если деньги ещё не отправлены, отправьте их обычным способом.",
   execPayoutCancelled: "Выплата отменена.",
   execDocumentDeleted: "Документ удалён — запись и сам файл.",
+  execDocumentUploaded: "Документ сохранён в хранилище.",
   execTeamCreated: "Сотрудник добавлен.",
   execTeamUpdated: "Данные сотрудника обновлены.",
   execPlatformCreated: "Площадка добавлена.",
@@ -323,6 +327,8 @@ export const hermesRu: typeof hermesEn = {
     hermes_propose_delete_entity: "Готовлю удаление на подтверждение…",
     hermes_propose_close_period: "Готовлю закрытие периода…",
     hermes_propose_snapshot_forecast: "Готовлю срез прогноза…",
+    hermes_propose_upload_document: "Готовлю файл к сохранению…",
+    hermes_search: "Ищу по базе студии…",
   } as Record<string, string>,
   chatNotConfigured:
     "Сейчас я не могу думать — не настроен ключ ИИ-провайдера. Команды по-прежнему работают: /brief /balances /approvals /compliance /cost /status",

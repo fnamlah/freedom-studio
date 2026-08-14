@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+
+import { MAX_FILE_BYTES, sanitizeFilename } from "../../../src/lib/fields/documents.js";
+import { downloadFile, getFile } from "../telegram/api.js";
 import { getAdminClient } from "../lib/supabase.js";
 import { hermesDict, money, type Locale } from "../lib/i18n.js";
 
@@ -755,6 +759,89 @@ async function deleteEntity(
   return deleteRecord(payload, approver, prior, saveStep, locale);
 }
 
+/**
+ * Store a Telegram-attached file as a compliance document (033).
+ *
+ * Three steps, in an order where every crash leaves a recoverable state:
+ *   1. download from Telegram (file_id from the payload — stable for the
+ *      bot's lifetime, so an approval tapped hours later still resolves);
+ *   2. upload into the private bucket under the portal's own key shape;
+ *   3. write the row via the wrapper (idempotent on storage_path).
+ * A crash after 2 leaves an invisible object a retry reclaims via the same
+ * deterministic key; a crash after 3 re-runs into the wrapper's
+ * already-exists branch. The bytes never touch this process's disk and are
+ * never sent anywhere but the bucket.
+ */
+async function uploadDocument(
+  payload: Record<string, unknown>,
+  approver: string,
+  prior: Record<string, unknown>,
+  saveStep: SaveStep,
+  locale: Reader,
+): Promise<ExecutorResult> {
+  const h = hermesDict(locale);
+  if (typeof prior.document_id === "string") {
+    return { message: h.execAlreadyRecorded, result: prior };
+  }
+
+  const db = getAdminClient();
+  const modelId = str(payload, "model_id");
+  const mime = str(payload, "mime_type");
+  const rawName = str(payload, "file_name");
+
+  // The key is DERIVED from the approval id, so a retry computes the same key
+  // instead of minting a second object for the same approval.
+  const approvalId = str(payload, "approval_id");
+  const safeName = sanitizeFilename(rawName);
+  const key = `${modelId}/${approvalId}/${safeName}`;
+  const storagePath = `model-documents/${key}`;
+
+  if (prior.stored !== true) {
+    const { file_path, file_size } = await getFile(str(payload, "file_id"));
+    if (!file_path) throw new Error("Telegram no longer has that file — ask for it to be re-sent");
+    // Telegram's OWN size answer, checked before a byte moves — the declared
+    // size on the proposal was the sender's claim, this one is the server's.
+    if (typeof file_size === "number" && file_size > MAX_FILE_BYTES) {
+      throw new Error(`that file is ${(file_size / 1_048_576).toFixed(1)} MB — over the ${MAX_FILE_BYTES / 1_048_576} MB limit`);
+    }
+    const bytes = await downloadFile(file_path);
+
+    // The size the PROPOSAL checked was Telegram's declaration; this is the
+    // truth. Telegram's own 20 MB getFile cap makes a giant body unlikely,
+    // but the portal's limit is the studio's rule and it binds actual bytes.
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_FILE_BYTES) {
+      throw new Error(`downloaded file is ${bytes.byteLength} bytes — outside the accepted range`);
+    }
+
+    const { error: uploadError } = await db.storage
+      .from("model-documents")
+      .upload(key, bytes, { contentType: mime, upsert: true });
+    if (uploadError) throw new Error(`storage upload failed: ${uploadError.message}`);
+
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    await saveStep({ stored: true, sha256, byte_length: bytes.byteLength });
+    prior = { ...prior, stored: true, sha256, byte_length: bytes.byteLength };
+  }
+
+  const { data, error } = await db.rpc("fn_agent_create_document", {
+    p_approver: approver,
+    p_model_id: modelId,
+    p_doc_type: str(payload, "doc_type") as never,
+    p_title: str(payload, "title"),
+    p_storage_path: storagePath,
+    p_file_name: safeName,
+    p_mime_type: mime,
+    p_size_bytes: typeof prior.byte_length === "number" ? prior.byte_length : num(payload, "size_bytes"),
+    p_sha256: typeof prior.sha256 === "string" ? prior.sha256 : undefined,
+    p_issued_date: typeof payload.issued_date === "string" ? payload.issued_date : undefined,
+    p_expires_at: typeof payload.expires_at === "string" ? payload.expires_at : undefined,
+  });
+  if (error) throw new Error(error.message);
+
+  const result = await saveStep({ document_id: data });
+  return { message: h.execDocumentUploaded, result };
+}
+
 export async function runExecutor(
   actionType: string,
   payload: Record<string, unknown>,
@@ -808,6 +895,8 @@ export async function runExecutor(
       return deleteDocument(payload, approver, prior, saveStep, locale);
     case "delete_entity":
       return deleteEntity(payload, approver, prior, saveStep, locale);
+    case "upload_document":
+      return uploadDocument(payload, approver, prior, saveStep, locale);
     default:
       throw new Error(`no executor for ${actionType}`);
   }

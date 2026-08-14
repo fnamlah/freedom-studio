@@ -3,6 +3,12 @@ import { hermesDict, toLocale, DEFAULT_LOCALE, type Locale } from "../lib/i18n.j
 import { getAdminClient } from "../lib/supabase.js";
 import { commandAllowed, roleMayUseBot } from "./access.js";
 import {
+  recallAttachment,
+  rememberAttachment,
+  safeMime,
+  type PendingAttachment,
+} from "./attachments.js";
+import {
   answerCallbackQuery,
   editMessageText,
   escapeHtml,
@@ -224,7 +230,8 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
   if (chatId === undefined) return;
 
   const isCallback = Boolean(update.callback_query);
-  const text = update.message?.text ?? update.callback_query?.data ?? "";
+  const text =
+    update.message?.text ?? update.message?.caption ?? update.callback_query?.data ?? "";
   const seen = await markSeen(update, isCallback ? "callback" : "text");
   if (!seen.fresh) return;
 
@@ -281,17 +288,29 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
       return;
     }
 
-    // A message with no text at all — a sticker, photo, voice note, or a group
+    // An attached FILE is a first-class message now — Alina photographs a
+    // passport and sends it with "паспорт Лены" as the caption. The file_id is
+    // remembered per chat (15 min) so a follow-up answer ("it's her contract,
+    // expires next June") can still file it; the id itself stays server-side
+    // and the DOWNLOAD happens only after an Approve tap.
+    const attachment = extractAttachment(update);
+    if (attachment) {
+      rememberAttachment(chatId, attachment);
+    }
+    const pending = recallAttachment(chatId);
+
+    // A message with no text at all — a sticker, voice note, or a group
     // service event. Telegram delivers these as updates with no `text`, and
     // before this they hit the static command list for free; sending an empty
-    // prompt to a provider would bill a round trip per sticker.
-    if (!text.trim()) {
+    // prompt to a provider would bill a round trip per sticker. A FILE with no
+    // caption is the one exception: the model should ask whose it is.
+    if (!text.trim() && !attachment) {
       await sendMessage(chatId, hermesDict(channel.locale).commandList);
       return;
     }
 
     // Free text from a verified member of senior staff — talk.
-    await converse_(chatId, text, channel, seen.rowId);
+    await converse_(chatId, text, channel, seen.rowId, pending);
   });
 }
 
@@ -356,6 +375,7 @@ async function converse_(
   text: string,
   channel: Channel,
   inboundRowId: number | null,
+  attachment?: PendingAttachment,
 ): Promise<void> {
   const h = hermesDict(channel.locale);
 
@@ -406,6 +426,7 @@ async function converse_(
       profileId: channel.profileId,
       chatId,
       history,
+      attachment,
       onProgress: (stage) => {
         if (stage.kind === "thinking") return show(h.chatStillWorking);
         const label = stage.names
@@ -503,4 +524,33 @@ function rememberTurn(
       () => undefined,
       (e: unknown) => console.warn("[telegram] memory write failed:", e),
     );
+}
+
+/* ------------------------------------------------------------ attachments --- */
+
+function extractAttachment(
+  update: TelegramUpdate,
+): Omit<PendingAttachment, "receivedAt"> | null {
+  const m = update.message;
+  if (m?.document?.file_id) {
+    return {
+      fileId: m.document.file_id,
+      fileName: m.document.file_name ?? "document",
+      // Sender-controlled; shape-checked at the door (see attachments.ts).
+      mimeType: safeMime(m.document.mime_type),
+      sizeBytes: m.document.file_size ?? 0,
+    };
+  }
+  // Photos arrive in ascending sizes; the last is the largest rendition, and
+  // Telegram re-encodes photos to JPEG, so the mime is OURS, not the sender's.
+  const photo = m?.photo?.[m.photo.length - 1];
+  if (photo?.file_id) {
+    return {
+      fileId: photo.file_id,
+      fileName: "photo.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: photo.file_size ?? 0,
+    };
+  }
+  return null;
 }
